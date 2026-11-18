@@ -167,11 +167,11 @@ interface TaskProgressMessage { taskId: string; status: string; message?: string
  * frame no longer renders its own transcript bubble: its data folds into
  * the footer's ctx segment and per-call duration segment.
  *
- * Every number is optional BY CONTRACT: the session frame carries the full
- * set, while the task feed's `usage` attestation (chat.ts feedTaskActivity)
- * forwards only what its source attested -- and each handler gate already
- * treats a missing/non-finite field as unattested (omitted from the gauge
- * and its tooltip, never zeroed in).
+ * Every number is optional BY CONTRACT: s2cTokenUsage gates contextWindow,
+ * durationMs and the ctx pair onto the frame only when attested as finite
+ * numbers (older records and unmeasured callers stay silent), and each
+ * handler gate already treats a missing/non-finite field as unattested
+ * (omitted from the gauge and its tooltip, never zeroed in).
  */
 interface TokenUsageMessage {
   promptTokens?: number;
@@ -192,6 +192,15 @@ interface MessageListOptions {
   hideThinking?: boolean;
   /** When set, question messages render as an interactive form. */
   onQuestionAnswer?: (answers: Record<string, string>) => void;
+  /** Lazy history: fired ONCE per top-zone entry while setHasOlder(true)
+   *  (see TOP_TRIGGER_PX) -- the chat layer pages older history on it and
+   *  re-arms itself by delivering a page (or the user leaving the zone). */
+  onNearTop?: () => void;
+  /** Host for the jump-to-bottom button (the app's #input-area seam). When
+   *  set, the manager mounts one button on it, visible exactly while the
+   *  view is un-pinned from the bottom. Absent (tests, the history mirror)
+   *  means no button, never a crash. */
+  jumpHost?: HTMLElement;
 }
 
 export interface MessageListManager {
@@ -222,6 +231,15 @@ export interface MessageListManager {
   handleCompacting: (data: CompactingMessage) => void;
   handleCommandResult: (data: CommandResultMessage) => void;
   handleQuestion: (data: QuestionMessage) => void;
+  /**
+   * Worker-view question surface (B4 / R3): a watcher of a subagent session
+   * SEES the pending question but can never answer it -- the delegating
+   * manager is the only respondent. Set true on a worker attach (kind
+   * "subagent"), false on every interactive attach; while true, question
+   * cards render read-only with the honest "awaiting the manager" label and
+   * no submit path exists to reach the server's refusal.
+   */
+  setQuestionReadOnly: (readOnly: boolean) => void;
   handleQuestionAnswered: (data: QuestionAnsweredMessage) => void;
   handleTaskProgress: (data: TaskProgressMessage) => void;
   handleTokenUsage: (data: TokenUsageMessage) => void;
@@ -255,11 +273,20 @@ export interface MessageListManager {
   destroy: () => void;
   /** Render a batch of session log entries (for viewing cold session logs). */
   renderLogEntries: (entries: LogEntry[]) => void;
+  /** Lazy history: whether older entries exist above what is on screen.
+   *  Drives the scroll-up trigger only -- never the render, never a count. */
+  setHasOlder: (hasOlder: boolean) => void;
+  /** Prepend an older history page WITHOUT moving the viewport: capture
+   *  scroll geometry, render the page through the same pipeline in a
+   *  detached mirror, splice the finished nodes in above the current
+   *  content, then restore `scrollTop += heightDelta` and mark the restore
+   *  so the scroll listener never reads it as the user scrolling. */
+  renderOlderEntries: (entries: LogEntry[]) => void;
 }
 
 export function createMessageList(
   container: HTMLElement,
-  { hideThinking = false, onQuestionAnswer }: MessageListOptions = {},
+  { hideThinking = false, onQuestionAnswer, onNearTop, jumpHost }: MessageListOptions = {},
 ): MessageListManager {
   let currentAssistantEl: HTMLDivElement | null = null;
   let currentThinkingEl: HTMLDivElement | null = null;
@@ -269,6 +296,9 @@ export function createMessageList(
   const pendingToolCallsByName = new Map<string, ToolBlockController[]>();
   let hasToolCallsSinceLastAssistant = false;
   let hideThinkingValue = hideThinking;
+  // Worker-view question surface (see setQuestionReadOnly); every attach
+  // rewrites it from the sessionCreated kind.
+  let questionReadOnly = false;
 
   // ── Live activity: the "Thinking" row and the in-flight tool bubbles ─────
   // Both are LIVE transcript state: cold logs never paint them (they render
@@ -1203,9 +1233,13 @@ export function createMessageList(
       allowOther: q.allowOther,
     }));
 
-    // Without an answer callback (e.g. cold log replay) render read-only.
-    if (!onQuestionAnswer) {
-      contentEl.innerHTML = `<strong>Question:</strong><br>`;
+    // Read-only renders (no answer callback -- e.g. cold log replay -- or a
+    // worker view, where the delegating manager owns the answer): the card
+    // says WHAT it is instead of pretending a submit path exists.
+    if (!onQuestionAnswer || questionReadOnly) {
+      contentEl.innerHTML = questionReadOnly
+        ? `<strong>Question -- asked the delegating manager, awaiting answer:</strong><br>`
+        : `<strong>Question:</strong><br>`;
       for (const q of normalized) {
         contentEl.innerHTML += `${sanitize(q.prompt)}<br>`;
         for (const opt of q.options) {
@@ -1527,12 +1561,79 @@ export function createMessageList(
   // message is taller than the threshold — e.g. a long history replay on
   // load, which would otherwise leave the view stuck at the top.
   let followBottom = true;
+  // Lazy history scroll-up trigger: the TOP mirror of the 150px bottom rule.
+  // Edging INTO the top zone (scrollTop <= 150px, with older history to load
+  // and a scrollable list) fires onNearTop exactly once per entry; leaving
+  // the zone re-arms it. hasOlder is the chat layer's attestation (the
+  // server's window flag), never a client guess; clear() resets both.
+  const TOP_TRIGGER_PX = 150;
+  let hasOlderValue = false;
+  // Starts "inside" so a fresh/opened list never fires on its own way to the
+  // bottom; the first real entry-edge is what triggers.
+  let nearTopInside = true;
+  // The scrollTop our prepend restore just wrote (see renderOlderEntries).
+  // A scroll event landing exactly on this value is OUR programmatic write,
+  // not the user scrolling: it never re-evaluates follow state (numeric
+  // restore keeps distFromBottom invariant anyway) and never edges a fresh
+  // trigger. The first event at any other value is the user's; the mark dies.
+  let restoreTarget: number | null = null;
+  function syncNearTop(): void {
+    const scrollable = container.scrollHeight - container.clientHeight > 0;
+    const inside = scrollable && container.scrollTop <= TOP_TRIGGER_PX;
+    if (inside && !nearTopInside && hasOlderValue) onNearTop?.();
+    nearTopInside = inside;
+  }
   const onScroll = () => {
+    if (restoreTarget !== null) {
+      const ours = container.scrollTop === restoreTarget;
+      restoreTarget = null;
+      if (ours) {
+        // Programmatic restore: keep follow as-is, only re-sync the trigger
+        // zone so the next real scroll-up edges honestly.
+        syncNearTop();
+        return;
+      }
+    }
     const distFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
     followBottom = distFromBottom <= 150;
+    syncJumpButton();
+    syncNearTop();
   };
   container.addEventListener("scroll", onScroll);
+
+  // ── Jump-to-bottom button ────────────────────────────────────────────────
+  // The un-pinned view's affordance: a round chevron docked on the composer
+  // seam (jumpHost = the app's #input-area), visible exactly when the
+  // transcript is NOT following the bottom. followBottom is the single
+  // source of truth -- syncJumpButton rides the user scroll path, clear(),
+  // and the click; the guarded restore never touches it (follow survives the
+  // restore, so the button is already right -- and syncing there could flash
+  // it mid-anchoring). The click pins INSTANTLY, no smooth scroll: a native
+  // animation emits intermediate scroll events whose distFromBottom > 150
+  // would flip followBottom off mid-flight, killing the very follow it seeks.
+  const ICON_CHEVRON_DOWN =
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" tabindex="-1">' +
+    '<path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  let jumpButton: HTMLButtonElement | null = null;
+  function syncJumpButton(): void {
+    if (jumpButton) jumpButton.hidden = followBottom;
+  }
+  function onJumpClick(): void {
+    followBottom = true;
+    container.scrollTop = container.scrollHeight;
+    syncJumpButton();
+  }
+  if (jumpHost) {
+    jumpButton = document.createElement("button");
+    jumpButton.type = "button";
+    jumpButton.className = "jump-to-bottom";
+    jumpButton.setAttribute("aria-label", "Jump to bottom");
+    jumpButton.hidden = true; // followBottom starts true; hide from frame one
+    jumpButton.innerHTML = ICON_CHEVRON_DOWN;
+    jumpButton.addEventListener("click", onJumpClick);
+    jumpHost.appendChild(jumpButton);
+  }
 
   function scrollBottom(): void {
     if (followBottom) {
@@ -1553,6 +1654,12 @@ export function createMessageList(
   function clear(): void {
     container.innerHTML = "";
     followBottom = true;
+    syncJumpButton();
+    // The lazy-history trigger is per-view: the chat layer re-attests
+    // hasOlder after rendering the new view (LOG_VIEWED / attach burst).
+    hasOlderValue = false;
+    nearTopInside = true;
+    restoreTarget = null;
     currentAssistantEl = null;
     currentThinkingEl = null;
     destroyToolBlocks();
@@ -1730,6 +1837,49 @@ export function createMessageList(
     scrollBottom();
   }
 
+  /**
+   * Prepend an older history page (loadOlderResult) without the viewport
+   * jumping: capture geometry, render the page through the SAME pipeline in
+   * a detached mirror list, splice the finished nodes above the current
+   * first child, then restore `scrollTop += heightDelta`. Pages arrive
+   * boundary-aligned (whole turns), so tool-call/result pairing resolves
+   * inside the mirror and never touches the live manager's state -- the
+   * mirror is simply discarded with its (never-destroyed) handles: the
+   * moved tool blocks are live transcript now, and its scroll listener
+   * dies with the detached node.
+   */
+  function renderOlderEntries(entries: LogEntry[]): void {
+    const prevScrollTop = container.scrollTop;
+    const prevScrollHeight = container.scrollHeight;
+    const scratch = document.createElement("div");
+    const mirror = createMessageList(scratch, { hideThinking: hideThinkingValue, onQuestionAnswer });
+    mirror.renderLogEntries(entries);
+    const first = container.firstChild;
+    for (const node of [...scratch.childNodes]) {
+      // Chrome never splices into the live list: the mirror gets no jump
+      // host by construction, and this keeps it that way even if one did.
+      if ((node as { classList?: { contains(name: string): boolean } }).classList?.contains("jump-to-bottom")) continue;
+      if (first) container.insertBefore(node, first);
+      else container.appendChild(node);
+    }
+    const delta = container.scrollHeight - prevScrollHeight;
+    if (delta > 0) {
+      container.scrollTop = prevScrollTop + delta;
+      restoreTarget = prevScrollTop + delta;
+    }
+    // Re-sync the trigger zone by hand: the restore moved scrollTop down past
+    // the page height, so the next genuine scroll-up INTO the zone edges --
+    // the restore itself never counts (see the restoreTarget guard).
+    nearTopInside = container.scrollTop > TOP_TRIGGER_PX ? false : nearTopInside;
+  }
+
+  function setHasOlder(hasOlder: boolean): void {
+    hasOlderValue = hasOlder;
+    // Re-arm WITHOUT firing: the view just opened; the next top-zone ENTRY
+    // (a real scroll) is the trigger.
+    nearTopInside = true;
+  }
+
   /** Append a system notice bubble (used for profile-switch confirmations). */
   function addSystemMessage(text: string): void {
     handleSystemMessage({ content: `Switched to profile: ${text}` });
@@ -1747,6 +1897,11 @@ export function createMessageList(
   /** Detach the container's scroll listener; the container itself is left untouched. */
   function destroy(): void {
     container.removeEventListener("scroll", onScroll);
+    if (jumpButton) {
+      jumpButton.removeEventListener("click", onJumpClick);
+      jumpButton.remove();
+      jumpButton = null;
+    }
     // The manager is dropped after this: no tool block may outlive it with
     // a live mount still waiting for a result.
     destroyToolBlocks();
@@ -1766,6 +1921,9 @@ export function createMessageList(
     handleCompacting,
     handleCommandResult,
     handleQuestion,
+    setQuestionReadOnly(readOnly: boolean): void {
+      questionReadOnly = readOnly;
+    },
     handleQuestionAnswered,
     handleTaskProgress,
     handleTokenUsage,
@@ -1780,5 +1938,7 @@ export function createMessageList(
     handleSystemMessage,
     destroy,
     renderLogEntries,
+    renderOlderEntries,
+    setHasOlder,
   };
 }

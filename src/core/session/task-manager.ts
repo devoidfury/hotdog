@@ -19,7 +19,6 @@ import { makeProviderHealth, type ProviderHealth } from "./provider-health.ts";
 import { TaskScheduler } from "./task-scheduler.ts";
 import { TaskExecution } from "./task-execution.ts";
 import type { AgentLike } from "./index.ts";
-import type { ToolMetadata } from "../extensions/tool-registry.ts";
 
 import {
   TASK_STATUS,
@@ -40,6 +39,7 @@ import {
   type TaskManagerOptions,
   type TaskManagerRequiredOptions,
   type TaskManagerSessionManager,
+  type WorkerSessionStartedInfo,
 } from "./task-types.ts";
 
 
@@ -65,6 +65,12 @@ export class TaskManager {
   #observer: TaskObserver | null = null;
   /** Follow-up -> pending-question answer seam (null: plain steer only). */
   #resolvePendingQuestion: ((sessionId: string, text: string) => boolean) | null;
+  /** B2 host seam: release a held worker question WITHOUT answering it
+   *  (null: no bridge to release through). See TaskManagerOptions.releaseWorkerQuestion. */
+  #releaseWorkerQuestion: ((sessionId: string, reason: string) => boolean) | null = null;
+  /** B1 host seam: worker-session row birth at the recordAgentSession site
+   *  (null: no host row table). See TaskManagerOptions.onWorkerSessionStarted. */
+  #onWorkerSessionStarted: ((info: WorkerSessionStartedInfo) => void) | null = null;
 
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
     this.#buildAgent = options.buildAgent;
@@ -117,6 +123,8 @@ export class TaskManager {
       : null;
     this.#profileManager = options.profileManager;
     this.#resolvePendingQuestion = options.resolvePendingQuestion ?? null;
+    this.#releaseWorkerQuestion = options.releaseWorkerQuestion ?? null;
+    this.#onWorkerSessionStarted = options.onWorkerSessionStarted ?? null;
     // One health registry per manager: explicit injection wins (shared / test seams),
     // explicit null opts out, otherwise build one. The interval gates only the
     // TIMER inside makeProviderHealth, so a 0 interval keeps failure-driven demotion
@@ -167,6 +175,7 @@ export class TaskManager {
         if (typeof entry.agentSessionId === "string") {
           this.#spawnLog?.recordAgent(entry.taskId, entry.agentSessionId);
         }
+        this.#notifyWorkerSessionStarted(entry);
       },
       buildAgent: (config) => this.#buildAgent(config),
       scheduler: this.#scheduler,
@@ -213,6 +222,35 @@ export class TaskManager {
     }
   }
 
+  /**
+   * Fire the B1 worker-session seam (TaskManagerOptions.onWorkerSessionStarted).
+   * Guarded exactly like the observer relay above: a throwing host must not
+   * disturb task execution.
+   */
+  #notifyWorkerSessionStarted(entry: TaskEntry): void {
+    const relay = this.#onWorkerSessionStarted;
+    if (!relay || typeof entry.agentSessionId !== "string") return;
+    try {
+      relay({
+        taskId: entry.taskId,
+        workerSid: entry.agentSessionId,
+        managerSid: entry.sessionId,
+        profile:
+          typeof entry.agentConfig.profileName === "string"
+            ? entry.agentConfig.profileName
+            : "",
+        // The LIVE accessor: reads entry.agent each call, so it goes null
+        // exactly when finalizeTurn releases the agent (the log becomes the
+        // only transcript source).
+        getAgent: () => entry.agent,
+      });
+    } catch (e: unknown) {
+      logger.error(
+        `[task ${entry.taskId}] onWorkerSessionStarted threw: ${formatError(e)}`,
+      );
+    }
+  }
+
   #infoOf(entry: TaskEntry): TaskInfo {
     return {
       taskId: entry.taskId,
@@ -229,6 +267,10 @@ export class TaskManager {
       activeMs: entry.activeMs,
       inRun: entry.inRun,
       turnStartedAt: entry.turnStartedAt,
+      // Worker-question badge (R4's nested-row badge): mirrors
+      // entry.questionYielded; the ask/settle hooks notify on a real flip so
+      // manager-scoped TASK_UPDATE frames carry it onto the nested row.
+      questionPending: entry.questionYielded,
     };
   }
 
@@ -253,6 +295,15 @@ export class TaskManager {
         entry.turnStartedAt = null;
         entry.inRun = false;
       }
+      // A terminal transition kills the question wait too (bare interruptTask,
+      // the manager-delete cascade -- any terminal race ahead of the settle):
+      // clear the badge BEFORE this notify so the terminal frame and every
+      // retained snapshot carry questionPending false. The settle hook's
+      // flip-back can never run here (#entryBySession matches RUNNING entries
+      // only), and the lane stays #finalizeTurn-owned -- the late bridge
+      // resolution then early-returns on the cleared flag, exactly-once
+      // untouched.
+      entry.questionYielded = false;
     }
     this.#notify({ kind: "task", task: this.#infoOf(entry) });
     // One status write point = one sweep point: every terminal transition
@@ -303,13 +354,6 @@ export class TaskManager {
     return Array.from(this.#tasks.values(), (entry) => this.#infoOf(entry));
   }
 
-  /** Delegating session of a known task (null: no parent); undefined for
-   * unknown ids. The websocket relay uses it for feed scoping and replay gating. */
-  getTaskSession(taskId: string): string | null | undefined {
-    const entry = this.#tasks.get(taskId);
-    return entry ? entry.sessionId : undefined;
-  }
-
   /** Worker agent's session for a known task (null: agent released or never
    * built); undefined for unknown ids. Pending questions live under the
    * worker's session, not the delegating one, so terminal cleanup must key
@@ -322,30 +366,23 @@ export class TaskManager {
   }
 
   /**
-   * Display metadata (ToolMetadata) for one tool of a task's WORKER agent,
-   * resolved from the worker's own tool registry -- the same source the
-   * websocket channel reads for a session's live TOOL_CALL frames. The
-   * webui task relay consults it to stamp display-DSL posture fields onto
-   * relayed activity (see taskActivityWithPosture in websocket/
-   * wire-messages.ts), so a subagent transcript renders the same postures
-   * as a session view. Undefined for unknown ids, a released agent (the
-   * terminal slim record carries no agent), or a host agent without a
-   * registry: the relay then falls back to the same hint-free fold the
-   * session channel computes for an undeclared tool (no display parts).
-   * Structural read -- AgentLike has no toolRegistry slot, the host's real
-   * Agent does (same cast posture as SessionRegistry.createChannel).
+   * Read-only working probe for worker rows (B3 attach): is the task whose
+   * WORKER runs under this agent session mid-turn? Workers never enter the
+   * private SessionManager, so the webui's `working` source
+   * (isSessionRunning) cannot answer for them -- the task's inRun is the
+   * exact same fact (set/cleared around every worker turn). null = no
+   * RUNNING task owns this worker sid (released, terminal, or unknown).
    */
-  getTaskToolMetadata(
-    taskId: string,
-    toolName: string,
-  ): ToolMetadata | undefined {
-    const entry = this.#tasks.get(taskId);
-    if (!entry?.agent) return undefined;
-    const registry = (entry.agent as unknown as {
-      toolRegistry?: { getMetadata?: (name: string) => ToolMetadata | undefined };
-    }).toolRegistry;
-    return registry?.getMetadata?.(toolName);
+  taskWorkingForAgentSession(agentSessionId: string): boolean | null {
+    for (const entry of this.#tasks.values()) {
+      if (entry.statusRef.value !== TASK_STATUS.RUNNING) continue;
+      const sid = entry.agent?.sessionId ?? entry.agentSessionId;
+      if (sid === agentSessionId) return entry.inRun;
+    }
+    return null;
   }
+
+
 
   /** Exposed for extensions. */
   get config(): Record<string, unknown> {
@@ -754,6 +791,41 @@ export class TaskManager {
     return this.#spawnLog.lineage().then((recs) => recs.filter((r) => !this.#tasks.has(r.taskId)));
   }
 
+  /** Agent session ids THIS lifetime's human promoted (D6, see
+   *  promoteAgentSession). Covers the no-SpawnLog path and the same-
+   *  lifetime moment before any re-read; promote lines in the sidecar
+   *  carry it across restarts. */
+  #promotedAgentSessions = new Set<string>();
+
+  /**
+   * D6 promotion: a manual Continue claimed this attested worker's log.
+   * The id stops reading as a joined worker: its cold log surfaces as a
+   * plain Recent Logs row and pins are allowed on it. Recorded in memory
+   * now and as an append-only sidecar line (fire-and-forget like every
+   * other write) so the next lifetime reads the same answer.
+   */
+  promoteAgentSession(agentSessionId: string): void {
+    this.#promotedAgentSessions.add(agentSessionId);
+    this.#spawnLog?.recordPromote(agentSessionId);
+  }
+
+  /**
+   * Worker-attested agent session ids for the Recent Logs exclusion
+   * (SpawnLog.joinedAgentSessionIds: boot lineage view UNION this
+   * lifetime's live joins, minus promotions). Unlike lineageTasks() there
+   * is deliberately NO #tasks.has() filter here: THIS process's live
+   * spawns must be hidden from the cold list before any restart -- the
+   * boot-cache-gap this set exists to close. Empty when the sidecar is
+   * unset (nothing attests anything).
+   */
+  async joinedAgentSessionIds(): Promise<Set<string>> {
+    const joined = this.#spawnLog
+      ? await this.#spawnLog.joinedAgentSessionIds()
+      : new Set<string>();
+    for (const sid of this.#promotedAgentSessions) joined.delete(sid);
+    return joined;
+  }
+
   /** Locked model + provider lane for a spawned task, or null if unknown. Provider is null while a multi-candidate task waits unplaced (model then shows the intent). */
   taskLane(taskId: string): { model: string; provider: string | null } | null {
     const task = this.#tasks.get(taskId);
@@ -793,6 +865,9 @@ export class TaskManager {
     const entry = this.#entryBySession(sessionId);
     if (!entry || entry.statusRef.value !== TASK_STATUS.RUNNING) return;
     entry.questionYielded = true;
+    // Badge flip (questionPending on the task wire): a real flip notifies the
+    // task so the manager-scoped TASK_UPDATE carries the nested-row badge.
+    this.#notify({ kind: "task", task: this.#infoOf(entry) });
     this.#scheduler.releaseSlot(entry);
     this.#deliverQuestion(entry, questions);
   }
@@ -806,6 +881,9 @@ export class TaskManager {
     const entry = this.#entryBySession(sessionId);
     if (!entry || !entry.questionYielded) return;
     entry.questionYielded = false;
+    // Badge flip back (mirror of onTaskQuestionAsked): the nested row's
+    // questionPending clears on the manager-scoped TASK_UPDATE.
+    this.#notify({ kind: "task", task: this.#infoOf(entry) });
     if (entry.statusRef.value !== TASK_STATUS.RUNNING || entry.abortController.signal.aborted) {
       return; // interrupt/delete won the race; #finalizeTurn owns the lane
     }
@@ -837,9 +915,19 @@ export class TaskManager {
   }
 
   /**
-   * Wake the delegating session with a task's pending question. Same framing boundary as deliverTaskCompletion:
-   * harness-trusted wrapper, model-authored body wrapped untrusted. Engine-spawned tasks (no delegating session) have
-   * no manager to reach -- the webui relay already showed the question.
+   * Wake the delegating session with a task's pending question. Same framing
+   * boundary as deliverTaskCompletion: harness-trusted wrapper, model-authored
+   * body wrapped untrusted. Engine-spawned tasks (no delegating session, or a
+   * host without a getBus seam) have nobody to reach: the wake is dropped with
+   * a warning, and the truth is that NOTHING displays it in place either --
+   * the webui opens worker views now (B4's collapse; the relay grammar is
+   * retired, and even before that it had no QUESTION case -- the old claim
+   * here was false). The question is
+   * not invisible: it rides the worker's durable session log, and the worker
+   * itself is never stranded silently -- a worker question runs the wait
+   * posture (no worker-facing timer), and the manager's teardown/cancel or
+   * the task's terminal release resolves it (see releaseQuestionsForManager
+   * and the host's terminal bridge cleanup).
    */
   #deliverQuestion(
     entry: TaskEntry,
@@ -923,6 +1011,36 @@ export class TaskManager {
       }
     }
     return interrupted;
+  }
+
+  /**
+   * D1's bound on the park (the manager-gone closure): the delegating
+   * manager's RUN was cancelled while its worker sat on a held question --
+   * nobody is coming to answer, so resolve those held questions IMMEDIATELY
+   * as "answerer gone, proceed" through the host's `releaseWorkerQuestion`
+   * seam (bridge.resolveUnanswered: defaults + the D10 unanswered marker;
+   * the question tool renders mode "unanswered", never ok-JSON defaults).
+   * NO worker-facing timer is involved -- timers never guess.
+   *
+   * Deliberately NOT an interrupt: the worker task keeps running (a kill is
+   * interrupt_task/manager/user territory, D2). Session DELETE is not this
+   * path: it keeps its existing cascade (interruptTasksForSession above --
+   * the question tool's own abort race reports that honestly, and the
+   * terminal release settles the bridge entry); if both ever race, the
+   * bridge's pending.delete-first idiom settles exactly one resolution and
+   * the settle hook's questionYielded guard keeps the lane honest.
+   */
+  releaseQuestionsForManager(managerSessionId: string, reason: string): number {
+    if (!this.#releaseWorkerQuestion) return 0;
+    let released = 0;
+    for (const entry of this.#tasks.values()) {
+      if (entry.sessionId !== managerSessionId) continue;
+      if (entry.statusRef.value !== TASK_STATUS.RUNNING || !entry.questionYielded) continue;
+      const workerSid = entry.agent?.sessionId ?? entry.agentSessionId;
+      if (!workerSid) continue;
+      if (this.#releaseWorkerQuestion(workerSid, reason)) released++;
+    }
+    return released;
   }
 
   activeTasks(): string[] {

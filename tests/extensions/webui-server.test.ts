@@ -322,7 +322,7 @@ describe("createWebuiServer", () => {
       expect(res.status).toBe(200);
       const text = await res.text();
       // Prove the real frontend page is served, not just any HTML body.
-      expect(text).toContain("<title>hotdog WebUI</title>");
+      expect(text).toContain("<title>hotdog</title>");
     });
 
     it("returns 404 for unknown paths", async () => {

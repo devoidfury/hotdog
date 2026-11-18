@@ -15,7 +15,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { logger } from "@utils/logger.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
@@ -278,8 +278,26 @@ export function sharedToolExecBroker(opts?: ToolExecBrokerOptions): ToolExecBrok
  * `dropSession` forgets ONE session's memoized plans AND its scratch-dir
  * mapping (the per-session `/fence` toggle calls it; the session replans
  * with a fresh scratch dir while siblings' memo entries and mappings
- * survive untouched). Optional: a seam planner with no memo has nothing to
- * drop.
+ * survive untouched). It NEVER removes the directory: a live pool entry
+ * may still have it bound. Optional: a seam planner with no memo has
+ * nothing to drop.
+ *
+ * The scratch lifecycle beyond the memo (2026-11 ENOSPC hunt: every
+ * session ever run left its dir behind forever):
+ *  - `armRelease(session, seq)`: SESSION_END. `seq` is the broker's monotonic
+ *    release generation, echoed back by the child's `released` frame. The
+ *    session is gone unless it plans again -- plan() DISARMS any pending
+ *    generation outright (a resumed session keeps its dir).
+ *  - `finishRelease(session, seq)`: the child confirmed seq. A generation
+ *    that is not the CURRENT arm (a stale ack from an earlier SESSION_END
+ *    re-fire, or the release was disarmed by a plan) never rm's. On the
+ *    current arm the child proves every entry dropped at seq or earlier is
+ *    process-dead (FIFO ack), so no live pool entry can bind the dir; the
+ *    arm surviving since that seq proves no plan landed since (a plan would
+ *    have cleared it), so no fence plan references it either.
+ *  - `releaseAll()`: the broker child died or closed -- its runners go
+ *    down with their jails (`--die-with-parent`, the pid namespace), so
+ *    nothing can still bind ANY scratch dir; purge the whole map.
  */
 export type FencePlanner = ((
   session: string,
@@ -287,6 +305,9 @@ export type FencePlanner = ((
   roots: string[],
 ) => WireFence | null) & {
   dropSession?(session: string): void;
+  armRelease?(session: string, seq: number): void;
+  finishRelease?(session: string, seq: number): void;
+  releaseAll?(): void;
 };
 
 /** Sessions ride the scratch dir name; uuids pass untouched, anything else is flattened. */
@@ -300,15 +321,41 @@ function sanitizeForPath(s: string): string {
  * (session, class, roots) tuple -- the fence spec legitimately differs by
  * class and roots. The scratch dir is per SESSION: one mkdtemp shared by
  * every tuple of that session (one tmp bind per session, not one per
- * class/roots). Nothing here ever removes it: entry death does not delete
- * it, the tmp policy does (live bwrap binds may still reference it).
+ * class/roots). Reclamation is the arm/finish dance on the FencePlanner
+ * docs: dropSession alone never removes a dir (live binds), and only the
+ * child's confirmed entry death (finishRelease) or the child's own death
+ * (releaseAll) may rm one.
  */
 export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null {
   if (fence === "off") return null;
   const memo = new Map<string, WireFence | null>();
   /** One scratch dir per session, minted on that session's first planned tuple. */
   const scratchDirs = new Map<string, string>();
+  /** Sessions whose scratch reclaim is armed, at the arm's release generation. */
+  const armedRelease = new Map<string, number>();
+  const forgetSession = (session: string): void => {
+    const prefix = `${session}\u0000`;
+    for (const key of memo.keys()) {
+      if (key.startsWith(prefix)) memo.delete(key);
+    }
+    const mapped = scratchDirs.get(session);
+    if (mapped !== undefined) unregisterLiveTmpDir(mapped);
+    scratchDirs.delete(session);
+  };
+  const rmScratch = (session: string, dir: string): void => {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (e) {
+      // Teardown never crashes the host over a directory; the stale sweep
+      // (or the tmp policy) gets it another day.
+      logger.warn(`[tool-exec] scratch reclaim for ${session} failed: ${formatError(e)}`);
+    }
+  };
   const plan: FencePlanner = (session, cls, roots) => {
+    // A live plan DISARMS any pending scratch release (all generations):
+    // the session resumed, so its dir (current mapping, or the fresh one
+    // minted below) is in use again and no late `released` ack may rm it.
+    armedRelease.delete(session);
     const key = `${session}\u0000${cls}\u0000${roots.join("\u0000")}`;
     const hit = memo.get(key);
     if (hit !== undefined) return hit;
@@ -327,6 +374,7 @@ export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null 
         `${join(tmpdir(), `hotdog-exec-${sanitizeForPath(session)}-`)}`,
       );
       scratchDirs.set(session, scratch);
+      registerLiveTmpDir(scratch);
     }
     let spec: WireFence | null = null;
     const { prefixArgv, probe } = planFor({
@@ -347,15 +395,132 @@ export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null 
   // The memo key starts with `${session}\u0000`, so a prefix drop hits exactly
   // one session's tuples and its scratch mapping (the next plan mints a
   // FRESH dir); siblings' memos and mappings survive untouched. Never rm()d
-  // -- a live pool entry may still have the dropped dir bound.
-  plan.dropSession = (session: string) => {
-    const prefix = `${session}\u0000`;
-    for (const key of memo.keys()) {
-      if (key.startsWith(prefix)) memo.delete(key);
+  // -- a live pool entry may still have the dropped dir bound; reclamation
+  // is armRelease/finishRelease's job (see the FencePlanner docs).
+  plan.dropSession = (session: string) => forgetSession(session);
+  plan.armRelease = (session: string, seq: number) => {
+    armedRelease.set(session, seq);
+  };
+  plan.finishRelease = (session: string, seq: number) => {
+    // Generation gate: a stale ack (an earlier SESSION_END re-fire whose
+    // bucket drained late) or an ack for a release the plan() disarm already
+    // cancelled must never rm. Only the CURRENT arm's seq answers.
+    if (armedRelease.get(session) !== seq) return;
+    armedRelease.delete(session);
+    const dir = scratchDirs.get(session);
+    // Drop the memo too: a resumed session must replan, and the next plan
+    // mints a fresh dir (the child's fence-id-mismatch replace rule then
+    // respawns any entry still standing under the dead plan).
+    forgetSession(session);
+    if (dir !== undefined) rmScratch(session, dir);
+  };
+  plan.releaseAll = () => {
+    for (const [session, dir] of scratchDirs) {
+      unregisterLiveTmpDir(dir);
+      rmScratch(session, dir);
     }
-    scratchDirs.delete(session);
+    scratchDirs.clear();
+    memo.clear();
+    armedRelease.clear();
   };
   return plan;
+}
+
+/**
+ * Age past which a `hotdog-*-` tmp dir is treated as abandoned by whatever
+ * minted it. Module constant (no config key by doctrine). Safety layers, in
+ * order of trust:
+ *  1. Live-dir immunity: dirs registered in THIS process (planner maps,
+ *     agent-browser fallback dirs) are never swept at any age.
+ *  2. Freshness, dir AND one entry level: a live jail is bound to a dir its
+ *     tools create/remove entries in (dir mtime moves), and a runner
+ *     appending to one existing tmp file for days moves only the FILE's
+ *     mtime -- so a dir counts as young if it or any direct entry is younger
+ *     than the threshold. Unreadable entries/dirs count as young.
+ *  3. Age itself, for the cross-process case: two hotdog processes can
+ *     coexist and each mints here, and OUR registry cannot see THEIR live
+ *     dirs -- absence from our map proves nothing. Residual risk, stated
+ *     honestly: a dir in another process that has seen NO entry create/
+ *     delete AND no file-mtime touch for 3 straight days is swept. For exec
+ *     scratch that is nearly impossible in practice (idle pool entries die
+ *     at the 5-minute idle reap, so a live bind is a busy bind), and the
+ *     agent-browser fallback dir self-heals (mkdir -p on the next save).
+ * Never sweep younger, never sweep a foreign prefix.
+ */
+export const STALE_TMP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Dirs whose in-process owner considers them live, whatever the clock says
+ * (any prefix). The sweep skips these unconditionally; the exec planner
+ * registers/unregisters its current mappings, and agent-browser registers
+ * its per-activation fallback dir. In-process only: other processes' live
+ * dirs fall to the freshness/age rules (see STALE_TMP_MAX_AGE_MS).
+ */
+const liveTmpDirs = new Set<string>();
+
+export function registerLiveTmpDir(dir: string): void {
+  liveTmpDirs.add(dir);
+}
+
+export function unregisterLiveTmpDir(dir: string): void {
+  liveTmpDirs.delete(dir);
+}
+
+/** Shallow freshness pass: dir or ANY direct entry (or an unreadable one) younger than the threshold. */
+function hasFreshTmpEntry(dir: string, now: number): boolean {
+  try {
+    for (const name of readdirSync(dir)) {
+      try {
+        if (now - statSync(join(dir, name)).mtimeMs < STALE_TMP_MAX_AGE_MS) return true;
+      } catch {
+        return true; // an entry we cannot stat is presumed alive
+      }
+    }
+    return false;
+  } catch (e) {
+    logger.warn(`[tool-exec] stale tmp sweep cannot read entries of ${dir}: ${formatError(e)}`);
+    return true; // an unreadable dir is presumed alive
+  }
+}
+
+/**
+ * Remove own-prefix tmp dirs older than STALE_TMP_MAX_AGE_MS (the boot
+ * janitor for what crash-paths, a lost ack, and pre-reclaim history left
+ * behind), sparing registered live dirs at any age and dirs fresh at the
+ * entry level. Tolerates unreadable entries (stat/race failures are logged
+ * and skipped); returns the count swept. Parameterized base/now for tests;
+ * production calls take the defaults.
+ */
+export function sweepStaleTmpDirs(
+  prefix: string,
+  base: string = tmpdir(),
+  now: number = Date.now(),
+): number {
+  let names: string[];
+  try {
+    names = readdirSync(base);
+  } catch (e) {
+    logger.warn(`[tool-exec] stale tmp sweep cannot read ${base}: ${formatError(e)}`);
+    return 0;
+  }
+  let swept = 0;
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const path = join(base, name);
+    if (liveTmpDirs.has(path)) continue; // a live owner in this process: never, at any age
+    try {
+      const st = statSync(path);
+      if (!st.isDirectory()) continue; // prefix collisions with files are not ours
+      if (now - st.mtimeMs < STALE_TMP_MAX_AGE_MS) continue; // dir itself too young to call dead
+      if (hasFreshTmpEntry(path, now)) continue; // activity lives at the entry level
+      rmSync(path, { recursive: true, force: true });
+      swept++;
+    } catch (e) {
+      logger.warn(`[tool-exec] stale tmp sweep skipped ${path}: ${formatError(e)}`);
+    }
+  }
+  if (swept > 0) logger.info(`[tool-exec] stale tmp sweep removed ${swept} "${prefix}*" dir(s)`);
+  return swept;
 }
 
 /**
@@ -451,6 +616,8 @@ export class ToolExecBroker implements ToolExecLink {
   #onFatal: ((e: Error) => void) | null = null;
   #pending = new Map<string, PendingCall>();
   #seq = 0;
+  /** Monotonic release generation (per frame; finishRelease compares per session). */
+  #releaseSeq = 0;
   /** Set when the child dies on its own (not by close()); consumed at respawn. */
   #crashed = false;
   #closing = false;
@@ -482,6 +649,13 @@ export class ToolExecBroker implements ToolExecLink {
         ? opts.fencePlan
         : createFencePlanner(opts.fence ?? "probe");
     this.#lastFence = opts.fence ?? "probe";
+    // Boot janitor: sweep scratch dirs older than STALE_TMP_MAX_AGE_MS off
+    // the construction path (deferred, unref'd -- never blocks the first
+    // tool exec, never the reason the host stays alive). Age-based, so a
+    // coexisting hotdog process's live dirs are never touched (see
+    // sweepStaleTmpDirs).
+    const janitor = setTimeout(() => sweepStaleTmpDirs("hotdog-exec-"), 0);
+    janitor.unref?.();
   }
 
   /** True once consecutive crash-respawns exhausted the cap. */
@@ -662,6 +836,38 @@ export class ToolExecBroker implements ToolExecLink {
     void this.#post({ op: "reap", session, class: cls });
   }
 
+  /**
+   * Session end: drop the session's pool entries AND arm its scratch-dir
+   * reclaim. The teardown seam is the SESSION_END wiring in
+   * `wireSessionEndReap` (agent-factory.ts): this is what it calls on the
+   * real link, in place of the bare `reap`. SESSION_END re-fires (the
+   * registry re-fires on delete, task paths fire on shared hooks), so every
+   * frame carries a monotonic generation `seq`.
+   *
+   * The safety guarantee, stated exactly: the scratch dir is rm()'d only
+   * when no live pool entry and no fence plan can reference it --
+   *  - entries: the child's FIFO watch answers `released` for seq N only
+   *    after the PROCESS of every entry dropped at seq <= N has exited (a
+   *    re-fired release with nothing left to drop cannot jump ahead of a
+   *    draining older bucket; a draining runner may bind the dir until its
+   *    death);
+   *  - plans: the ack rm's only when seq is the CURRENT arm (finishRelease),
+   *    and any plan() for the session after that arm DISARMS (clears the
+   *    arm), so a resumed session keeps its dir against any ack; on the
+   *    reclaimed side the confirmation drops the session's memo AND mapping,
+   *    and the next plan mints a fresh dir;
+   *  - death: if the child dies before answering, releaseAll purges (its
+   *    runners die with their jails: --die-with-parent, the pid namespace).
+   * No child means nothing to wait for and nothing to reclaim (same
+   * no-spawn-on-teardown rule as reap()).
+   */
+  release(session: string): void {
+    if (!this.#proc) return;
+    const seq = ++this.#releaseSeq;
+    this.#fencePlan?.armRelease?.(session, seq);
+    void this.#post({ op: "release", session, seq });
+  }
+
   async #post(frame: OutboundFrame): Promise<void> {
     try {
       await this.#ensureStarted();
@@ -690,7 +896,13 @@ export class ToolExecBroker implements ToolExecLink {
     this.#closing = true;
     this.#proc = null;
     this.#starting = null;
-    const exited = new Promise<void>((resolve) => proc.once("exit", () => resolve()));
+    let childGone = false;
+    const exited = new Promise<void>((resolve) =>
+      proc.once("exit", () => {
+        childGone = true;
+        resolve();
+      }),
+    );
     try {
       proc.stdin?.end();
     } catch {
@@ -705,6 +917,18 @@ export class ToolExecBroker implements ToolExecLink {
     } catch {
       // already gone
     }
+    if (!childGone) {
+      // Outlived the grace: the kill is delivered but the scratch purge must
+      // not outrun the child's actual death either (its runners die with the
+      // jail at broker exit) -- give the exit event a short beat before the
+      // purge. Unref'd: a wedged child must not hold the host.
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 1000).unref())]);
+    }
+    // The child is gone: its runners died with their jails, so no scratch
+    // dir can still be bound. Purge -- the close-time ENOSPC hole. (The
+    // crash path purges in #failAll; close nulls #proc first, so the
+    // identity-checked #handleDeath never reaches it here.)
+    this.#fencePlan?.releaseAll?.();
     const err = new Error("[tool-exec] broker closed");
     for (const { reject } of this.#pending.values()) reject(err);
     this.#pending.clear();
@@ -892,6 +1116,13 @@ export class ToolExecBroker implements ToolExecLink {
       ready?.();
       return;
     }
+    if (frame.op === "released") {
+      // Confirmed entry death for one release generation: the armed reclaim
+      // may now rm, but ONLY if this seq is the current arm (stale re-fire
+      // acks and post-resume acks are no-ops in the planner).
+      this.#fencePlan?.finishRelease?.(frame.session, frame.seq);
+      return;
+    }
     if (frame.op === "log") {
       logger[frame.level](`[tool-exec:broker] ${frame.msg}`);
     }
@@ -900,6 +1131,12 @@ export class ToolExecBroker implements ToolExecLink {
   #failAll(err: Error): void {
     this.#proc = null;
     this.#starting = null;
+    // Pool entries live and die inside the child: a dead child means every
+    // fenced runner went down with its jail (--die-with-parent fires on
+    // broker death even by SIGKILL; the pid namespace takes the rest), so
+    // no scratch dir can still be bound host-side. Purge them all -- the
+    // ENOSPC hunt's crash-path hole (a pending `released` ack never arrives).
+    this.#fencePlan?.releaseAll?.();
     const fatal = this.#onFatal;
     this.#onFatal = null;
     this.#onReady = null;

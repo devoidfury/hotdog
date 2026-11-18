@@ -42,15 +42,27 @@ export const C2S = {
   // human-readable entry text (never base64 image payloads). Correlated
   // back with SEARCH_RESULTS; stale replies are dropped client-side by id.
   SEARCH_LOGS: "searchLogs",
+  // Lazy history page (see history-window.ts): { type, requestId,
+  // logId | sessionId, olderThan, pageSize?, epochToken? }. Requests the
+  // page of conversation messages immediately OLDER than `olderThan` (the
+  // oldestIndex a windowed LOG_VIEWED / sessionCreated shipped), aligned to
+  // the same turn-boundary grammar. `pageSize` is a message count, clamped
+  // server-side (MAX_HISTORY_PAGE_MESSAGES). `epochToken` echoes the token
+  // the attestation carried (the full-log epochStartIndex the window was
+  // cut at): a mismatch refuses with code "epoch_moved" (a mid-socket RESET
+  // moved the epoch under the window; the client closes its seam on that
+  // class). An absent token skips the check (pre-token clients). The id may
+  // name a cold log OR a live session (both read the durable epoch view).
+  // Correlated back with LOAD_OLDER_RESULT by requestId (the searchLogs
+  // precedent); refusals (bad index, unknown log) ride the reply's `error`
+  // field, still correlated -- never an uncorrelated guess.
+  LOAD_OLDER: "loadOlder",
   // Profile management
   LIST_PROFILES: "listProfiles",
   SWITCH_PROFILE: "switchProfile",
   // Subagent task control (delegates to TaskManager primitives)
   TASK_INTERRUPT: "taskInterrupt",
   TASK_FOLLOWUP: "taskFollowup",
-  // Replay buffered activity for one task (subagent view opening with an
-  // empty buffer; see TASK_ACTIVITY_HISTORY)
-  TASK_ACTIVITY_REQUEST: "taskActivityRequest",
   // Per-session exec-fence flip from the webui header strip:
   // { type, sessionId, policy: "off" | "probe" }. The server answers with a
   // sessionState frame (key "toolExec") scoped to that session's clients.
@@ -165,10 +177,29 @@ export const S2C = {
 
   // Cold session log management
   LOGS_LISTED: "logsListed",
+  // Windowed by default (history-window.ts): the reply carries the TRAILING
+  // window of conversation messages. Additive fields, present ONLY when
+  // older history exists: `oldestIndex` (the epoch-log index of the oldest
+  // shipped entry -- hand it back as loadOlder's `olderThan`),
+  // `hasOlder: true`, and `epochToken` (the full-log epochStartIndex the
+  // window was cut at -- echo it on loadOlder; a mid-socket RESET changes
+  // it and the server refuses the stale page with code "epoch_moved"). A
+  // session that fits the window ships everything with NONE of these
+  // fields, byte-identical to the pre-windowing wire.
   LOG_VIEWED: "logViewed",
   LOG_DELETED: "logDeleted",
   // Reply to C2S SEARCH_LOGS (requesting socket only), correlated by requestId.
   SEARCH_RESULTS: "searchResults",
+  // Reply to C2S LOAD_OLDER (requesting socket only), correlated by
+  // requestId. `entries` are capped exactly like LOG_VIEWED's (same seam);
+  // `oldestIndex`/`hasOlder` re-attest the window head for the next page and
+  // `epochToken` echoes the epoch the page was cut from (the client adopts
+  // it). Refusals carry requestId + `error` and nothing else (the
+  // LIST_DIR_RESULT posture); the stale-epoch refusal additionally carries
+  // code:"epoch_moved" -- a machine-readable class the client CLOSES its
+  // seam on (a mid-socket RESET moved the epoch; the held index means a
+  // different entry). See handlers-logs.ts / history-window.ts.
+  LOAD_OLDER_RESULT: "loadOlderResult",
   // Reply to C2S CONFIG_SNAPSHOT (requesting socket only), correlated by
   // requestId. See the Config snapshot section below and handlers-config.ts.
   CONFIG_SNAPSHOT_RESULT: "configSnapshotResult",
@@ -237,15 +268,10 @@ export const S2C = {
   // Question answers (broadcast to all clients when a question is resolved)
   QUESTION_ANSWERED: "questionAnswered",
 
-  // Subagent task feed (broadcast; see TaskManager observer relay in server.ts)
+  // Subagent task ticker (broadcast; see the TaskManager observer branch
+  // in server.ts; transcripts ride the worker's own session view)
   TASK_LIST: "taskList",
   TASK_UPDATE: "taskUpdate",
-  TASK_ACTIVITY: "taskActivity",
-  // Reply to C2S TASK_ACTIVITY_REQUEST, requesting socket only. ONE source
-  // per task state, picked server-side (handleTaskActivityRequest): settled
-  // tasks replay their durable session log; unsettled tasks get the
-  // in-memory buffer. A missing log degrades to the buffer, never to silence.
-  TASK_ACTIVITY_HISTORY: "taskActivityHistory",
   // Subagent task control reply (sent to the requesting socket only; the
   // status change itself rides the broadcast taskUpdate observer feed)
   TASK_CONTROL: "taskControl",
@@ -339,6 +365,10 @@ export interface SearchHitWire {
   matchCount: number;
   profile?: string;
   model?: string;
+  /** B5 additive: the delegation task description when this id is an
+   *  attested subagent log (Recent Logs hides it; the search row labels
+   *  it). Omitted on interactive hits -- their bytes are unchanged. */
+  subagentOf?: string;
   /** Whether this id is a live session (vs a cold log). */
   live: boolean;
   /** Excerpt lines, capped per log; each rides the matching text. */
@@ -478,12 +508,11 @@ export function wireImages(
 // API key, token, or password even if the config file holds one.
 
 /** Ceiling on a serialized slot value; longer strings cut with the
- *  "[truncated]" marker (MAX_TASK_ACTIVITY_CHARS precedent). The schema
- *  bounds the row set, this bounds the fat values. */
+ *  "[truncated]" marker. The schema bounds the row set, this bounds the fat
+ *  values. */
 export const MAX_CONFIG_VALUE_CHARS = 2000;
 /** Row and finding caps per snapshot reply (belt over the schema's own
- *  bound; MAX_TASK_ACTIVITY_CHARS idiom: count rows, honor the truncated
- *  flag). KEPT at 400 for the all-fields editor (owner ruling 2026-11-09):
+ *  bound: count rows, honor the truncated flag). KEPT at 400 for the all-fields editor (owner ruling 2026-11-09):
  *  rows now include file-only keys, provider entries (indexed) and the
  *  children of class-A refused containers, but a full real snapshot is ~80
  *  schema leaves plus tens of extras -- 400 bounds one reply well above the
@@ -915,17 +944,6 @@ export type FileOpResultWire = {
 
 // ── Subagent task feed ──────────────────────────────────────────────────────
 
-import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
-import { toolContentText, wrapperContentText } from "@utils/tool-content.ts";
-import {
-  ctxByIndex,
-  deriveCallDurationsByIndex,
-  parseEntryTs,
-  turnFinalDurationsByIndex,
-  type CtxUsage,
-} from "@utils/session-turns.ts";
-import { conversationContent, LOG_SOURCE } from "@core/session/session-log.ts";
-
 /**
  * Display snapshot of one task agent (TaskManager.TaskInfo on the wire).
  * `status` stays a string here: the browser must not need the core enum.
@@ -952,10 +970,17 @@ export interface TaskInfoWire {
   /** Wall start of the in-flight turn, null when none; live display adds (now - turnStartedAt). */
   turnStartedAt: number | null;
   /**
+   * True while the worker is blocked in a question-tool wait awaiting its
+   * delegating manager (B2, rides from core's TaskInfo via the taskWire
+   * spread). Additive: old clients ignore it; the nested subagent row badges
+   * it. Live rows only -- durable (sidecar) rows never carry it.
+   */
+  questionPending?: boolean;
+  /**
    * The worker agent's own session id -- the key of its durable session log
    * (a finished subagent is a finished session). Additive: old clients ignore
-   * it; the row menu uses it for Export/Copy-path, and the server's
-   * TASK_ACTIVITY_HISTORY replay reads that log for settled tasks.
+   * it; the row menu uses it for Export/Copy-path, and settled rows open
+   * the transcript through it (viewLog / the session view).
    */
   agentSessionId?: string;
   /**
@@ -977,115 +1002,12 @@ export interface TaskInfoWire {
    * survivor, NOT a task this process runs. The clock is frozen sidecar wall
    * time and the status is the recorded outcome or "interrupted". The webui
    * routes Open to the worker's durable log (agentSessionId -> viewLog /
-   * LOG_VIEWED) -- never to the task-activity replay, which has no bytes for
-   * a past lifetime. Additive: old clients render the row with the unknown-
+   * LOG_VIEWED) -- the in-memory feed has no bytes for a past lifetime.
+   * Additive: old clients render the row with the unknown-
    * glyph fallback and an inert transcript click.
    */
   durable?: boolean;
 }
-
-/**
- * One task-agent activity item. Text arrives as deltas (streaming chunks and
- * final assistant messages land in the same lane; the client appends). Tool
- * inputs/outputs are summaries -- see MAX_TASK_ACTIVITY_CHARS.
- *
- * `reset` is the STREAM_RESET sentinel (mid-stream provider failure being
- * retried): live-only, payload-free. The client drops the dead attempt's
- * trailing streamed blocks on receiving it, and the server buffer consumes it
- * as a trim instead of storing it (see SessionRegistry.recordTaskActivity),
- * so a replayed taskActivityHistory can never carry one and can never clear
- * a rebuilt subagent transcript view.
- *
- * The tool kinds carry the SAME display-descriptor fields the session
- * TOOL_CALL/TOOL_RESULT frames do (argsSummary = the registry-resolved fold,
- * display = the declared ToolDisplayWire parts, startLine = the edit's
- * landing line). The subagent transcript renders through the same
- * MessageListManager a session rides, so the posture data must ride here too
- * (owner ruling 2026-11-13: viewing a subagent renders like any session
- * view); the relay resolves them from the worker agent's own tool registry
- * via taskActivityWithPosture in wire-messages.ts -- the s2cToolCall/
- * s2cToolResult computation, not a copy. Fully additive optional fields: a
- * tool with no declared display parts rides no `display` (the fold it does
- * ride is the hint-free one the session frame computes too -- parity, not
- * presence), and old clients ignore what they do not know.
- *
- * `user` carries two provenances the settled fold reads from the log (owner
- * ruling 2026-11-15: the transcript opens with the delegated task prompt,
- * exactly once per task, under both authorities): the FIRST `input` entry of
- * any origin is the delegated task prompt and renders as the leading row,
- * while later entries surface only with `origin` "user" (a human follow-up
- * the task received, TaskManager.sendFollowUp -> the worker's steering seam).
- * Other non-user origins (harness injections, unknown legacy rows after the
- * prompt) stay out. The LIVE relay carries neither lane -- the worker's
- * OUTPUT_EVENT.USER_MESSAGE has no provenance, so the relay could not tell
- * the composed task prompt from a human steer -- the live view seeds its
- * prompt row client-side from TaskInfoWire.description, and the fold's
- * replace (the settle flip) hands the pane the log's own version.
- * Additive: an old client ignores the kind.
- *
- * `usage` is the footer attestation (owner ruling 2026-11-15: a subagent
- * transcript's response rows carry the same footer a session view shows --
- * clock time, ctx gauge, producing call, turn total). It renders no lane of
- * its own; the client folds its numbers into the footer of the assistant
- * message it closes. Live frames carry only what the TOKEN_USAGE event
- * attested (no `ts`: the client clocks the commit itself); the settled fold
- * derives every number SERVER-SIDE from the same primitives the session cold
- * view runs (@utils/session-turns.ts ctxByIndex / turnFinalDurationsByIndex /
- * deriveCallDurationsByIndex / parseEntryTs), stamped on the item that closes
- * the entry, so the settled transcript's footer equals the session view's for
- * the same log. Absent fields are omitted, never invented: a log with no
- * usable token_usage record renders no usage item at all.
- */
-export type TaskActivityWire =
-  | { kind: "text"; content: string }
-  | { kind: "reasoning"; content: string }
-  | { kind: "user"; content: string }
-  | {
-      kind: "tool_call";
-      name: string;
-      args: string;
-      /** s2cToolCall's fold, tri-state on purpose: "" = "no summary, no
-       *  client fallback header" (the declaring tool's parts are the story). */
-      argsSummary?: string;
-      /** Declared display parts, forwarded exactly like the session frame. */
-      display?: ToolDisplayWire[];
-    }
-  | {
-      kind: "tool_result";
-      name: string;
-      output: string;
-      error?: string;
-      /** Where the edit landed (positive integer gate, see s2cToolResult):
-       *  numbers the diff gutters with real file lines. */
-      startLine?: number;
-    }
-  | {
-      kind: "usage";
-      /** Settled fold only: the log ts (epoch ms) of the response this call
-       *  closed -- the footer's clock. Live frames ride none: the client
-       *  clocks its own commit, exactly like every other live footer. */
-      ts?: number;
-      /** Settled fold only, and only on the response that CLOSED a turn:
-       *  the turn's wall-clock total (the "Worked for" segment). */
-      durationMs?: number;
-      /** The ctx gauge attested at this message's commit (session CtxUsage
-       *  semantics, minus callMs -- the display number rides beside it). */
-      ctx?: Omit<CtxUsage, "callMs">;
-      /** The producing call's own wall time: the usage record's durationMs
-       *  first, else the strict-adjacency log-gap derivation. */
-      callMs?: number;
-      /** `callMs` is that derivation, not a recorded measurement -- the
-       *  tooltip says so instead of dressing it up. */
-      callDerived?: boolean;
-    }
-  | { kind: "reset" };
-
-/**
- * Ceiling on relayed tool args/output per activity item. Task agents can emit
- * megabyte tool results; the webui transcript view shows a summary, and the socket should not
- * carry whole file dumps.
- */
-export const MAX_TASK_ACTIVITY_CHARS = 4000;
 
 /**
  * Preview ceiling on a `streamingToolCall` frame's accumulated args (see
@@ -1096,217 +1018,6 @@ export const MAX_TASK_ACTIVITY_CHARS = 4000;
  * `toolCall` frame carries the complete args either way.
  */
 export const MAX_STREAMING_TOOL_CALL_ARGS_CHARS = 2000;
-
-function truncateActivity(value: string): string {
-  if (value.length <= MAX_TASK_ACTIVITY_CHARS) return value;
-  return `${value.slice(0, MAX_TASK_ACTIVITY_CHARS)}...[truncated]`;
-}
-
-/** A recorded usage number counts as attested only when finite and > 0;
- *  0/absent means the provider said nothing (the ctxByIndex/ctxFromUsage
- *  gate, restated here so live frames and log-fold footers agree). */
-function attestedNumber(n: unknown): number | undefined {
-  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-/** A bare breakdown number: 0 is a real value here (e.g. nothing cached),
- *  so only non-numbers/NaN drop the field (the CtxUsage gate). */
-function recordedNumber(n: unknown): number | undefined {
-  return typeof n === "number" && Number.isFinite(n) ? n : undefined;
-}
-
-/**
- * Serialize one task-agent OutputEvent into a wire activity payload, or null when the
- * event is not part of the webui subagent view (session plumbing, the
- * provenance-less USER_MESSAGE lane...). Reasoning deltas get their own kind
- * for separate styling. TOKEN_USAGE rides the additive `usage` footer
- * attestation (owner ruling 2026-11-15): a RUNNING viewed subagent folds it
- * into the footer of each call's row exactly like the session view folds the
- * session TOKEN_USAGE frame -- gauge numbers gated like ctxByIndex, call time
- * only when the event measured one, no `ts` (the client clocks live commits).
- * The task id is NOT part of payload -- the enclosing taskActivity message has it (see taskActivityMessage).
- */
-export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | null {
-  switch (event.type) {
-    case OUTPUT_EVENT.STREAMING_CHUNK:
-    case OUTPUT_EVENT.ASSISTANT_MESSAGE:
-      return event.content ? { kind: "text", content: event.content } : null;
-    case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
-      return event.content ? { kind: "reasoning", content: event.content } : null;
-    case OUTPUT_EVENT.STREAM_RESET:
-      // The relay's counterpart of the main-chat streamReset S2C: the dead
-      // attempt's streamed fragments must retract in the subagent transcript too.
-      return { kind: "reset" };
-    case OUTPUT_EVENT.TOKEN_USAGE: {
-      // Same acceptance gates as ctxByIndex/ctxFromUsage (the session
-      // footer's sources): the gauge exists only with an attested used;
-      // breakdown numbers count 0 as a value; the call time rides whenever
-      // the event measured one. All numbers -- nothing unbounded rides here.
-      const item: Extract<TaskActivityWire, { kind: "usage" }> = { kind: "usage" };
-      const used = attestedNumber(event.totalTokens);
-      const total = attestedNumber(event.contextWindow);
-      const cached = recordedNumber(event.cachedTokens);
-      const prompt = recordedNumber(event.promptTokens);
-      const completion = recordedNumber(event.completionTokens);
-      const callMs = recordedNumber(event.durationMs);
-      if (used !== undefined) {
-        item.ctx = {
-          used,
-          ...(total !== undefined ? { total } : {}),
-          ...(cached !== undefined ? { cached } : {}),
-          ...(prompt !== undefined ? { prompt } : {}),
-          ...(completion !== undefined ? { completion } : {}),
-        };
-      }
-      if (callMs !== undefined) item.callMs = callMs;
-      return item;
-    }
-    case OUTPUT_EVENT.TOOL_CALL:
-      return { kind: "tool_call", name: event.toolName, args: truncateActivity(event.input) };
-    case OUTPUT_EVENT.TOOL_RESULT: {
-      const wire: TaskActivityWire = {
-        kind: "tool_result",
-        name: event.toolName,
-        output: truncateActivity(toolContentText(event.content)),
-      };
-      if (event.error !== undefined) wire.error = truncateActivity(event.error);
-      return wire;
-    }
-    default:
-      return null;
-  }
-}
-
-/**
- * The settled-task counterpart of taskActivityFromEvent: fold a durable
- * session log (readSessionEntries' EPOCH view -- the same cold-log read the
- * session replay and /export ride) into transcript items. Doctrine: a viewed
- * subagent is a session view, and a FINISHED subagent is a finished session,
- * so a settled task's full transcript replays from its own session log while
- * the in-memory buffer (300-item ring, reset-trim, whole-task eviction)
- * serves only live tasks. ONE authority per task state, chosen server-side in
- * handleTaskActivityRequest -- the client keeps its single render path and
- * can never double-render.
- *
- * Per-entry mapping mirrors replayLogSlice's log semantics but keeps the
- * RELAY's item order (reasoning -> text -> usage -> calls): the transcript
- * view was painted live in relay order (the TOKEN_USAGE event lands after the
- * streamed response and before that call's tool frames), and a settled replay
- * must look identical.
- * The `user` kind surfaces twice over (owner ruling 2026-11-15): the FIRST
- * `input` entry -- whatever its origin, composed "model" prompts and legacy
- * origin-less rows alike -- is the delegated task prompt and folds as the
- * leading row, exactly once per task; later `input` entries surface only with
- * `origin` "user" (the steering lane, the one place a human follow-up
- * survives -- the live relay cannot carry one, its USER_MESSAGE event has no
- * provenance). Other non-user-origin INPUTs (harness injections, unknown
- * legacy rows behind the prompt) stay excluded: unknown is never guessed.
- * `token_usage` records fold into the additive `usage` footer item stamped on
- * the entry they close (same ruling: the settled transcript's footer equals
- * the session view's). The numbers come from the session cold-log primitives
- * -- ctxByIndex for the gauge, turnFinalDurationsByIndex for the turn total
- * on the bracket-closing entry, deriveCallDurationsByIndex for a call time
- * the record did not measure (flagged `callDerived`), parseEntryTs for the
- * clock -- so the same log yields the same footer bytes on both surfaces.
- * A call whose usage the provider kept private gets NO item: absent fields
- * are omitted, never invented, and logs without usable token_usage render
- * exactly as they did before this ruling. system_prompt and the other
- * bookkeeping markers still render nothing: fabricating a lane would paint a
- * transcript the live view never showed.
- * Tool-result names resolve tool_name -> the producing llm entry's call name
- * (old logs predate tool_name; replay's own resolution) -> "unknown". Texts
- * ride the same MAX_TASK_ACTIVITY_CHARS cap as the live relay (one surface,
- * one ceiling). Display-DSL posture is deliberately NOT folded here: the
- * cold browse (handleViewLog) resolves it at entry level for the full log
- * view; the task transcript's fold would need the released worker's registry,
- * which no longer exists -- a settled block renders the honest hint-free fold
- * the client computes from the args.
- */
-export function taskActivityFromLogEntries(
-  entries: Array<{ source?: unknown } & Record<string, unknown>>,
-): TaskActivityWire[] {
-  const callNames = new Map<string, string>();
-  for (const e of entries) {
-    if (e.source !== LOG_SOURCE.LLM || !Array.isArray(e.tool_calls)) continue;
-    for (const tc of e.tool_calls as Array<{ id?: string; function?: { name?: string } }>) {
-      if (tc?.id && tc.function?.name) callNames.set(tc.id, tc.function.name);
-    }
-  }
-  // The session footer primitives, run over the SAME entries the session
-  // cold view runs them over -- parity by shared derivation, not by copy.
-  const usageEntries = entries as ReadonlyArray<
-    { source?: string | null; ts?: string | null } & Record<string, unknown>
-  >;
-  const ctxs = ctxByIndex(usageEntries);
-  const turnFinalMs = turnFinalDurationsByIndex(usageEntries);
-  const derivedCallMs = deriveCallDurationsByIndex(usageEntries);
-  const items: TaskActivityWire[] = [];
-  let promptLaneDone = false;
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i]!;
-    if (e.source === LOG_SOURCE.LLM) {
-      const reasoning = e.reasoning_content;
-      if (typeof reasoning === "string" && reasoning !== "") {
-        items.push({ kind: "reasoning", content: truncateActivity(reasoning) });
-      }
-      const text = wrapperContentText(conversationContent(e as never));
-      if (text !== "") items.push({ kind: "text", content: truncateActivity(text) });
-      // The footer attestation, stamped where the TOKEN_USAGE event lands in
-      // the live sink: after the response, before its calls. Only a call with
-      // an attested gauge gets one (ctxByIndex's own gate) -- a log without
-      // usable usage records gains no item and renders exactly as before.
-      const usage = ctxs[i];
-      if (usage !== undefined) {
-        const derived = usage.callMs === undefined ? derivedCallMs[i] : undefined;
-        const displayCallMs = usage.callMs ?? derived;
-        const ts = parseEntryTs(e.ts);
-        const worked = turnFinalMs[i];
-        const { callMs: _recorded, ...gauge } = usage;
-        items.push({
-          kind: "usage",
-          ...(ts !== undefined ? { ts } : {}),
-          ...(worked !== undefined ? { durationMs: worked } : {}),
-          ctx: gauge,
-          ...(displayCallMs !== undefined ? { callMs: displayCallMs } : {}),
-          ...(derived !== undefined ? { callDerived: true } : {}),
-        });
-      }
-      const calls = Array.isArray(e.tool_calls)
-        ? (e.tool_calls as Array<{ id?: string; name?: string; function?: { name?: string; arguments?: string } }>)
-        : [];
-      for (const tc of calls) {
-        const name = tc?.function?.name || tc?.name || "unknown";
-        const rawArgs = tc?.function?.arguments ?? (typeof (tc as { arguments?: unknown }).arguments === "string" ? (tc as { arguments: string }).arguments : "{}");
-        items.push({ kind: "tool_call", name, args: truncateActivity(rawArgs) });
-      }
-    } else if (e.source === LOG_SOURCE.TOOL_RESULT) {
-      const callId = typeof e.tool_call_id === "string" ? e.tool_call_id : undefined;
-      const name =
-        (typeof e.tool_name === "string" && e.tool_name !== "" ? e.tool_name : undefined) ||
-        (callId ? callNames.get(callId) : undefined) ||
-        "unknown";
-      items.push({
-        kind: "tool_result",
-        name,
-        output: truncateActivity(toolContentText(conversationContent(e as never))),
-      });
-    } else if (e.source === LOG_SOURCE.INPUT) {
-      // The FIRST input is the delegated task prompt -- whatever its origin
-      // (composed "model" prompts and legacy origin-less rows alike) -- and it
-      // folds exactly once, as the leading user row. Later inputs join the
-      // user lane only with provenance "user": a human steer. Harness fuel
-      // and unknown-origin rows behind the prompt stay out.
-      const isPrompt = !promptLaneDone;
-      if (isPrompt) promptLaneDone = true;
-      if (isPrompt || e.origin === "user") {
-        const row = wrapperContentText(conversationContent(e as never));
-        if (row !== "") items.push({ kind: "user", content: truncateActivity(row) });
-      }
-    }
-    // Every other source is bookkeeping or a lane the live relay never had.
-  }
-  return items;
-}
 
 /**
  * Reply to a C2S taskInterrupt/taskFollowup request, sent to the requesting
@@ -1336,14 +1047,4 @@ export function taskControlMessage(
   const wire: TaskControlWire = { type: S2C.TASK_CONTROL, taskId, action, ok };
   if (error !== undefined) wire.error = error;
   return wire;
-}
-
-/** The broadcast envelope: every activity message is tagged with its task id. */
-export function taskActivityMessage(
-  taskId: string,
-  event: OutputEvent,
-): { type: string; taskId: string; activity: TaskActivityWire } | null {
-  const activity = taskActivityFromEvent(event);
-  if (!activity) return null;
-  return { type: S2C.TASK_ACTIVITY, taskId, activity };
 }

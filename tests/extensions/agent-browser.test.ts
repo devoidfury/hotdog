@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { deflateSync } from "node:zlib";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
@@ -686,6 +686,35 @@ describe("screenshot", () => {
     expect(r.images).toHaveLength(1);
     expect(String(r.output)).toContain(join(tmpdir(), "hotdog-agent-browser-"));
     expect(readdirSync(SESSIONS_TMP).filter((f) => f.includes("escape"))).toEqual([]);
+    // The test cleans up after itself: the fallback dir is named in the label.
+    const saved = /(\S*hotdog-agent-browser-[^ ]+\.png) \(/.exec(String(r.output));
+    if (saved) rmSync(dirname(saved[1]!), { recursive: true, force: true });
+  });
+
+  it("fallback saves collapse to ONE dir per tool instance, not one per save (ENOSPC hunt)", async () => {
+    const prefix = "hotdog-agent-browser-";
+    const before = new Set(readdirSync(tmpdir()).filter((d) => d.startsWith(prefix)));
+    const sneaky = "../escape";
+    try {
+      const { tool } = toolWithShots([TINY_PNG_B64, TINY_PNG_B64]);
+      await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor(sneaky));
+      await tool.execute({ action: "screenshot" }, ctxFor(sneaky, VISION_REGISTRY));
+      await new Promise((r) => setTimeout(r, 2)); // filenames carry ms; keep them distinct
+      await tool.execute({ action: "screenshot" }, ctxFor(sneaky, VISION_REGISTRY));
+      // A second activation is a separate fallback dir (age sweep reclaims
+      // dead processes' dirs; live ones are never each other's food).
+      const { tool: tool2 } = toolWithShots([TINY_PNG_B64]);
+      await tool2.execute({ action: "open", url: PUBLIC_URL }, ctxFor(sneaky));
+      await tool2.execute({ action: "screenshot" }, ctxFor(sneaky, VISION_REGISTRY));
+      const fresh = readdirSync(tmpdir()).filter((d) => d.startsWith(prefix) && !before.has(d));
+      expect(fresh).toHaveLength(2); // THREE saves, two dirs: per-activation, not per-save
+      const files = fresh.flatMap((d) => readdirSync(join(tmpdir(), d)));
+      expect(files).toHaveLength(3);
+    } finally {
+      for (const d of readdirSync(tmpdir()).filter((x) => x.startsWith(prefix) && !before.has(x))) {
+        rmSync(join(tmpdir(), d), { recursive: true, force: true });
+      }
+    }
   });
 });
 

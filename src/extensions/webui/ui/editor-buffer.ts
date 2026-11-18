@@ -188,6 +188,17 @@ export function bufferFromContent(content: string): TextBuffer {
 const joinContent = (lines: string[], endsNL: boolean): string =>
   lines.join("\n") + (endsNL ? "\n" : "");
 
+/** HOT EXIT overlay: the buffer's content is PRESERVED (stashed) text while
+ *  the baseline stays the current DISK text, so the dirty flag rides the
+ *  usual content-derived rule -- text that re-serializes equal to disk reads
+ *  CLEAN (nothing to keep), anything else reads dirty and the save gate sees
+ *  the real bytes. */
+export function bufferFromStash(stashText: string, diskContent: string): TextBuffer {
+  const buf = bufferFromContent(stashText);
+  const dirty = buf.baseline !== diskContent;
+  return dirty ? { ...buf, baseline: diskContent, dirty } : buf;
+}
+
 /** The exact bytes to save. */
 export function contentOf(buf: TextBuffer): string {
   return joinContent(buf.lines, buf.endsNL);
@@ -543,7 +554,12 @@ export function deleteForward(buf: TextBuffer, time: number): TextBuffer {
   return applyCaretDeletes(buf, edits, time);
 }
 
-function applyCaretDeletes(buf: TextBuffer, edits: SelRange[], time: number): TextBuffer {
+function applyCaretDeletes(
+  buf: TextBuffer,
+  edits: SelRange[],
+  time: number,
+  kind: "typing" | "block" = "typing",
+): TextBuffer {
   let changed = false;
   for (let i = 0; i < buf.sels.length; i++) {
     if (!eqPos(edits[i]!.head, buf.sels[i]!.head)) changed = true;
@@ -571,7 +587,7 @@ function applyCaretDeletes(buf: TextBuffer, edits: SelRange[], time: number): Te
     primaryBefore: buf.primary,
     selsAfter,
     primaryAfter: buf.primary,
-    kind: "typing",
+    kind,
     time,
   };
   return stampDirty({ ...buf, lines, sels: selsAfter, primary: buf.primary, undo: mergeUndoStep(buf.undo, step), redo: [] });
@@ -613,6 +629,13 @@ export function setCaret(buf: TextBuffer, target: Pos): TextBuffer {
   const p = clampPos(buf.lines, target);
   const caret: SelRange = { anchor: p, head: p };
   return { ...buf, sels: [caret], primary: 0 };
+}
+
+/** One range selection (the find-match select, anything that must paint a
+ *  span rather than a caret): the list collapses to the single range,
+ *  anchor at `from`, head at `to` (direction preserved for shift-extend). */
+export function selectRange(buf: TextBuffer, from: Pos, to: Pos): TextBuffer {
+  return { ...buf, sels: [{ anchor: clampPos(buf.lines, from), head: clampPos(buf.lines, to) }], primary: 0 };
 }
 
 /** Shift-arrow / shift-click / drag: extend (or start) the PRIMARY range. */
@@ -1195,6 +1218,329 @@ export function backspaceSmart(buf: TextBuffer, time: number): TextBuffer {
     undo: mergeUndoStep(buf.undo, step),
     redo: [],
   });
+}
+
+// ── Word-wise movement and delete (alt+Arrow / alt+Backspace|Delete) ───────
+// VS Code-ish three-class walk, SHARED by movement and delete: each code
+// point is an IDENTIFIER ([\p{L}\p{N}_], unicode -- the same class the find
+// widget's whole-word filter uses, so CJK reads as one identifier run and
+// surrogate pairs read whole), WHITESPACE, or PUNCTUATION (neither).
+// Forward: consume the run AT the caret; if that run is whitespace, keep
+// going into the next non-whitespace run (VS Code never stops mid-gap).
+// Backward is the mirror. The line-crossing rule is the plain arrow's:
+// Right at EOL -> next line col 0, Left at col 0 -> previous line's end;
+// the buffer edge is a dead key (no move, no delete, no undo step).
+
+type WordCls = 0 | 1 | 2; // 0 ws, 1 identifier, 2 punctuation
+const WORD_CH = /[\p{L}\p{N}_]/u;
+
+/** The class of the code point STARTING at column `i` (pair whole), and of
+ *  the code point ENDING at column `i` -- movement only ever starts from a
+ *  boundary, but a stray mid-pair column reads the whole pair anyway. */
+const clsRight = (line: string, i: number): WordCls | undefined => {
+  if (i >= line.length) return undefined;
+  const a = line.charCodeAt(i);
+  const s = a >= 0xd800 && a <= 0xdbff && line.charCodeAt(i + 1) >= 0xdc00 && line.charCodeAt(i + 1) <= 0xdfff
+    ? line.slice(i, i + 2)
+    : line[i]!;
+  return /\s/.test(s) ? 0 : WORD_CH.test(s) ? 1 : 2;
+};
+const clsLeft = (line: string, i: number): WordCls | undefined => {
+  if (i <= 0) return undefined;
+  const a = line.charCodeAt(i - 2);
+  const s = a >= 0xd800 && a <= 0xdbff && line.charCodeAt(i - 1) >= 0xdc00 && line.charCodeAt(i - 1) <= 0xdfff
+    ? line.slice(i - 2, i)
+    : line[i - 1]!;
+  return /\s/.test(s) ? 0 : WORD_CH.test(s) ? 1 : 2;
+};
+
+/** Next word boundary right of `col` (never < col; EOL is its own stop --
+ *  the caller owns the line crossing). */
+export function forwardWordCol(line: string, col: number): number {
+  let i = Math.max(0, Math.min(col, line.length));
+  const at = clsRight(line, i);
+  if (at === undefined) return i; // already at EOL
+  if (at === 0) {
+    // Gap first, then the run it hides -- but if only a gap remains, the gap
+    // alone is the move (land at EOL, do not cross lines from mid-gap).
+    while (i < line.length && clsRight(line, i) === 0) i++;
+    if (i >= line.length) return i;
+  }
+  const cls = clsRight(line, i);
+  while (i < line.length && clsRight(line, i) === cls) i++;
+  return i;
+}
+
+/** Next word boundary left of `col` (never > col; col 0 is its own stop). */
+export function backwardWordCol(line: string, col: number): number {
+  let i = Math.max(0, Math.min(col, line.length));
+  const at = clsLeft(line, i);
+  if (at === undefined) return i; // already at col 0
+  if (at === 0) {
+    while (i > 0 && clsLeft(line, i) === 0) i--;
+    if (i <= 0) return i;
+  }
+  const cls = clsLeft(line, i);
+  while (i > 0 && clsLeft(line, i) === cls) i--;
+  return i;
+}
+
+/** alt+ArrowLeft/Right: word-wise move of the PRIMARY caret (the standard
+ *  multi-caret collapse the plain arrows already ride), Shift extends. */
+export function moveWordHorizontal(buf: TextBuffer, dir: -1 | 1, extend: boolean): TextBuffer {
+  const head = clampPos(buf.lines, primarySel(buf).head);
+  const line = buf.lines[head.line]!;
+  let target: Pos;
+  if (dir === 1) {
+    const to = forwardWordCol(line, head.col);
+    target = to > head.col
+      ? { line: head.line, col: to }
+      : head.line < buf.lines.length - 1
+        ? { line: head.line + 1, col: 0 }
+        : head;
+  } else {
+    const to = backwardWordCol(line, head.col);
+    target = to < head.col
+      ? { line: head.line, col: to }
+      : head.line > 0
+        ? { line: head.line - 1, col: buf.lines[head.line - 1]!.length }
+        : head;
+  }
+  return extend ? extendPrimary(buf, target) : setCaret(buf, target);
+}
+
+/** alt+Backspace / alt+Delete: delete to the word boundary PER CARET, ONE
+ *  block undo step (deliberately NOT the typing kind: a word delete is a
+ *  structural edit, never coalesced into an adjacent typing run). With any
+ *  selection the selection goes instead (the plain-delete doctrine). A caret
+ *  at a buffer edge contributes a zero-width range (it survives the op and
+ *  its caret stays put); when NO caret can delete anything the key is dead:
+ *  no step, no dirty, identity. */
+export function deleteWord(buf: TextBuffer, dir: -1 | 1, time: number): TextBuffer {
+  if (buf.sels.some(hasSelection)) {
+    return performTx(buf, () => "", (entry) => ({ anchor: entry.edit.from, head: entry.edit.from }), { kind: "block", time });
+  }
+  // The applyCaretDeletes machine (same as plain backspace/Delete, so a
+  // dead caret SURVIVES with its position and the undo step restores the
+  // CARETS, not staged ranges -- a performTx staging would leak the
+  // staged span back as a selection on undo): edits carry the caret's head
+  // at the word boundary, EOL/col-0 ride the line-break merge, buffer
+  // edges leave the head untouched (a dead caret contributes nothing).
+  const edits = buf.sels.map((r) => {
+    const p = clampPos(buf.lines, r.head);
+    const line = buf.lines[p.line]!;
+    let head: Pos;
+    if (dir === 1) {
+      if (p.col >= line.length) head = p.line < buf.lines.length - 1 ? { line: p.line + 1, col: 0 } : p;
+      else head = { line: p.line, col: forwardWordCol(line, p.col) };
+    } else {
+      if (p.col <= 0) head = p.line > 0 ? { line: p.line - 1, col: buf.lines[p.line - 1]!.length } : p;
+      else head = { line: p.line, col: backwardWordCol(line, p.col) };
+    }
+    return { anchor: p, head };
+  });
+  return applyCaretDeletes(buf, edits, time, "block");
+}
+
+// ── Select inside quotes (the innermost pair containing the primary caret) ─
+// Single, double, backtick. Each quote char is scanned INDEPENDENTLY with
+// backslash-escape awareness (an escaped quote never opens or closes a run),
+// pairs are consecutive unescaped occurrences, and every CLOSED pair that
+// strictly contains the caret is a candidate -- the SMALLEST span wins, so
+// the b in `f('a "b|c" d')` selects `b|c` rather than the outer `'...'`.
+// Quotes never span lines (the matchScan's stated ceiling, same rule). An
+// unpaired quote, or a caret on/outside every pair, is an honest no-op.
+
+/** The innermost closed quote pair on `line` strictly containing column
+ *  `col`: the content range (quote chars excluded). Undefined when nothing
+ *  contains the caret. */
+export function quoteContentRange(line: string, col: number): { from: number; to: number } | undefined {
+  const p = Math.max(0, Math.min(col, line.length));
+  let best: { from: number; to: number } | undefined;
+  for (const q of ['"', "'", "`"]) {
+    let start = -1;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]!;
+      if (c === "\\") {
+        i++; // the escaped char (whatever it is) is inert
+        continue;
+      }
+      if (c !== q) continue;
+      if (start >= 0) {
+        if (p > start && p < i) {
+          const span = { from: start + 1, to: i };
+          if (!best || span.to - span.from < best.to - best.from) best = span;
+        }
+        start = -1; // pairs never nest per char: this run closed
+      } else {
+        start = i;
+      }
+    }
+  }
+  return best;
+}
+
+/** PRIMARY-caret only (stated): expand the selection to the content of the
+ *  innermost quote/backtick pair containing the primary caret; no-op when
+ *  the caret sits in no closed pair. Selection move, so no undo step and no
+ *  dirty, like every other caret op. */
+export function selectInsideQuotes(buf: TextBuffer): TextBuffer {
+  const head = clampPos(buf.lines, primarySel(buf).head);
+  const span = quoteContentRange(buf.lines[head.line]!, head.col);
+  if (!span) return buf;
+  return selectRange(buf, { line: head.line, col: span.from }, { line: head.line, col: span.to });
+}
+
+// ── Line-comment toggle (Ctrl/Cmd+/) ───────────────────────────────────────
+// The session's paint lang decides the token; the keys are file-view's own
+// lang names. A lang with NO line comment (css/html/xml are block-only,
+// json has no comments at all, diff/markdown/plain are not commentable) is
+// an honest no-op -- NO block-comment fallback is invented, per spec.
+//
+// Semantics: the PRIMARY selection's line block; if ANY line of the block
+// is commented the whole block uncomments (the commented ones lose the
+// token plus ONE trailing space, exactly what commenting inserted), else
+// every line comments: the token + a space goes AFTER the leading
+// whitespace. Whitespace-only lines are never touched (they carry no code,
+// and it keeps "// " litter off the blanks -- an all-blank block is a dead
+// key). Carets on touched lines shift by what the line gained or lost; one
+// block undo step.
+
+/** lang -> line-comment token. Absent (or unknown lang, or none) = the
+ *  toggle is an honest no-op. Keys are fileViewLangChoices()' names. */
+export const LINE_COMMENT_BY_LANG: Record<string, string> = {
+  c: "//",
+  cpp: "//",
+  csharp: "//",
+  dart: "//",
+  go: "//",
+  groovy: "//",
+  java: "//",
+  javascript: "//",
+  kotlin: "//",
+  php: "//",
+  protobuf: "//",
+  rust: "//",
+  scss: "//", // SCSS ships // lines (plain css is block-only -> absent)
+  swift: "//",
+  typescript: "//",
+  zig: "//",
+  cmake: "#",
+  crystal: "#",
+  dockerfile: "#",
+  elixir: "#",
+  env: "#",
+  gitignore: "#",
+  graphql: "#",
+  hcl: "#",
+  ini: "#",
+  make: "#",
+  nix: "#",
+  python: "#",
+  ruby: "#",
+  shell: "#",
+  toml: "#",
+  yaml: "#",
+  lua: "--",
+  sql: "--",
+  erlang: "%",
+};
+
+export const lineCommentToken = (lang: string | undefined): string | undefined =>
+  lang === undefined ? undefined : LINE_COMMENT_BY_LANG[lang];
+
+/** The column a comment token goes at: after the line's leading whitespace
+ *  (a whitespace-only line reports its own end -> it never gets a token). */
+const commentCol = (line: string): number => leadingWs(line).length;
+
+export function toggleLineComment(buf: TextBuffer, lang: string | undefined, time: number): TextBuffer {
+  const token = lineCommentToken(lang);
+  if (token === undefined) return buf; // json/unknown/block-only: honest no-op
+  const sel = primarySel(buf);
+  const from = clampPos(buf.lines, normFrom(sel));
+  const to = clampPos(buf.lines, normTo(sel));
+  const codeLines: number[] = [];
+  for (let l = from.line; l <= to.line; l++) if (buf.lines[l]!.trim() !== "") codeLines.push(l);
+  if (codeLines.length === 0) return buf; // a blank block is a dead key
+  const isCommented = (l: number): boolean => buf.lines[l]!.startsWith(token, commentCol(buf.lines[l]!));
+  const uncomment = codeLines.some(isCommented); // ANY -> uncomment (pinned rule)
+  // Descending apply keeps every not-yet-touched line's coordinates valid
+  // (the dedentLines pattern: per-line edits outside the selection
+  // mechanism, still one UndoStep through the same primitives).
+  let lines = buf.lines;
+  const entries: TxEntry[] = [];
+  const deltas = new Map<number, number>();
+  for (const l of [...codeLines].sort((x, y) => y - x)) {
+    const line = lines[l]!;
+    const col = commentCol(line);
+    if (uncomment) {
+      if (!line.startsWith(token, col)) continue; // only the commented ones lose it
+      const cut = token.length + (line[col + token.length] === " " ? 1 : 0);
+      const { lines: next, entry } = applyEdit(lines, { line: l, col }, { line: l, col: col + cut }, "");
+      lines = next;
+      entries.push(entry);
+      deltas.set(l, -cut);
+    } else {
+      const { lines: next, entry } = applyEdit(lines, { line: l, col }, { line: l, col }, token + " ");
+      lines = next;
+      entries.push(entry);
+      deltas.set(l, token.length + 1);
+    }
+  }
+  if (entries.length === 0) return buf;
+  const shift = (p: Pos): Pos => {
+    const d = deltas.get(p.line);
+    return d === undefined ? p : { line: p.line, col: Math.max(0, p.col + d) };
+  };
+  const selsAfter = buf.sels.map((r) => ({ anchor: shift(r.anchor), head: shift(r.head) }));
+  const step: UndoStep = {
+    entries,
+    selsBefore: buf.sels,
+    primaryBefore: buf.primary,
+    selsAfter,
+    primaryAfter: buf.primary,
+    kind: "block",
+    time,
+  };
+  return stampDirty({ ...buf, lines, sels: selsAfter, primary: buf.primary, undo: [...buf.undo, step], redo: [] });
+}
+
+// ── Duplicate line (Ctrl+Shift+D; alt+Shift+Down is taken by add-caret) ────
+// Per caret: the caret's line is duplicated below it and the caret rides
+// the COPY (VS Code's shape). Selections collapse to carets -- this chord
+// is line geometry, the selection extent is irrelevant. Two carets on one
+// line duplicate it ONCE (identical insert points dedupe) and both carets
+// land on the copy at their own columns. ONE block undo step.
+export function duplicateLine(buf: TextBuffer, time: number): TextBuffer {
+  const heads = buf.sels.map((r) => clampPos(buf.lines, r.head));
+  const targets = [...new Set(heads.map((h) => h.line))];
+  const ascending = [...targets].sort((x, y) => x - y);
+  // Descending: the dedent/applyEdit discipline (disjoint edits, LIFO-safe).
+  let lines = buf.lines;
+  const entries: TxEntry[] = [];
+  for (const l of ascending.slice().reverse()) {
+    const eol = { line: l, col: buf.lines[l]!.length };
+    const { lines: next, entry } = applyEdit(lines, eol, eol, "\n" + buf.lines[l]!);
+    lines = next;
+    entries.push(entry);
+  }
+  // The caret lands on the COPY: its own line plus one, plus every copy
+  // inserted BELOW it (those pushed the caret's own line down too).
+  const newLine = (l: number): number => l + 1 + ascending.indexOf(l);
+  const selsAfter = heads.map((h) => {
+    const p = { line: newLine(h.line), col: h.col };
+    return { anchor: p, head: p };
+  });
+  const step: UndoStep = {
+    entries,
+    selsBefore: buf.sels,
+    primaryBefore: buf.primary,
+    selsAfter,
+    primaryAfter: buf.primary,
+    kind: "block",
+    time,
+  };
+  return stampDirty({ ...buf, lines, sels: selsAfter, primary: buf.primary, undo: [...buf.undo, step], redo: [] });
 }
 
 // ── Matched-bracket highlight ──────────────────────────────────────────────

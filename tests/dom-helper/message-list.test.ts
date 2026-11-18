@@ -1947,10 +1947,12 @@ describe("live activity: the Thinking row", () => {
     expect(container.children).toHaveLength(0);
   });
 
-  it("the subagent task feed never arms it: that view gets no working edges", () => {
-    // feedTaskActivity shares this manager for tool frames but never calls
-    // noteWorking/setRequestPending -- the tell is scoped to the viewed live
-    // session, so a round of subagent activity stays row-free.
+  it("a bare tool round with no working attestation leaves no tell", () => {
+    // The tell is attestation-driven: only setRequestPending (send) and
+    // noteWorking (the viewed session's `working` sessionState, chat.ts) arm
+    // it. A round of tool frames carrying neither stays row-free -- the
+    // pre-B4 task feed used to paint tool frames into this same manager
+    // without ever calling either.
     ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"' });
     ml.handleToolCall({ name: "bash", args: '{"command":"ls"}', toolCallId: "t1" });
     ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "t1" });
@@ -2099,5 +2101,297 @@ describe("live activity: the in-flight tool bubble", () => {
     ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"pwd"' });
     expect(bubbles()).toHaveLength(1);
     expect(previews()[0]!.textContent).toBe('{"command":"pwd"'); // fresh, not appended
+  });
+});
+
+describe("lazy history: scroll-up trigger + prepend anchoring", () => {
+  type Geo = { scrollTop: number; scrollHeight: number; clientHeight: number };
+
+  /** Explicit geometry stub (allowed by the harness): scrollHeight grows a
+   *  fixed px per rendered child, like a real list laying out bubbles; the
+   *  returned setter bumps the base ("images landed" async growth). */
+  function withLaidOutHeight(c: HTMLElement, perChild = 100): (grown: number) => void {
+    let base = 0;
+    Object.defineProperty(c, "scrollHeight", {
+      configurable: true,
+      get: () => base + c.children.length * perChild,
+    });
+    return (grown: number) => { base += grown; };
+  }
+
+  function turn(tag: string): Array<{ source: string; content: string }> {
+    return [
+      { source: "input", content: `Q ${tag}` },
+      { source: "llm", content: `A ${tag}` },
+    ];
+  }
+
+  it("entering the top zone fires onNearTop ONCE per entry (leaving re-arms)", () => {
+    let fires = 0;
+    setup({ onNearTop: () => { fires++; } });
+    const c = container as unknown as Geo;
+    c.scrollHeight = 5000;
+    ml.setHasOlder(true);
+    c.scrollTop = 4000;
+    container.dispatchEvent(new Event("scroll")); // far from top: armed, no fire
+    expect(fires).toBe(0);
+    c.scrollTop = 80;
+    container.dispatchEvent(new Event("scroll")); // EDGE into the zone
+    expect(fires).toBe(1);
+    c.scrollTop = 20; // more events INSIDE the zone: no repeat
+    container.dispatchEvent(new Event("scroll"));
+    expect(fires).toBe(1);
+    c.scrollTop = 3000;
+    container.dispatchEvent(new Event("scroll"));
+    c.scrollTop = 80;
+    container.dispatchEvent(new Event("scroll")); // re-entry fires again
+    expect(fires).toBe(2);
+  });
+
+  it("the trigger is inert without hasOlder, and clear() disarms it", () => {
+    let fires = 0;
+    setup({ onNearTop: () => { fires++; } });
+    const c = container as unknown as Geo;
+    c.scrollHeight = 5000;
+    c.scrollTop = 4000;
+    container.dispatchEvent(new Event("scroll"));
+    c.scrollTop = 50;
+    container.dispatchEvent(new Event("scroll"));
+    expect(fires).toBe(0); // hasOlder was never attested
+    ml.setHasOlder(true);
+    // Re-armed INSIDE the zone by the attestation itself -- it must never
+    // fire retroactively; only the next entry-edge does.
+    expect(fires).toBe(0);
+    c.scrollTop = 3000;
+    container.dispatchEvent(new Event("scroll"));
+    c.scrollTop = 50;
+    container.dispatchEvent(new Event("scroll"));
+    expect(fires).toBe(1);
+    ml.clear();
+    c.scrollTop = 3000;
+    container.dispatchEvent(new Event("scroll"));
+    c.scrollTop = 50;
+    container.dispatchEvent(new Event("scroll"));
+    expect(fires).toBe(1); // clear() reset hasOlder with the view
+  });
+
+  it("a list that does not scroll never fires", () => {
+    let fires = 0;
+    setup({ onNearTop: () => { fires++; } });
+    const c = container as unknown as Geo;
+    c.scrollHeight = 500; // == clientHeight
+    ml.setHasOlder(true);
+    c.scrollTop = 0;
+    container.dispatchEvent(new Event("scroll"));
+    expect(fires).toBe(0);
+  });
+
+  it("prepend anchors the viewport: scrollTop += height delta, content lands on top", () => {
+    setup();
+    withLaidOutHeight(container);
+    (container as unknown as Geo).clientHeight = 300;
+    ml.renderLogEntries(turn("1").concat(turn("2")) as never);
+    const oldFirstChild = container.firstChild;
+    // The user is near the TOP of the window.
+    (container as unknown as Geo).scrollTop = 50;
+    container.dispatchEvent(new Event("scroll"));
+    ml.setHasOlder(true);
+    ml.renderOlderEntries(turn("0") as never);
+    // The older turn PREPENDS (log order on screen: old Q first).
+    expect(container.children).toHaveLength(6);
+    expect(container.children[0]!.textContent).toContain("Q 0");
+    // Anchor: 2 new children x 100px of height; the previously first visible
+    // child is still under the same scroll offset (50 -> 250, it sits at 200).
+    expect((container as unknown as Geo).scrollTop).toBe(250);
+    expect(container.childNodes[2] ?? null).toBe(oldFirstChild);
+  });
+
+  it("the restore's scroll event is not a user scroll: follow survives async growth", () => {
+    setup();
+    // A race: the page lands while the user is pinned at the bottom.
+    const grow = withLaidOutHeight(container);
+    (container as unknown as Geo).clientHeight = 500;
+    ml.renderLogEntries(turn("1") as never); // 2 children -> scrollHeight 200
+    (container as unknown as Geo).scrollTop = 0; // content fits: bottom = 0
+    container.dispatchEvent(new Event("scroll")); // follow engaged
+    ml.renderOlderEntries(turn("0") as never);
+    expect((container as unknown as Geo).scrollTop).toBe(200); // 0 + 200 delta
+    // Async image growth between the restore and its (deferred) scroll event.
+    // An unguarded listener would read distFromBottom > 150 as "the user
+    // scrolled up" and silently kill live auto-scroll.
+    grow(800);
+    container.dispatchEvent(new Event("scroll")); // the browser's async echo
+    // Follow SURVIVED the guarded event: a live append still pins to bottom.
+    ml.handleUserMessage({ content: "live stream" });
+    expect((container as unknown as Geo).scrollTop).toBe(800 + 5 * 100);
+  });
+
+  it("a page with a tool round pairs INSIDE the prepended block", () => {
+    setup();
+    withLaidOutHeight(container);
+    ml.renderLogEntries(turn("now") as never);
+    ml.renderOlderEntries([
+      { source: "input", content: "run it" },
+      {
+        source: "llm",
+        content: "",
+        tool_calls: [{ id: "c1", function: { name: "bash", arguments: '{"command":"ls"}' } }],
+      },
+      { source: "tool_result", content: "ok", tool_call_id: "c1" },
+    ] as never);
+    const block = container.querySelector(".tool-result-box")!;
+    expect(block.textContent).toContain("ok");
+    // The whole page landed ABOVE the window that was already on screen.
+    const kids = [...container.children];
+    const olderIdx = kids.findIndex((k) => k.textContent?.includes("run it"));
+    const newerIdx = kids.findIndex((k) => k.textContent?.includes("Q now"));
+    expect(olderIdx).toBeGreaterThanOrEqual(0);
+    expect(olderIdx).toBeLessThan(newerIdx);
+  });
+});
+
+// ── Jump-to-bottom button ───────────────────────────────────────────────────
+// The un-pinned view's affordance, mounted on the composer host the chat
+// layer hands in (the app's #input-area). followBottom is the single
+// predicate; the guarded restore must never touch the button.
+
+describe("jump-to-bottom button", () => {
+  type Geo = { scrollTop: number; scrollHeight: number; clientHeight: number };
+
+  function setupJump(opts?: Parameters<typeof createMessageList>[1]): HTMLElement {
+    const host = document.createElement("div");
+    setup({ ...opts, jumpHost: host });
+    return host;
+  }
+
+  function jumpBtn(host: HTMLElement): HTMLElement {
+    return host.querySelector(".jump-to-bottom") as HTMLElement;
+  }
+
+  /** Same geometry stub as the lazy-history suite: fixed px per child. */
+  function laidOutHeight(c: HTMLElement, perChild = 100): void {
+    Object.defineProperty(c, "scrollHeight", {
+      configurable: true,
+      get: () => c.children.length * perChild,
+    });
+  }
+
+  it("no host: no button, and the manager still works", () => {
+    setup(); // the default: no jumpHost
+    ml.handleUserMessage({ content: "hi" });
+    expect(container.querySelector(".message.user")).not.toBeNull();
+  });
+
+  it("a real button on the host: aria-labelled, svg chrome is inert", () => {
+    const host = setupJump();
+    const btn = jumpBtn(host);
+    expect(btn).not.toBeNull();
+    expect(btn.tagName.toLowerCase()).toBe("button");
+    expect(btn.getAttribute("aria-label")).toBe("Jump to bottom");
+    const svg = btn.querySelector("svg")!;
+    expect(svg.getAttribute("aria-hidden")).toBe("true");
+    expect(svg.getAttribute("tabindex")).toBe("-1");
+    expect(svg.querySelector("path")!.getAttribute("stroke")).toBe("currentColor");
+  });
+
+  it("visible exactly while the view is un-pinned (the same 150px rule)", () => {
+    const host = setupJump();
+    const btn = jumpBtn(host);
+    const c = container as unknown as Geo;
+    c.scrollTop = 4500;
+    c.scrollHeight = 5000;
+    c.clientHeight = 500;
+    expect(btn.hidden).toBe(true); // born pinned: hidden from frame one
+    container.dispatchEvent(new Event("scroll"));
+    expect(btn.hidden).toBe(true); // dist 0: pinned
+    c.scrollTop = 1000;
+    container.dispatchEvent(new Event("scroll")); // dist 3500: un-pinned
+    expect(btn.hidden).toBe(false);
+    c.scrollTop = 4360;
+    container.dispatchEvent(new Event("scroll")); // dist 140 <= 150: back
+    expect(btn.hidden).toBe(true);
+  });
+
+  it("click pins instantly and re-engages follow for the next append", () => {
+    const host = setupJump();
+    const btn = jumpBtn(host);
+    const c = container as unknown as Geo;
+    c.scrollTop = 1000;
+    c.scrollHeight = 5000;
+    c.clientHeight = 500;
+    container.dispatchEvent(new Event("scroll"));
+    expect(btn.hidden).toBe(false);
+    btn.click();
+    expect(c.scrollTop).toBe(5000); // container.scrollHeight, INSTANT
+    expect(btn.hidden).toBe(true);
+    // Follow re-engaged: the next live append pins to the (new) bottom.
+    c.scrollHeight = 6000;
+    ml.handleUserMessage({ content: "live" });
+    expect(c.scrollTop).toBe(6000);
+  });
+
+  it("a guarded restore never flashes the button", () => {
+    const host = setupJump();
+    const btn = jumpBtn(host);
+    const c = container as unknown as Geo;
+    c.clientHeight = 500;
+    let base = 0;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => base + container.children.length * 100,
+    });
+    ml.renderLogEntries([
+      { source: "input", content: "Q 1" },
+      { source: "llm", content: "A 1" },
+    ] as never); // 2 children -> scrollHeight 200
+    c.scrollTop = 0; // content fits: bottom = 0
+    container.dispatchEvent(new Event("scroll")); // follow engaged
+    expect(btn.hidden).toBe(true);
+    ml.renderOlderEntries([
+      { source: "input", content: "Q 0" },
+      { source: "llm", content: "A 0" },
+    ] as never);
+    base = 800; // async image growth between the restore and its echo
+    container.dispatchEvent(new Event("scroll")); // the browser's async echo
+    expect(btn.hidden).toBe(true); // guarded: follow survived, no flash
+    ml.handleUserMessage({ content: "live stream" });
+    expect(c.scrollTop).toBe(800 + 5 * 100); // still pinning
+  });
+
+  it("jumping while a page is pending: bottom survives the prepend, no trigger re-fire", () => {
+    let fires = 0;
+    const host = setupJump({ onNearTop: () => { fires++; } });
+    const btn = jumpBtn(host);
+    laidOutHeight(container);
+    const c = container as unknown as Geo;
+    c.clientHeight = 300;
+    for (let i = 0; i < 10; i++) ml.handleUserMessage({ content: `msg ${i}` }); // 1000px
+    ml.setHasOlder(true);
+    c.scrollTop = 500;
+    container.dispatchEvent(new Event("scroll")); // outside the zone: arms
+    c.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll")); // top-zone edge fires
+    expect(fires).toBe(1);
+    expect(btn.hidden).toBe(false);
+    btn.click();
+    container.dispatchEvent(new Event("scroll")); // the browser's echo
+    expect(fires).toBe(1); // leaving the zone re-arms, never fires
+    expect(btn.hidden).toBe(true);
+    // The page lands while the jumped view sits pinned at the bottom.
+    ml.renderOlderEntries([
+      { source: "input", content: "older" },
+      { source: "llm", content: "answer" },
+    ] as never);
+    container.dispatchEvent(new Event("scroll")); // the guarded restore echo
+    expect(fires).toBe(1);
+    expect(c.scrollTop).toBe(container.scrollHeight); // STILL the bottom
+    expect(btn.hidden).toBe(true); // follow survived the anchor
+  });
+
+  it("destroy() removes the button from the host", () => {
+    const host = setupJump();
+    expect(jumpBtn(host)).not.toBeNull();
+    ml.destroy();
+    expect(jumpBtn(host)).toBeNull();
   });
 });

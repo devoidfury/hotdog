@@ -85,18 +85,24 @@ import {
   colForX,
   dedentLines,
   deleteForward,
+  deleteWord,
   docEnd,
   docStart,
+  duplicateLine,
   indentTab,
   insertText,
   matchBracket,
   moveHorizontal,
   moveVertical,
+  moveWordHorizontal,
   pressEnterSmart,
   redo,
   selectAll,
+  selectInsideQuotes,
+  selectRange,
   selectWordAt,
   setCaret,
+  toggleLineComment,
   smartEnd,
   smartHome,
   typeChar,
@@ -106,6 +112,16 @@ import {
   type Pos,
   type TextBuffer,
 } from "./editor-buffer.ts";
+import {
+  findMatches,
+  indexAtOrAfter,
+  replaceAll,
+  replaceMatch,
+  selectOccurrences,
+  type FindMatch,
+  type FindOptions,
+  type FindResult,
+} from "./editor-find.ts";
 
 /** CSS-owned row height of the editor's line layer, in px. Hit-testing and
  *  the caret/selection overlay trust this constant; styles.css pins it. */
@@ -192,6 +208,27 @@ interface EditorView {
   gotoOpen: boolean;
   gotoText: string;
   gotoEl: HTMLInputElement | null;
+  /** The find widget (per-PATH ephemeral state like the goto box, so the
+   *  finder is per editor session, never global -- and it never enters the
+   *  TextBuffer). The field texts mirror the DOM (the goto-box idiom: the
+   *  input owns the caret, the mirror only re-seeds a re-render); the
+   *  match list is DERIVED every render (pure finder), so an edit in the
+   *  buffer can never leave stale matches behind. */
+  findOpen: boolean;
+  findQuery: string;
+  findRepl: string;
+  findCase: boolean;
+  findWord: boolean;
+  findRegex: boolean;
+  /** Cursor index into the render's match list (clamped at paint; the
+   *  navigation ops re-derive the list and wrap). */
+  findCursor: number;
+  /** One-shot focus request: the field refs focus ONLY the requested field
+   *  on their next attach, then clear (a blanket focus-on-patch would
+   *  steal focus from the replace field every time a count repaint lands). */
+  findFocus: "query" | "replace" | null;
+  queryEl: HTMLInputElement | null;
+  replEl: HTMLInputElement | null;
 }
 
 const editorViews = new Map<string, EditorView>();
@@ -199,7 +236,7 @@ const editorViews = new Map<string, EditorView>();
 function viewOf(path: string): EditorView {
   let v = editorViews.get(path);
   if (!v) {
-    v = { scrollTop: 0, viewportH: 0, vpTop: 0, vpLeft: 0, codeLeft: 0, gutterPx: 0, ta: null, composing: false, dragging: false, boxAnchor: null, repaint: null, vp: null, gotoOpen: false, gotoText: "", gotoEl: null };
+    v = { scrollTop: 0, viewportH: 0, vpTop: 0, vpLeft: 0, codeLeft: 0, gutterPx: 0, ta: null, composing: false, dragging: false, boxAnchor: null, repaint: null, vp: null, gotoOpen: false, gotoText: "", gotoEl: null, findOpen: false, findQuery: "", findRepl: "", findCase: false, findWord: false, findRegex: false, findCursor: 0, findFocus: null, queryEl: null, replEl: null };
     editorViews.set(path, v);
   }
   return v;
@@ -305,6 +342,31 @@ function parseGotoSpec(raw: string): { line: number; col?: number } | null {
   return { line, col };
 }
 
+/** Carry the window so `line` sits inside the windowed slice. Keyboard
+ *  moves ride the browser's own focus-scroll for the parked textarea, but a
+ *  programmatic jump (goto, find-match walk) has no such helper. Setting
+ *  node.scrollTop re-enters onScroll with the same number in a real browser
+ *  (a no-op repaint); the view state here is already correct, so the caller
+ *  commits once regardless. */
+function scrollLineIntoView(v: EditorView, line: number): void {
+  const vh = v.viewportH || 30 * EDIT_LINE_H;
+  const rowTop = line * EDIT_LINE_H;
+  if (rowTop < v.scrollTop) v.scrollTop = rowTop;
+  else if (rowTop + EDIT_LINE_H > v.scrollTop + vh) v.scrollTop = rowTop + EDIT_LINE_H - vh;
+  if (v.vp && v.vp.scrollTop !== v.scrollTop) v.vp.scrollTop = v.scrollTop;
+}
+
+const findOptsOf = (v: EditorView): FindOptions => ({
+  caseSensitive: v.findCase,
+  wholeWord: v.findWord,
+  regex: v.findRegex,
+});
+
+/** A stale cursor index (edits can shrink the match list under the widget)
+ *  clamps into the live list; navigation wraps separately. */
+const clampFindCursor = (i: number, n: number): number =>
+  n <= 0 ? 0 : Math.min(Math.max(i, 0), n - 1);
+
 export interface FileEditorProps {
   path: string;
   session: EditorSession;
@@ -323,6 +385,9 @@ export interface FileEditorProps {
   onSave: (path: string) => void;
   onReload: (path: string) => void;
   onToggleWs: () => void;
+  /** HOT EXIT: the session stash is OFF (a sessionStorage write failed with
+   *  quota once); the foot bar says so honestly instead of silently. */
+  stashOff?: boolean;
 }
 
 export function FileEditor(p: FileEditorProps): JsxChild {
@@ -361,7 +426,15 @@ export function FileEditor(p: FileEditorProps): JsxChild {
   // vanishes on move for free, and never lags the buffer.
   const match = matchBracket(buf.lines, head);
 
-  const statusText = p.session.saving ? "saving..." : buf.dirty ? "edited" : "saved";
+  // HOT EXIT: when the stash is off (quota), a dirty buffer says so -- the
+  // reload-safety that normally hides behind "edited" is honestly missing.
+  const statusText = p.session.saving
+    ? "saving..."
+    : buf.dirty
+      ? p.stashOff
+        ? "edited \u00b7 stash off"
+        : "edited"
+      : "saved";
 
   // ── row:col readout + jump ───────────────────────────────────────────────
   // The readout renders from the primary head, so every caret move repaints
@@ -389,17 +462,97 @@ export function FileEditor(p: FileEditorProps): JsxChild {
     // Keyboard moves never scroll the viewport (the browser's own focus
     // scroll does that for the parked textarea), but a jump has no such
     // helper: carry the window so the caret row is inside the windowed
-    // slice. Setting node.scrollTop re-enters onScroll with the same
-    // number in a real browser (a no-op repaint); the view state here is
-    // already correct, so commit once regardless.
-    const vh = v.viewportH || 30 * EDIT_LINE_H;
-    const rowTop = line * EDIT_LINE_H;
-    if (rowTop < v.scrollTop) v.scrollTop = rowTop;
-    else if (rowTop + EDIT_LINE_H > v.scrollTop + vh) v.scrollTop = rowTop + EDIT_LINE_H - vh;
-    if (v.vp && v.vp.scrollTop !== v.scrollTop) v.vp.scrollTop = v.scrollTop;
+    // slice (the shared scrollLineIntoView -- the find widget's match walk
+    // rides the exact same seam).
+    scrollLineIntoView(v, line);
     v.gotoOpen = false;
     v.ta?.focus();
     act(next); // setCaret: primary head at the target, list collapsed to one caret
+  };
+
+  // ── find & replace actions (pure finder in editor-find.ts) ──────────────
+  // The selected match goes THROUGH the buffer machine (selectRange /
+  // performTx), so it paints with the theme's own selection layer and the
+  // replaces land as ONE undo step each with the dirty flag re-derived.
+  const findGo = (target: TextBuffer, matches: FindMatch[], i: number): void => {
+    const m = matches[i]!;
+    v.findCursor = i;
+    scrollLineIntoView(v, m.line);
+    act(selectRange(target, { line: m.line, col: m.from }, { line: m.line, col: m.to }));
+  };
+  const openFind = (): void => {
+    v.findOpen = true;
+    v.findFocus = "query";
+    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    if (found.ok && found.matches.length > 0) {
+      // Re-aim at the first occurrence at/after the caret (wrap otherwise)
+      // instead of always snapping back to the top of the file.
+      const h = buf.sels[buf.primary]?.head ?? { line: 0, col: 0 };
+      findGo(buf, found.matches, indexAtOrAfter(found.matches, h));
+      return;
+    }
+    p.onCommit(p.path, p.session); // repaint the count / the honest error
+  };
+  const closeFind = (backToEditor: boolean): void => {
+    v.findOpen = false;
+    v.findFocus = null;
+    // Closing NEVER touches the buffer: the current match stays selected.
+    if (backToEditor) v.ta?.focus();
+    p.onCommit(p.path, p.session);
+  };
+  const stepFind = (dir: 1 | -1): void => {
+    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    if (!found.ok || found.matches.length === 0) return;
+    const n = found.matches.length;
+    findGo(buf, found.matches, (clampFindCursor(v.findCursor, n) + dir + n) % n);
+  };
+  /** Re-aim at the first match of the CURRENT query+toggles (typing and
+   *  toggling share this); a miss (or an error) just repaints the strip. */
+  const refreshFind = (): void => {
+    v.findCursor = 0;
+    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    if (found.ok && found.matches.length > 0) {
+      findGo(buf, found.matches, 0);
+      return;
+    }
+    p.onCommit(p.path, p.session);
+  };
+  const doReplaceOne = (): void => {
+    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    if (!found.ok || found.matches.length === 0) return;
+    const m = found.matches[clampFindCursor(v.findCursor, found.matches.length)]!;
+    const repl = v.replEl?.value ?? v.findRepl;
+    v.findRepl = repl; // keep the mirror honest (a repaint re-seeds from it)
+    const next = replaceMatch(buf, m, repl, Date.now());
+    const after = findMatches(next.lines, v.findQuery, findOptsOf(v));
+    if (after.ok && after.matches.length > 0) {
+      // Advance PAST the replaced span: a replacement that itself matches
+      // the query must not be found (and re-replaced) forever.
+      findGo(next, after.matches, indexAtOrAfter(after.matches, { line: m.line, col: m.from + repl.length }));
+      return;
+    }
+    v.findCursor = 0;
+    act(next);
+  };
+  const doReplaceAll = (): void => {
+    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    if (!found.ok || found.matches.length === 0) return;
+    const repl = v.replEl?.value ?? v.findRepl;
+    v.findRepl = repl;
+    v.findCursor = 0;
+    act(replaceAll(buf, found.matches, repl, Date.now()));
+  };
+  const doSelectAllOccurrences = (): void => {
+    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    if (!found.ok || found.matches.length === 0) return;
+    const i = clampFindCursor(v.findCursor, found.matches.length);
+    // The widget yields: with every occurrence selected as a caret, focus
+    // returns to the editor so the EXISTING multi-caret typing takes over.
+    v.findOpen = false;
+    v.findFocus = null;
+    v.findCursor = i;
+    act(selectOccurrences(buf, found.matches, i));
+    v.ta?.focus();
   };
 
   return (
@@ -539,7 +692,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
             ref={(el) => {
               v.ta = el as unknown as HTMLTextAreaElement | null;
             }}
-            onKeydown={(e: KeyboardEvent) => onKeyDown(e, p, v, act)}
+            onKeydown={(e: KeyboardEvent) => onKeyDown(e, p, v, act, { openFind, closeFind })}
             onCompositionstart={() => {
               v.composing = true;
             }}
@@ -637,6 +790,205 @@ export function FileEditor(p: FileEditorProps): JsxChild {
           queueMicrotask(() => remeasureCharWidth());
         }}>{Array.from({ length: 100 }, () => "0").join("")}</span>
       </div>
+      {v.findOpen
+        ? // The find & replace strip: the house popover idiom (the goto
+          // box's uncontrolled-input + text-mirror + isConnected-microtask
+          // focus, the sidebar search's aria-pressed chips and ✕ close) as
+          // a block-flow row at the head of the editor column -- no new
+          // positioning layer, no new colors: the current match PAINTS
+          // through the buffer's own selection layer. The fields are
+          // separate elements from the capture textarea (the focus guard:
+          // keystrokes inside the strip structurally cannot reach the
+          // buffer), and every chord the strip claims stopPropagation's on
+          // top of that.
+          (() => {
+            const found: FindResult = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+            const count = found.ok ? found.matches.length : 0;
+            const cursor = clampFindCursor(v.findCursor, count);
+            const btnStyle = { width: "auto", minWidth: "24px", height: "22px", padding: "0 4px", fontSize: "12px" };
+            const opts: Array<{ key: "findCase" | "findWord" | "findRegex"; cls: string; glyph: string; label: string }> = [
+              { key: "findCase", cls: "editor-find-case", glyph: "Aa", label: "Match case" },
+              { key: "findWord", cls: "editor-find-word", glyph: "W", label: "Whole word" },
+              { key: "findRegex", cls: "editor-find-regex", glyph: ".*", label: "Use regular expression" },
+            ];
+            const seedRef = (which: "query" | "replace") => (el: unknown): void => {
+              const node = el as HTMLInputElement | null;
+              if (which === "query") v.queryEl = node;
+              else v.replEl = node;
+              if (!node) return;
+              // Mirror re-seed ONLY on drift: writing .value unconditionally
+              // would reset the caret on every count repaint (the goto box
+              // never re-renders mid-typing; this strip does).
+              const want = which === "query" ? v.findQuery : v.findRepl;
+              if (node.value !== want) node.value = want;
+              if (v.findFocus === which) {
+                v.findFocus = null;
+                queueMicrotask(() => {
+                  if ((node as unknown as { isConnected?: boolean }).isConnected !== false) node.focus();
+                });
+              }
+            };
+            const fieldKeydown = (field: "query" | "replace") => (e: KeyboardEvent): void => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                closeFind(true); // match selection SURVIVES the close
+                return;
+              }
+              if (e.key === "Enter" && e.altKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                doSelectAllOccurrences();
+                return;
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (field === "replace") doReplaceOne();
+                else stepFind(e.shiftKey ? -1 : 1);
+                return;
+              }
+              if ((e.ctrlKey || e.metaKey) && !e.altKey && typeof e.key === "string" && e.key.toLowerCase() === "f") {
+                // Ctrl+F with the strip already open: re-aim at the query
+                // field and select its text (the browser find-again seat).
+                e.preventDefault();
+                e.stopPropagation();
+                v.queryEl?.select();
+              }
+            };
+            return (
+              <div
+                className="editor-find"
+                role="search"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  flexWrap: "wrap",
+                  padding: "4px 8px",
+                  background: "var(--bg-base)",
+                  borderBottom: "1px solid var(--border)",
+                  fontSize: "12px",
+                  color: "var(--text-muted)",
+                }}
+              >
+                <input
+                  className="editor-goto-input editor-find-query"
+                  style={{ width: "18ch" }}
+                  type="text"
+                  placeholder="Find"
+                  aria-label="Find"
+                  spellcheck="false"
+                  ref={seedRef("query")}
+                  onInput={() => {
+                    v.findQuery = v.queryEl?.value ?? "";
+                    refreshFind();
+                  }}
+                  onKeydown={fieldKeydown("query")}
+                />
+                {opts.map((o) => (
+                  <button
+                    key={o.key}
+                    type="button"
+                    className={`file-reload-btn ${o.cls}${v[o.key] ? " is-on" : ""}`}
+                    style={v[o.key] ? { ...btnStyle, color: "var(--accent)" } : btnStyle}
+                    title={o.label}
+                    aria-label={o.label}
+                    aria-pressed={v[o.key] ? "true" : "false"}
+                    onClick={() => {
+                      v[o.key] = !v[o.key];
+                      refreshFind();
+                    }}
+                  >
+                    {o.glyph}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="file-reload-btn editor-find-prev"
+                  style={btnStyle}
+                  title="Previous match (Shift+Enter)"
+                  aria-label="Previous match"
+                  onClick={() => stepFind(-1)}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="file-reload-btn editor-find-next"
+                  style={btnStyle}
+                  title="Next match (Enter)"
+                  aria-label="Next match"
+                  onClick={() => stepFind(1)}
+                >
+                  ›
+                </button>
+                {found.ok ? (
+                  <span className="editor-find-count" role="status" style={{ minWidth: "8ch", fontVariantNumeric: "tabular-nums" }}>
+                    {v.findQuery === "" ? "" : count === 0 ? "No matches" : `${cursor + 1} of ${count}`}
+                  </span>
+                ) : (
+                  <span className="editor-find-error" role="alert" title={found.error} style={{ color: "var(--error)" }}>
+                    {found.error}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="file-reload-btn editor-find-close"
+                  style={btnStyle}
+                  title="Close find (Esc)"
+                  aria-label="Close find"
+                  onClick={() => closeFind(true)}
+                >
+                  ✕
+                </button>
+                <input
+                  className="editor-goto-input editor-find-replace"
+                  style={{ width: "18ch" }}
+                  type="text"
+                  placeholder="Replace"
+                  aria-label="Replace"
+                  spellcheck="false"
+                  ref={seedRef("replace")}
+                  onInput={() => {
+                    v.findRepl = v.replEl?.value ?? "";
+                  }}
+                  onKeydown={fieldKeydown("replace")}
+                />
+                <button
+                  type="button"
+                  className="file-reload-btn editor-replace-one"
+                  style={btnStyle}
+                  title="Replace the current match, advance to the next"
+                  aria-label="Replace"
+                  onClick={doReplaceOne}
+                >
+                  replace
+                </button>
+                <button
+                  type="button"
+                  className="file-reload-btn editor-replace-all"
+                  style={btnStyle}
+                  title="Replace every occurrence (ONE undo step)"
+                  aria-label="Replace all"
+                  onClick={doReplaceAll}
+                >
+                  all
+                </button>
+                <button
+                  type="button"
+                  className="file-reload-btn editor-find-select-all"
+                  style={btnStyle}
+                  title="Select all occurrences as carets (Alt+Enter), then type at all of them"
+                  aria-label="Select all occurrences"
+                  onClick={doSelectAllOccurrences}
+                >
+                  select all
+                </button>
+              </div>
+            );
+          })()
+        : null}
       {/* The foot bar rides the viewer's idiom (the sticky seam is shared). */}
       <div className="file-view-bar editor-bar">
         {p.onLang ? (
@@ -825,17 +1177,34 @@ function extendSelTo(buf: TextBuffer, pos: Pos): TextBuffer {
 
 // ── Keyboard ───────────────────────────────────────────────────────────────
 // Claimed BEFORE default on the textarea: typing, editing keys, navigation,
-// the clipboard chords, undo/redo, and Ctrl/Cmd+S (unclaimed app-wide --
-// the only document hotkey is Ctrl+Shift+L, and the editor never touches
-// it). Ctrl+V is deliberately NOT claimed: the native paste event carries
-// the text. Alt chords pass to the browser; the completion menu and the tab
-// strip live on other elements, so nothing here fights them.
+// the clipboard chords, undo/redo, Ctrl/Cmd+S and Ctrl/Cmd+F (all unclaimed
+// app-wide -- the only document hotkey is Ctrl+Shift+L, and the editor never
+// touches it). Ctrl+V is deliberately NOT claimed: the native paste event
+// carries the text. The alt/mod chords claimed here (audited free, the
+// table lives with the branches below): Alt+ArrowLeft/Right word move,
+// Alt+Shift+same word-extend, Alt+Backspace/Delete word delete,
+// Alt+Shift+Enter select-inside-quotes, Ctrl/Cmd+/ comment toggle,
+// Ctrl/Cmd+Shift+D duplicate line (Alt+Shift+Down stays add-caret). The
+// completion menu and the tab strip live on other elements, so nothing here
+// fights them.
+// FIND STRIP KEYS (the audited table): Ctrl/Cmd+F opens (was inert -- the
+// mod branch claimed no "f"); inside the strip's fields, Enter = next match
+// / replace (query/replace field), Shift+Enter = previous, Alt+Enter =
+// select-all-occurrences, Escape = close (match selection survives),
+// Ctrl/Cmd+F re-aims at the query. Alt+Enter is free as a chord (the
+// textarea's Enter case treats it as a plain newline, and the strip's
+// fields are SEPARATE elements: the buffer's keydown handler lives only on
+// the capture textarea, so strip keystrokes cannot reach the buffer -- the
+// focus guard is by construction; every strip-claimed chord ALSO calls
+// stopPropagation, mirroring the goto box). With the strip open, the
+// textarea's Escape closes it instead of collapsing the selection.
 
 function onKeyDown(
   e: KeyboardEvent,
   p: FileEditorProps,
   v: EditorView,
   act: (next: TextBuffer) => void,
+  find: { openFind: () => void; closeFind: (backToEditor: boolean) => void },
 ): void {
   // The IME owns the event while composing -- no intercept, no clear.
   if (v.composing || (e as KeyboardEvent & { isComposing?: boolean }).isComposing === true || e.key === "Process") return;
@@ -865,6 +1234,14 @@ function onKeyDown(
       act(selectAll(buf));
       return;
     }
+    if (k === "f") {
+      // Ctrl/Cmd+F: the find strip. Free chord (grep-verified: the mod
+      // branch claimed no f before, and the only document hotkey is
+      // Ctrl+Shift+L). preventDefault keeps the browser's native find out.
+      e.preventDefault();
+      find.openFind();
+      return;
+    }
     if (k === "c") {
       // Copy writes through the shared copyText seam (same as Ctrl+X). The
       // old stage-the-textarea-and-let-the-native-copy-fire trick was
@@ -890,6 +1267,25 @@ function onKeyDown(
       return;
     }
     if (k === "v") return; // native paste event
+    if (k === "/") {
+      // Ctrl/Cmd+/: the line-comment toggle (audited free: no branch
+      // claimed "/", the only document hotkey is Ctrl+Shift+L, and the
+      // browser's "/" quick-find is not a Ctrl chord). A lang without a
+      // line comment (json, block-only, unknown) is an honest no-op -- but
+      // the chord is consumed either way, so the browser default (Cmd+/
+      // help pages) never fires behind the editor.
+      e.preventDefault();
+      act(toggleLineComment(buf, p.lang, now));
+      return;
+    }
+    if (k === "d" && e.shiftKey) {
+      // Ctrl/Cmd+Shift+D: duplicate line. alt+Shift+Down (VS Code's chord)
+      // is taken by add-caret-below and does NOT no-op without a selection,
+      // so duplicate rides this audited-free chord instead (see notes).
+      e.preventDefault();
+      act(duplicateLine(buf, now));
+      return;
+    }
     if (e.key === "Home") {
       e.preventDefault();
       act(docStart(buf, e.shiftKey));
@@ -901,6 +1297,40 @@ function onKeyDown(
       return;
     }
     return;
+  }
+  // ── The audited alt chords (the keyboard-key table's other half) ────────
+  // NO per-platform fork: mac Option arrives as e.altKey and e.key stays
+  // ArrowLeft/ArrowRight/Backspace/Delete/Enter for these chords, so one
+  // branch serves every OS. None of them collided: alt+Arrow and
+  // alt+Backspace/Delete previously FELL THROUGH to the plain cases (a
+  // one-char move / one-char delete), alt+Shift+Enter fell through to the
+  // plain Enter (a newline -- line moves are Alt+Shift+Arrow, NOT this
+  // chord), and the only document hotkey app-wide is Ctrl+Shift+L. mac's
+  // native Option-Backspace word delete never double-fires because the
+  // interception happens BEFORE default, exactly like every other key here.
+  if (e.altKey && !mod) {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      act(moveWordHorizontal(buf, e.key === "ArrowLeft" ? -1 : 1, e.shiftKey));
+      return;
+    }
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      act(deleteWord(buf, -1, now));
+      return;
+    }
+    if (e.key === "Delete") {
+      e.preventDefault();
+      act(deleteWord(buf, 1, now));
+      return;
+    }
+    if (e.key === "Enter" && e.shiftKey) {
+      // Select the content of the innermost quote/backtick pair around the
+      // primary caret; unpaired is an honest no-op (still consumed).
+      e.preventDefault();
+      act(selectInsideQuotes(buf));
+      return;
+    }
   }
   // VS Code's add-caret-below/above: Ctrl+Shift+Alt+Arrow OR Alt+Shift+Arrow
   // (both spellings ship -- the macOS/Windows chords differ). Claimed before
@@ -929,6 +1359,14 @@ function onKeyDown(
       return;
     case "Escape":
       e.preventDefault();
+      // The find strip gets there FIRST (VS Code's first-Escape): close it,
+      // leave the match selection alone. Only with no strip open does the
+      // usual collapse-to-primary run. Focus is already the capture
+      // textarea, so there is nothing to hand back.
+      if (v.findOpen) {
+        find.closeFind(false);
+        return;
+      }
       act(collapseSelections(buf));
       return;
     case "ArrowLeft":

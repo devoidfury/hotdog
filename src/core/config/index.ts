@@ -206,6 +206,13 @@ export async function loadConfig(
  */
 const warnedRemovedKeys = new Set<string>();
 
+/** Test seam: the process-wide dedupe is the documented ceiling, but a test
+ *  that WARNED the key (rescue's own harness) must not silence the next
+ *  file's load in a shared runner process. Never called in product paths. */
+export function resetRemovedKeyWarningsForTesting(): void {
+  warnedRemovedKeys.clear();
+}
+
 function warnRemovedConfigKeys(raw: unknown): void {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
   for (const key of Object.keys(raw as Record<string, unknown>)) {

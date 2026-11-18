@@ -19,11 +19,12 @@ import {
   type ModelConfig,
   type ProviderDef,
 } from "@core/config/providers.ts";
-import { S2C, taskActivityMessage, C2SMessage } from "./protocol.ts";
-import { taskActivityWithPosture, taskWire } from "./wire-messages.ts";
+import { S2C, C2SMessage } from "./protocol.ts";
+import { taskWire, toS2CMessage } from "./wire-messages.ts";
 import { TaskManager } from "@core/session/task-manager.ts";
 import type { TaskObserverEvent } from "@core/session/task-types.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
+import type { Agent } from "@core/agent.ts";
 import { WebSocketQuestionBridge, type QuestionStrategy } from "./question-input.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
@@ -253,8 +254,9 @@ export function createWsServer(
 
   // Subagent tasks for webui/ws sessions: the registry's SessionManager is built without taskConfig,
   // so the TaskManager lives here. Publishing it as the taskManager service lets delegate_task
-  // resolve lazily; the observer relays spawn/status/activity to every connected client --
-  // the webui subagent feed consumes it, and nothing reaches the main chat transcript.
+  // resolve lazily; the observer relays spawn/status (TASK_UPDATE, scoped to the manager's
+  // channels) so the webui task rows tick -- worker transcripts ride the session view's own
+  // tail since B4, never the main chat transcript.
   // Hoisted so the returned stopTaskManager() can reach it (null when no registry).
   let taskManager: TaskManager | null = null;
   if (resolvedCore?.modelRegistry) {
@@ -273,10 +275,20 @@ export function createWsServer(
       sessionManager: registry.getSessionManager(),
       // A follow-up on a session blocked in a question becomes its answer.
       resolvePendingQuestion: (sid, text) => bridge?.answerWithText(sid, text) ?? false,
+      // B2 manager-gone closure seam: the CANCEL route releases a cancelled
+      // manager's held worker questions through this (bridge.resolveUnanswered
+      // -- defaults + the unanswered marker, never ok-JSON defaults; the
+      // worker task itself is NOT interrupted).
+      releaseWorkerQuestion: (sid, reason) => bridge?.resolveUnanswered(sid, reason) ?? false,
+      // B1 worker-row seam: the worker's session row is born at the
+      // recordAgentSession site (entry.agent in hand, before the first turn,
+      // so the row exists before any question can arm). Book-only: the row
+      // never enters the private SessionManager (no bus, no run loop).
+      onWorkerSessionStarted: (info) => registry.registerWorker(info),
     });
     taskManager = tm;
     // Hand-built mock cores (tests, embedded hosts) may carry no service
-    // registry; the relay still works, only delegate_task lookup is skipped.
+    // registry; the task manager still works, only delegate_task lookup is skipped.
     if (core.services) registerTaskManagerService(core, tm);
     registry.setTaskManager(tm);
     tm.setObserver((ev: TaskObserverEvent) => {
@@ -299,29 +311,58 @@ export function createWsServer(
           ev.task.status === "completed";
         if (terminal) {
           const sid = tm.getTaskAgentSession(ev.task.taskId);
-          if (sid && bridge && bridge.hasPending(sid)) bridge.cancel(sid);
+          if (sid && bridge && bridge.hasPending(sid)) {
+            // D10 honesty: a terminal task's pending question was never
+            // answered. Worker rows resolve through resolveUnanswered (the
+            // unanswered marker reaches the question tool as mode
+            // "unanswered", never ok-JSON defaults); the interactive fallback
+            // keeps the plain cancel semantics byte-identical.
+            if (registry.getRow(sid)?.kind === "worker") {
+              bridge.resolveUnanswered(
+                sid,
+                `the delegating task reached ${ev.task.status} without an answer`,
+              );
+            } else {
+              bridge.cancel(sid);
+            }
+          }
+          if (sid) {
+            // B1 terminal release: mark the worker row terminal (frames stop;
+            // watcher channels are NOT force-closed -- the idle sweep reclaims
+            // the released row once it holds zero clients), and drop the
+            // bridge entry (the #inputs map leak: worker bridge inputs lived
+            // for the process lifetime because dropSession only ran from the
+            // registry's delete path, which a worker never takes).
+            registry.releaseWorker(sid);
+            bridge?.dropSession(sid);
+          }
         }
         return;
       }
-      const activityMsg = taskActivityMessage(ev.taskId, ev.event);
-      if (!activityMsg) return;
-      // Posture parity (owner ruling 2026-11-13): the display-DSL
-      // descriptors the session TOOL_CALL frames carry ride here too,
-      // resolved from the worker agent's own tool registry -- so the
-      // subagent transcript's ToolBlocks reach the identical read-box /
-      // inline-diff / code-block postures. Enriched BEFORE buffering, so
-      // live delivery and taskActivityHistory replay carry the same bytes.
-      activityMsg.activity = taskActivityWithPosture(
-        activityMsg.activity,
-        ev.event,
-        (toolName) => tm.getTaskToolMetadata(ev.taskId, toolName),
-      );
-      // Buffer always for replay (the reset sentinel trims instead of
-      // storing; see recordTaskActivity); live delivery only to the owning
-      // session (orphan tasks belong to no tab).
-      registry.recordTaskActivity(ev.taskId, activityMsg.activity);
-      const owner = tm.getTaskSession(ev.taskId);
-      if (owner) registry.broadcastScoped(owner, activityMsg);
+      // B3's worker live-tail producer (design (b) "Live output"): the ONE
+      // new wiring. EXACT order: (a) gate FIRST on the watcher count -- zero
+      // watchers pays nothing: one map lookup, then return before ANY
+      // mapping or allocation (no mapper call, no frame, no resolver
+      // closure is even built for the event); (b) map the RAW event through
+      // the session byte-homes with the display-hint resolvers read off the
+      // row agent's toolRegistry (the createChannel idiom, null-tolerant
+      // after release: resolvers answer undefined); (c) deliver worker-
+      // scoped over the row's channel set. QUESTION / USER_MESSAGE /
+      // TOOL_CALL / TOOL_RESULT / streaming frames all ride this single
+      // mapping -- including S2C.QUESTION, which the retired relay grammar
+      // structurally could not carry.
+      const tailSid = tm.getTaskAgentSession(ev.taskId);
+      if (tailSid && registry.channelCount(tailSid) > 0) {
+        const rowAgent = registry.getRow(tailSid)?.getAgent?.() ?? null;
+        const metaOf = (toolName: string) =>
+          (rowAgent as Partial<Pick<Agent, "toolRegistry">> | null)?.toolRegistry?.getMetadata?.(toolName);
+        const frame = toS2CMessage(ev.event, tailSid, {
+          argDisplay: (toolName) => metaOf(toolName)?.argDisplay,
+          headerKeys: (toolName) => metaOf(toolName)?.headerKeys,
+          display: (toolName) => metaOf(toolName)?.display,
+        });
+        if (frame) registry.publish(tailSid, frame);
+      }
     });
   }
 
@@ -338,12 +379,42 @@ export function createWsServer(
       const strategy = (ws.questionStrategy as string | undefined) ?? questionStrategy;
       const timeoutSecs =
         (ws.questionTimeoutSecs as number | undefined) ?? questionTimeoutSecs;
+      // Worker rows (owner rulings 2026-11-16, binding; they supersede the
+      // design doc's pre-ruling "default + per-question timer" posture):
+      // worker questions run "wait", ALWAYS -- strategy "wait" arms no
+      // timer, which is the point (no worker-facing timer; the lane yields
+      // on ask and the manager wakes and answers via the existing steer-lane
+      // machinery). An inherited "cancel" or "default" (host config OR row
+      // meta) coerces to "wait", loudly-but-harmlessly: a warn line, never
+      // an error/throw. Kills stay interrupt_task/manager/user only; the
+      // manager's teardown/cancel releases a held question event-driven
+      // ("answerer gone, proceed" -- handlers-send's CANCEL route and the
+      // terminal observer below), timers never guess. "cancel"/"default"
+      // stay UNTOUCHED as interactive-session policy: the answer below is
+      // byte-identical for every non-worker sid.
+      const row = registry.getRow(sid);
+      if (row?.kind === "worker") {
+        const inherited = row.questionStrategy || strategy;
+        if (inherited !== "wait") {
+          logger.warn(
+            `[websocket] worker ${sid} inherited questionStrategy "${inherited}"; worker questions always run "wait" (no worker-facing timer) -- coerced, nothing else changed`,
+          );
+        }
+        // timeoutSecs rides the live read (moot under wait; the live-read
+        // posture stays for the day the policy table ever changes).
+        return { strategy: "wait", timeoutSecs };
+      }
       return {
         strategy: (meta?.questionStrategy || strategy) as QuestionStrategy,
         timeoutSecs: meta?.questionTimeoutSecs || timeoutSecs,
       };
     },
-    hasChannels: (sid) => registry.hasChannels(sid),
+    // B3 carried-note fix (B4): this drives only the question-tool RESULT's
+    // mode label. A worker-row question is answered by the delegating
+    // manager (R3) -- never through the socket -- so watcher channels must
+    // not make it read "interactive".
+    hasChannels: (sid) =>
+      registry.hasChannels(sid) && registry.getRow(sid)?.kind !== "worker",
     interrupt: (sid) => registry.getSessionManager().interrupt(sid),
     // Task-host lane handoff: the worker yields its lane slot while a
     // question is pending, back on settle.

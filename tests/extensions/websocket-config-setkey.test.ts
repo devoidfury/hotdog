@@ -21,7 +21,7 @@
 // (e) The mutex composes across the new value kinds (scalar + json + writeOnly).
 // (f) Fail-closed ambiguity and rollback (injected-fs seam, no mock.module).
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -134,10 +134,18 @@ const bridgeStub = {
 } as unknown as WebSocketQuestionBridge;
 
 let dirCounter = 0;
+const madeDirs = new Set<string>();
 function tempDir(): string {
   dirCounter++;
-  return mkdtempSync(join(TMP_PARENT, `hotdog-setkey-${dirCounter}-`));
+  const dir = mkdtempSync(join(TMP_PARENT, `hotdog-setkey-${dirCounter}-`));
+  madeDirs.add(dir);
+  return dir;
 }
+
+afterAll(() => {
+  for (const dir of madeDirs) rmSync(dir, { recursive: true, force: true });
+  madeDirs.clear();
+});
 
 function cfgFile(dir: string): string {
   return join(dir, "defaults.json");
@@ -464,6 +472,7 @@ describe("setConfigKey scalar writes", () => {
   it("an explicit --config on the argv re-points the write (and ONLY that file)", async () => {
     const dir = tempDir();
     const other = mkdtempSync(join(TMP_PARENT, "hotdog-setkey-explicit-"));
+    madeDirs.add(other);
     const explicit = join(other, "custom.json");
     writeFileSync(cfgFile(dir), FULL);
     writeFileSync(explicit, `{ "webui": { "port": 3000 } }`);

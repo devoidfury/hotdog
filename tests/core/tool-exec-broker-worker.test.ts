@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import {
   handleFrame,
+  noteEntryGone,
   parseBrokerArgs,
   poolKey,
   relayRunnerLine,
@@ -64,7 +65,7 @@ async function waitForFrame(pred: (f: any) => boolean, ms = 5000): Promise<any> 
 
 function makeState(overrides: Partial<BrokerState> = {}): BrokerState {
   // Hand-built states start tool-less, like a child awaiting its register.
-  return { pool: new Map(), idleReapMs: 0, descriptors: [], ...overrides };
+  return { pool: new Map(), idleReapMs: 0, descriptors: [], pendingRelease: new Map(), ...overrides };
 }
 
 /** A pool entry whose "process" is a recorder; no spawn, no stdio. */
@@ -217,6 +218,91 @@ describe("reap frames (fake entries)", () => {
     handleFrame(JSON.stringify({ op: "reap" }), state);
     expect(entry.dead).toBe(true);
     expect(state.pool.size).toBe(0);
+  });
+});
+
+// ── release frames: scratch-reclaim confirmations ───────────────────────────
+
+describe("release frames (fake entries)", () => {
+  it("with no entries AND no pending watch, answers released immediately (echoing seq)", () => {
+    startCapture();
+    const state = makeState();
+    const other = fakeEntry();
+    state.pool.set(poolKey("other", "rw"), other.entry);
+    handleFrame(JSON.stringify({ op: "release", session: "gone", seq: 7 }), state);
+    expect(captured.filter((f) => f.op === "released" && f.session === "gone").map((f) => f.seq)).toEqual([7]);
+    expect(other.entry.dead).toBe(false);
+  });
+
+  it("a re-fired release inside an older frame's drain window cannot ack early (FIFO generations)", () => {
+    startCapture();
+    const state = makeState();
+    const E1 = fakeEntry();
+    state.pool.set(poolKey("s", "rw"), E1.entry);
+    handleFrame(JSON.stringify({ op: "release", session: "s", seq: 1 }), state);
+    expect(E1.entry.dead).toBe(true); // pool-deleted synchronously...
+    // SESSION_END re-fires inside the runner's drain (process alive up to the
+    // killTimer grace): doomed=0, but the seq-1 watch must gate this frame.
+    handleFrame(JSON.stringify({ op: "release", session: "s", seq: 2 }), state);
+    expect(captured.some((f) => f.op === "released")).toBe(false);
+    noteEntryGone(poolKey("s", "rw"), E1.entry, state);
+    const acks = captured.filter((f) => f.op === "released" && f.session === "s");
+    // FIFO: seq 1 answers on the entry's death, the empty seq-2 bucket drains
+    // right behind it -- a seq-2 ack therefore also proves seq-1's death.
+    expect(acks.map((a) => a.seq)).toEqual([1, 2]);
+  });
+
+  it("the ack waits for the LAST dropped entry's process death, fires exactly once; sibling sessions untouched", () => {
+    startCapture();
+    const state = makeState();
+    const d1 = fakeEntry();
+    const d2 = fakeEntry();
+    const sib = fakeEntry();
+    state.pool.set(poolKey("s", "rw"), d1.entry);
+    state.pool.set(poolKey("s", "net"), d2.entry);
+    state.pool.set(poolKey("sib", "rw"), sib.entry);
+    handleFrame(JSON.stringify({ op: "release", session: "s", seq: 1 }), state);
+    expect(d1.entry.dead).toBe(true);
+    expect(d2.entry.dead).toBe(true);
+    expect(sib.entry.dead).toBe(false);
+    // NO ack yet: a draining runner may still bind the supervisor's scratch dir.
+    expect(captured.some((f) => f.op === "released")).toBe(false);
+    noteEntryGone(poolKey("s", "rw"), d1.entry, state);
+    expect(captured.some((f) => f.op === "released")).toBe(false); // one still draining
+    noteEntryGone(poolKey("s", "net"), d2.entry, state);
+    expect(captured.filter((f) => f.op === "released" && f.session === "s").length).toBe(1);
+    // Exactly once per watched entry: a late second death report (the exit
+    // after an error event) must never answer the release twice.
+    noteEntryGone(poolKey("s", "rw"), d1.entry, state);
+    noteEntryGone(poolKey("s", "net"), d2.entry, state);
+    expect(captured.filter((f) => f.op === "released" && f.session === "s").length).toBe(1);
+  });
+
+  it("an entry spawned after the release frame is not watched (resumed session keeps its dir)", () => {
+    startCapture();
+    const state = makeState();
+    const stale = fakeEntry();
+    state.pool.set(poolKey("s", "rw"), stale.entry);
+    handleFrame(JSON.stringify({ op: "release", session: "s", seq: 1 }), state);
+    // The session resumed and its fresh entry landed on the same key.
+    const fresh = fakeEntry();
+    state.pool.set(poolKey("s", "rw"), fresh.entry);
+    noteEntryGone(poolKey("s", "rw"), stale.entry, state);
+    expect(captured.some((f) => f.op === "released" && f.session === "s")).toBe(true);
+    expect(fresh.entry.dead).toBe(false);
+  });
+
+  it("real process death closes the watch: a released plain entry acks when its runner exits", async () => {
+    startCapture();
+    const state = makeState();
+    const key = poolKey("rel-sess", "rw");
+    const entry = spawnEntry(key, state);
+    state.pool.set(key, entry); // ensureEntry does this in production; hand-built here.
+    handleFrame(JSON.stringify({ op: "release", session: "rel-sess", seq: 3 }), state);
+    expect(entry.dead).toBe(true);
+    // The ack rides the runner's actual exit (EOF drain), not the drop.
+    const ack = await waitForFrame((f) => f.op === "released" && f.session === "rel-sess");
+    expect(ack.seq).toBe(3);
   });
 });
 

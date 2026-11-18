@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,8 +15,22 @@ const baseTask: TaskSpec = {
   checks: [{ type: "exit_code", equals: 0 }],
 };
 
+const scratch = new Set<string>();
+
+/** Temp dir for a test, reclaimed after the suite even if the test throws. */
+function tmp(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  scratch.add(dir);
+  return dir;
+}
+
+afterAll(() => {
+  for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
+  scratch.clear();
+});
+
 function tmpWorkspace(): string {
-  return mkdtempSync(join(tmpdir(), "eval-lib-test-"));
+  return tmp("eval-lib-test-");
 }
 
 describe("parseHarnessSpec", () => {
@@ -369,7 +383,7 @@ describe("bwrap", () => {
 
   describe("baseRoBinds", () => {
     it("keeps existing candidates only, dedupes, and includes home config dir only when present", () => {
-      const root = mkdtempSync(join(tmpdir(), "eval-sbx-"));
+      const root = tmp("eval-sbx-");
       try {
         const repo = join(root, "repo");
         mkdirSync(repo);
@@ -395,7 +409,7 @@ describe("bwrap", () => {
 
   describe("hiddenRepoPaths", () => {
     it("hides .git, series, and results when they exist; skips what does not", () => {
-      const root = mkdtempSync(join(tmpdir(), "eval-hidden-"));
+      const root = tmp("eval-hidden-");
       try {
         const repo = join(root, "repo");
         mkdirSync(join(repo, ".git"), { recursive: true });
@@ -415,7 +429,7 @@ describe("bwrap", () => {
     const origPath = process.env.PATH;
 
     function fakeBwrap(script: string): string {
-      const bin = mkdtempSync(join(tmpdir(), "eval-bwrap-bin-"));
+      const bin = tmp("eval-bwrap-bin-");
       writeFileSync(join(bin, "bwrap"), script, { mode: 0o755 });
       process.env.PATH = `${bin}:${origPath}`;
       return bin;
@@ -426,7 +440,7 @@ describe("bwrap", () => {
     }
 
     it("skips a directory named bwrap shadowing the real binary", () => {
-      const root = mkdtempSync(join(tmpdir(), "eval-bwrap-shadow-"));
+      const root = tmp("eval-bwrap-shadow-");
       const shadow = join(root, "a");
       const real = join(root, "b");
       mkdirSync(shadow);
@@ -546,8 +560,8 @@ describe("runHarness env override", () => {
 
 describe("startServe", () => {
   it("waits for readiness, then kills the whole group", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "hotdog-eval-serve-"));
-    const logDir = mkdtempSync(join(tmpdir(), "hotdog-eval-servelog-"));
+    const workspace = tmp("hotdog-eval-serve-");
+    const logDir = tmp("hotdog-eval-servelog-");
     try {
       writeFileSync(join(workspace, "srv.ts"), `
         Bun.serve({ port: 8799, fetch() { return new Response("ok"); } });
@@ -580,8 +594,8 @@ describe("startServe", () => {
   });
 
   it("fails loudly when the server never becomes ready", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "hotdog-eval-serve-"));
-    const logDir = mkdtempSync(join(tmpdir(), "hotdog-eval-servelog-"));
+    const workspace = tmp("hotdog-eval-serve-");
+    const logDir = tmp("hotdog-eval-servelog-");
     try {
       const { startServe } = await import("../../evals/lib/serve.ts");
       expect((await startServe(

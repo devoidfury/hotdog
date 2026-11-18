@@ -7,6 +7,7 @@ import {
   type QuestionBridgeHooks,
   type QuestionPolicy,
 } from "@extensions/websocket/question-input.ts";
+import { followupAnswered, unansweredReason } from "@core/context/input.ts";
 
 interface MockHooksState {
   policy: QuestionPolicy;
@@ -367,5 +368,83 @@ describe("WebSocketQuestionBridge - task-host hooks", () => {
     // A second steer with nothing pending is a no-op, not a phantom answer.
     expect(bridge.answerWithText("s1", "late")).toBe(false);
     bridge.clear();
+  });
+
+  it("answerWithText stamps followup provenance; channel answers stay unmarked", async () => {
+    // B3 carry fixed in B4: a WORKER question answered by the manager's
+    // task_followup must not read "interactive" (isInteractive() is
+    // channel-driven). The marker is the provenance the tool labels with.
+    const { bridge } = makeHookedBridge();
+    const p = bridge.collect("s1", [{ key: "q", prompt: "Q?" }]);
+    expect(bridge.answerWithText("s1", "manager says go")).toBe(true);
+    const answers = await p;
+    expect(answers).toEqual({ q: "manager says go" });
+    expect(followupAnswered(answers)).toBe(true);
+    // Non-enumerable: the symbol rides no JSON, no spread, no key walk.
+    expect(JSON.stringify(answers)).toBe('{"q":"manager says go"}');
+    expect({ ...answers }).toEqual({ q: "manager says go" });
+    bridge.clear();
+
+    // A human answer on the question's own channel is NOT a followup.
+    const { bridge: b2 } = makeHookedBridge();
+    const p2 = b2.collect("s2", [{ key: "q", prompt: "Q?" }]);
+    expect(b2.answer("s2", { q: "typed" })).toBe(true);
+    expect(followupAnswered(await p2)).toBe(false);
+    b2.clear();
+  });
+});
+
+// ── resolveUnanswered (B2 worker-path release, D10 marker) ─────────────────
+
+describe("WebSocketQuestionBridge.resolveUnanswered", () => {
+  let bridge: WebSocketQuestionBridge;
+
+  beforeEach(() => {
+    bridge = new WebSocketQuestionBridge(makeHooks());
+  });
+
+  afterEach(() => {
+    bridge.clear();
+  });
+
+  it("resolves with defaults PLUS the marker; a raced second resolver no-ops (delete-first)", async () => {
+    const p = bridge.collect("s1", [{ key: "q", prompt: "Q?", default: "d" }]);
+    expect(bridge.resolveUnanswered("s1", "the delegating manager's run was cancelled")).toBe(true);
+    const answers = await p;
+    expect(answers).toEqual({ q: "d" });
+    expect(unansweredReason(answers)).toBe("the delegating manager's run was cancelled");
+    expect(bridge.hasPending("s1")).toBe(false);
+    // The exact-once proof: every other resolver finds no entry.
+    expect(bridge.resolveUnanswered("s1", "again")).toBe(false);
+    expect(bridge.cancel("s1")).toBe(false);
+    expect(bridge.answer("s1", { q: "x" })).toBe(false);
+    expect(bridge.answerWithText("s1", "x")).toBe(false);
+  });
+
+  it("fires the settle hook with cancelled=true (the lane handoff stays intact)", async () => {
+    const settled: Array<{ sid: string; cancelled: boolean }> = [];
+    const hooked = new WebSocketQuestionBridge({
+      ...makeHooks(),
+      onQuestionSettled: (sid, cancelled) => {
+        settled.push({ sid, cancelled });
+      },
+    });
+    const p = hooked.collect("s1", [{ key: "q", prompt: "Q?" }]);
+    expect(hooked.resolveUnanswered("s1", "answerer gone")).toBe(true);
+    await p;
+    expect(settled).toEqual([{ sid: "s1", cancelled: true }]);
+    hooked.clear();
+  });
+
+  it("an unmarked collect resolves through the plain paths (interactive policy untouched)", async () => {
+    const p = bridge.collect("s1", [{ key: "q", prompt: "Q?", default: "d" }]);
+    bridge.cancel("s1");
+    const answers = await p;
+    expect(answers).toEqual({ q: "d" });
+    expect(unansweredReason(answers)).toBeNull();
+  });
+
+  it("returns false with nothing pending", () => {
+    expect(bridge.resolveUnanswered("nope", "gone")).toBe(false);
   });
 });

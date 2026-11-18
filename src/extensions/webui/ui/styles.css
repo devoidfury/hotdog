@@ -721,6 +721,19 @@ body.sidebar-resizing {
     border-color: var(--accent);
 }
 
+/* B5: attested-subagent label on a hidden-log hit (SearchHitWire.subagentOf).
+   Plain muted text, no badge treatment: it explains why the row never sat
+   in Recent Logs. Omitted outright when the hit carries no field. */
+.search-subagent {
+    margin-left: 6px;
+    font-size: 0.725rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 160px;
+}
+
 .search-snippet {
     margin-top: 5px;
     font-size: 0.805rem;
@@ -1389,18 +1402,6 @@ body.logs-resizing .sidebar-header-resize {
     opacity: 0.5;
 }
 
-/* Subagent view (owner ruling 2026-11-13): the profile/model switching
-   dropdowns are the ONE exception to "works like a live session" -- they
-   act on the ATTACHED manager, never the viewed task. The disabled attribute
-   on the trigger buttons drops them from the tab order; this reuses the
-   read-only pills' exact dim so the disabled posture is one treatment, not
-   two. */
-#input-area.selects-locked #model-selector,
-#input-area.selects-locked #profile-selector {
-    opacity: 0.5;
-    cursor: default;
-}
-
 /* ── Model & Profile Switchers (composer pills) ───────────────────────────── */
 
 /* The label is the pill; the combobox trigger sits inside it borderless.
@@ -1473,10 +1474,9 @@ body.logs-resizing .sidebar-header-resize {
     white-space: nowrap;
 }
 
-/* Honest disabled posture (the selects-locked subagent lock sets the
-   attribute): the pill already dims to 0.5 and hands its cursor to default;
-   the trigger must stop claiming pointer, or the disabled chip still begs
-   to be clicked. */
+/* Honest disabled posture: the pill already dims to 0.5 and hands its
+   cursor to default; the trigger must stop claiming pointer, or the
+   disabled chip still begs to be clicked. */
 #model-select:disabled,
 #profile-select:disabled {
     cursor: default;
@@ -3104,6 +3104,46 @@ body.logs-resizing .sidebar-header-resize {
     height: 24px;
     background: linear-gradient(to bottom, transparent, var(--bg-primary));
     pointer-events: none;
+}
+
+/* Jump-to-bottom (message-list's jumpHost button): hangs over the transcript
+   seam, centered above the floating composer -- the same bottom: calc(100% +
+   6px) anchor as #completion-menu. Center because the composer's right edge
+   belongs to send/cancel; z-index rides over the scrim but under the tab-
+   completion popup (20). Chrome buttons never inherit the field's chrome. */
+.jump-to-bottom {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-full);
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.jump-to-bottom:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+}
+
+.jump-to-bottom:active {
+    background: var(--bg-active);
+}
+
+/* Author display beats the UA [hidden] rule, so the hide is spelled out:
+   the manager toggles the .hidden property (reflects to the attribute). */
+.jump-to-bottom[hidden] {
+    display: none;
 }
 
 #chat-form {

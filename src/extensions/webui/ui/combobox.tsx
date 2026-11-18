@@ -33,8 +33,8 @@ export interface ComboboxProps {
   /** Option labels (value === label here: profiles and model ids are both
    *  their own display text). */
   options: string[];
-  /** Locked posture (the selects-locked subagent view): refuses open and
-   *  selection; closes an open popup when it lands. */
+  /** Locked posture: refuses open and selection; closes an open popup when
+   *  it lands. */
   disabled?: boolean;
   /** Fires ONLY on a real change -- picking the already-current value is a
    *  no-op, exactly like the native select's change event. */

@@ -3,9 +3,6 @@
 // ceiling, and the timing constants for auth-pending reaping, idle cleanup,
 // and the SIGTERM drain.
 
-/** Activity-replay ring bounds (see SessionRegistry.recordTaskActivity). */
-export const MAX_TASK_ACTIVITY_HISTORY_ITEMS = 300;
-export const MAX_TASK_ACTIVITY_HISTORY_TASKS = 50;
 
 /**
  * Rebuilt-subagent-lineage rows kept PER MANAGER SESSION on the wire (boot

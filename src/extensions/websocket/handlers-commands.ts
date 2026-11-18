@@ -13,11 +13,25 @@ export function handleCommand(ctx: RouteContext): void {
   const { ws, msg, registry } = ctx;
   const sessionManager = registry.getSessionManager();
   if (!msg.sessionId || !msg.command) return;
-  registry.touch(msg.sessionId as string);
   let cmdText = msg.command as string;
   if (cmdText.startsWith("/")) {
     cmdText = cmdText.slice(1).trim();
   }
+  // B3 refusal table: the subagent pane is text-followup-only, so NOTHING
+  // dispatches on a worker sid (the existing composer rule, enforced
+  // server-side). /fork keeps its own honest reason: there is no manager
+  // entry to fork. touch stays behind the gate -- a refusal moves no state.
+  if (registry.getRow(msg.sessionId as string)?.kind === "worker") {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.ERROR,
+      message:
+        cmdText === "fork" || cmdText.startsWith("fork ")
+          ? "Subagent sessions cannot be forked (no manager entry to fork)."
+          : "Subagent sessions accept text follow-ups only; commands are not dispatched.",
+    });
+    return;
+  }
+  registry.touch(msg.sessionId as string);
 
   // /fork is intercepted rather than dispatched to the bus: the registry must
   // register the new session's UI metadata and re-target the requesting socket,

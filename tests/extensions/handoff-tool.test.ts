@@ -169,7 +169,16 @@ describe("handoff-tool create() extension", () => {
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
+    // Restore KEY BY KEY: `process.env = {...}` swaps in a detached object on
+    // this runtime -- later `process.env.TMPDIR = ...` writes then never reach
+    // the real environment, silently poisoning tmpdir()-reading tests in a
+    // shared runner process.
+    for (const [k, v] of Object.entries(originalEnv)) {
+      if (process.env[k] !== v) process.env[k] = v;
+    }
+    for (const k of Object.keys(process.env)) {
+      if (!(k in originalEnv)) delete process.env[k];
+    }
   });
 
   it("returns extension with all expected hooks", async () => {

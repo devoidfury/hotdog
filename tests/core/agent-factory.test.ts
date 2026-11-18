@@ -350,6 +350,22 @@ describe("wireSessionEndReap", () => {
     expect(reaped).toEqual(["gone"]);
   });
 
+  it("a link with `release` gets release, not the bare reap (scratch reclaim rides the confirmation)", async () => {
+    const hooks = new HookSystem();
+    const calls: string[] = [];
+    const link = {
+      invoke: async () => {
+        throw new Error("not used");
+      },
+      close: async () => {},
+      reap: () => calls.push("reap"),
+      release: (session: string) => calls.push(`release:${session}`),
+    };
+    wireSessionEndReap(hooks, link as never);
+    await hooks.notifyHooks(HOOKS.SESSION_END, { sessionId: "done" });
+    expect(calls).toEqual(["release:done"]); // release reaps too; no double frame
+  });
+
   it("registers once per hook system, however many factories share it", () => {
     const hooks = new HookSystem();
     const { link: a, reaped: reapedA } = fakeLink();

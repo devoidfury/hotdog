@@ -755,6 +755,22 @@ describe("createWsServer", () => {
     expect(msg.message).toContain("Unknown message type");
   });
 
+  it("retired taskActivityRequest route answers with the unknown-type error frame", async () => {
+    // B4 deleted the C2S.TASK_ACTIVITY_REQUEST table entry: the old client's
+    // replay request is now just an unknown type -- generic error frame, no
+    // TASK_ACTIVITY(_HISTORY) frame can ever follow it.
+    const ws = await connectWithSession();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: "taskActivityRequest", taskId: "task-1" }));
+
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.ERROR);
+    expect(msg.message).toContain("Unknown message type");
+    expect(
+      ws.messages.map((m) => JSON.parse(m)).some((m: any) => String(m.type).startsWith("taskActivity")),
+    ).toBe(false);
+  });
+
   it("handles invalid JSON", async () => {
     const ws = await connectWithSession();
 
@@ -1807,6 +1823,44 @@ describe("log replay via SWITCH_SESSION", () => {
     expect(cursor).toBeDefined();
     expect(cursor.value).toBe(2);
   });
+
+  // ── Lazy history windowing (history-window.ts, TASK W) ──────────────────
+
+  it("full replay ships the trailing K messages and attests the window on sessionCreated", async () => {
+    const entries: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < 9; i++) {
+      entries.push({ source: "input", content: `Q${i}` }, { source: "llm", content: `A${i}` });
+    }
+    const ws = await switchWithLog(entries);
+    const msgs = ws.messages.map((m) => JSON.parse(m));
+    const created = msgs.find((m: any) => m.type === S2C.SESSION_CREATED);
+    // The window meta rides the very frame that clears the client's
+    // transcript: oldestIndex is the EPOCH-relative index of the first
+    // replayed entry (the boundary-aligned window head).
+    expect(created.hasOlder).toBe(true);
+    expect(created.oldestIndex).toBe(6); // (9 - K) turns x 2 entries
+    expect(created.epochToken).toBe(0); // no RESET: the epoch starts at 0
+    const users = msgs
+      .filter((m: any) => m.type === S2C.USER_MESSAGE)
+      .map((m: any) => m.content);
+    expect(users).toEqual(["Q3", "Q4", "Q5", "Q6", "Q7", "Q8"]);
+    // The cursor bookkeeping is UNTOUCHED by windowing: the client may have
+    // paged older history, but its TAIL still ends at the full log length.
+    const cursor = msgs.find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+    expect(cursor.value).toBe(18);
+  });
+
+  it("a session that fits the window replays everything with NO window fields", async () => {
+    const entries: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < 6; i++) {
+      entries.push({ source: "input", content: `Q${i}` }, { source: "llm", content: `A${i}` });
+    }
+    const ws = await switchWithLog(entries);
+    const created = ws.messages.map((m) => JSON.parse(m)).find((m: any) => m.type === S2C.SESSION_CREATED);
+    expect(created.hasOlder).toBeUndefined();
+    expect(created.oldestIndex).toBeUndefined();
+    expect(created.epochToken).toBeUndefined();
+  });
 });
 
 // ── Reconnect identity (?session=...&cursor=...) ────────────────────────────
@@ -1919,6 +1973,31 @@ describe("reconnect attach with session id + cursor", () => {
       .map((m) => JSON.parse(m))
       .find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
     expect(cursor.value).toBe(3);
+  });
+
+  it("delta attach stays byte-identical under windowing (a few entries catch up, no window fields)", async () => {
+    // A BIG log: the full-replay path would window it. The delta reconnect
+    // catching up a few entries must not -- the slice is the exact tail the
+    // client lacks, and sessionCreated carries no window meta (the client
+    // already holds its older window; loadOlder pages against it).
+    writeLog("reconnect-delta-big", Array.from({ length: 9 }, (_, i) => `m${i}`));
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?session=reconnect-delta-big&cursor=7", headers: { host: "localhost" } }, ws);
+
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.replayDelta).toBe(true);
+    expect(created.hasOlder).toBeUndefined();
+    expect(created.oldestIndex).toBeUndefined();
+    expect(created.epochToken).toBeUndefined();
+    const msgs = ws.messages.map((m) => JSON.parse(m));
+    const users = msgs
+      .filter((m: any) => m.type === S2C.USER_MESSAGE)
+      .map((m: any) => m.content);
+    expect(users).toEqual(["m7", "m8"]);
+    const cursor = msgs.find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+    expect(cursor.value).toBe(9);
   });
 
   it("reports cursor 0 when an in-flight partial stream is flushed", async () => {

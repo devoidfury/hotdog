@@ -3,7 +3,7 @@
 // The chat opens a socket at construction; tests grab it from
 // FakeWebSocket.instances (reset before each test by useFakeWebSocket()).
 
-import { describe, it, expect, afterEach, beforeEach } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { createChat, type ChatController } from "@extensions/webui/ui/chat.ts";
 import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
 import { FakeWebSocket, useFakeWebSocket } from "../dom-helper/index.ts";
@@ -750,168 +750,325 @@ describe("thinking row recovery from the attach's working state", () => {
   });
 });
 
-// ── Viewed-subagent pointer persistence (sessionStorage, per TAB) ──────────
-// hotdog-viewed-task records the main-pane browse pointer. A reload re-plays
-// it EXACTLY ONCE, through the same viewSubagent open, once the task hydrates
-// into the feed; a full snapshot without the id clears the key (unknown/gone
-// degrades to today's boot); navigation writes the NEW pointer, never a stale
-// one. Storage is the workbench-tab stub idiom -- installed before createChat,
-// resolved per call, no mock.module.
+// ── Worker-session view (B4: the pane IS the session) ──────────────────────
+// The browse-pointer relay retired with the relay: a worker pane is the
+// STANDARD session view opened by switchSession, so reload restore rides the
+// ordinary last-session persistence and the view kind rides sessionCreated
+// (B3's additive fields). A held question is READ-ONLY for the watcher (R3):
+// the delegating manager answers, never the pane. Steering rides exactly one
+// taskFollowup frame with NO optimistic row -- the drained USER_MESSAGE is the
+// steer line's sole bearer, so it can never double up.
 
-describe("viewed-subagent pointer persistence (reload restore)", () => {
-  let session: Map<string, string>;
-  let prevSessionStorage: unknown;
-
-  beforeEach(() => {
-    session = new Map([["hotdog-viewed-task", "task-9"]]);
-    prevSessionStorage = (window as unknown as Record<string, unknown>).sessionStorage;
-    (window as unknown as Record<string, unknown>).sessionStorage = {
-      getItem: (k: string) => session.get(k) ?? null,
-      setItem: (k: string, v: string) => void session.set(k, String(v)),
-      removeItem: (k: string) => void session.delete(k),
-    };
-  });
-  afterEach(() => {
-    if (prevSessionStorage === undefined) {
-      delete (window as unknown as Record<string, unknown>).sessionStorage;
-    } else {
-      (window as unknown as Record<string, unknown>).sessionStorage = prevSessionStorage;
-    }
-  });
-
-  const task = (over: Record<string, unknown> = {}) => ({
-    taskId: "task-9",
-    description: "do the delegated thing",
-    sessionId: "s1",
-    status: "running",
-    createdAt: 1,
-    startedAt: 1,
-    endedAt: null,
-    activeMs: 0,
-    inRun: true,
-    turnStartedAt: 1,
-    ...over,
-  });
-
-  it("pointer applied exactly once, through viewSubagent, when the task hydrates", () => {
-    const { chat, ws, container } = makeChat();
-    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
-    chat.setSession("s1");
-    // The attach cleared the live pointer; the candidate waits in memory.
-    expect(chat.viewedTaskIdAtom()).toBeNull();
-    expect(session.get("hotdog-viewed-task")).toBe("task-9");
-
-    // Hydration WITHOUT the id must not apply anything yet... and a full
-    // snapshot that DENIES the id is handled in its own test. Here the
-    // snapshot carries the task: the pointer lands.
-    ws.fireMessage({ type: "taskList", tasks: [task()] });
-    expect(chat.viewedTaskIdAtom()).toBe("task-9");
-    // Same open path: the delegated-prompt seed paints, and the transcript
-    // request rides (open semantics, not a bare pointer write).
-    expect(container.textContent).toContain("do the delegated thing");
-    expect(ws.sent.some((s) => (JSON.parse(s) as Sent).type === "taskActivityRequest")).toBe(true);
-
-    // Exactly once: a later snapshot containing the id never re-opens (no
-    // second clear, no second request).
-    const requestsBefore = ws.sent.filter((s) => (JSON.parse(s) as Sent).type === "taskActivityRequest").length;
-    ws.fireMessage({ type: "taskList", tasks: [task()] });
-    const requestsAfter = ws.sent.filter((s) => (JSON.parse(s) as Sent).type === "taskActivityRequest").length;
-    expect(requestsAfter).toBe(requestsBefore);
-    expect(chat.viewedTaskIdAtom()).toBe("task-9");
-  });
-
-  it("a taskActivity or taskUpdate frame for the candidate also hydrates it (once)", () => {
+describe("worker-session view: kind, read-only question, single-frame steer", () => {
+  it("sessionCreated kind rides the view state; an interactive attach resets it", () => {
     const { chat, ws } = makeChat();
-    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
-    chat.setSession("s1");
     ws.fireMessage({
-      type: "taskActivity",
-      taskId: "task-9",
-      activity: { kind: "text", content: "streamed bytes" },
+      type: "sessionCreated",
+      sessionId: "w1",
+      kind: "subagent",
+      parentSessionId: "s1",
     });
-    expect(chat.viewedTaskIdAtom()).toBe("task-9");
-    expect(session.get("hotdog-viewed-task")).toBe("task-9");
-    // The restore paints this frame's block via the buffer -- and a later
-    // taskUpdate never re-opens.
-    ws.fireMessage({ type: "taskUpdate", task: task({ status: "completed", inRun: false }) });
-    expect(chat.viewedTaskIdAtom()).toBe("task-9");
+    chat.setSession("w1");
+    expect(chat.sessionKindAtom()).toBe("subagent");
+    expect(chat.sessionParentAtom()).toBe("s1");
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    expect(chat.sessionKindAtom()).toBeNull();
+    expect(chat.sessionParentAtom()).toBeNull();
   });
 
-  it("a full snapshot WITHOUT the id clears the key and behaves as today", () => {
+  it("a held question on a worker attach renders READ-ONLY (no answer control)", () => {
+    const { chat, ws, container } = makeChat();
+    ws.fireMessage({
+      type: "sessionCreated",
+      sessionId: "w1",
+      kind: "subagent",
+      parentSessionId: "s1",
+    });
+    chat.setSession("w1"); // builds the manager (the app does it in the callback)
+    ws.fireMessage({
+      type: "question",
+      sessionId: "w1",
+      questions: [{ key: "q1", message: "Which port?", options: ["3000", "8080"] }],
+    });
+    expect(container.textContent).toContain("asked the delegating manager");
+    expect(container.textContent).toContain("Which port?");
+    // No submit path to reject: the control never renders.
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    void chat;
+  });
+
+  it("an interactive attach keeps the question surface fully interactive", () => {
     const { chat, ws, container } = makeChat();
     ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
-    chat.setSession("s1");
-    ws.fireMessage({ type: "assistantMessage", sessionId: "s1", content: "the parent transcript" });
-    ws.fireMessage({ type: "taskList", tasks: [task({ taskId: "other-task" })] });
-    expect(chat.viewedTaskIdAtom()).toBeNull();
-    expect(session.has("hotdog-viewed-task")).toBe(false);
-    // The parent's transcript paints un-suppressed, exactly as a boot that
-    // never had a pointer.
-    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "live into the log" });
-    expect(container.textContent).toContain("live into the log");
+    chat.setSession("s1"); // builds the manager
+    ws.fireMessage({
+      type: "question",
+      sessionId: "s1",
+      questions: [{ key: "q1", message: "Which port?", options: ["3000", "8080"] }],
+    });
+    expect(container.textContent).not.toContain("asked the delegating manager");
+    expect(container.querySelectorAll("button").length).toBeGreaterThan(0);
+    void chat;
   });
 
-  it("a candidate whose manager is not built yet waits for the next feed frame", () => {
-    // taskList broadcast can beat the attach: no manager, no open, candidate
-    // intact -- the burst's own snapshot (after sessionCreated/setSession)
-    // decides.
-    const { chat, ws } = makeChat();
-    ws.fireMessage({ type: "taskList", tasks: [task()] });
-    expect(chat.viewedTaskIdAtom()).toBeNull();
-    expect(session.get("hotdog-viewed-task")).toBe("task-9");
+  it("taskFollowup sends exactly ONE frame and paints no optimistic row", () => {
+    const { chat, ws, container } = makeChat();
+    ws.fireMessage({
+      type: "sessionCreated",
+      sessionId: "w1",
+      kind: "subagent",
+      parentSessionId: "s1",
+    });
+    chat.setSession("w1");
+    chat.taskFollowup("t1", "  left  ");
+    const frames = ws
+      .sent.map((s) => JSON.parse(s) as Sent)
+      .filter((m) => m.type === "taskFollowup");
+    expect(frames).toEqual([{ type: "taskFollowup", taskId: "t1", message: "left" }]);
+    // No echo before the drain: the worker's own USER_MESSAGE event is the
+    // row's sole bearer.
+    expect(container.textContent).not.toContain("left");
+    ws.fireMessage({ type: "userMessage", sessionId: "w1", content: "left" });
+    expect(container.querySelectorAll(".message.user")).toHaveLength(1);
+  });
+});
+
+// ── Lazy history windowing (chat layer, TASK W) ─────────────────────────────
+// The chat owns the window state (id + oldestIndex) and the once-per-gap
+// loadOlder guard; the manager owns the scroll geometry. These pins drive
+// the wire pair end-to-end against the FakeWebSocket + dom-helper container.
+
+describe("lazy history: chat layer loadOlder", () => {
+  type Geo = { scrollTop: number; scrollHeight: number; clientHeight: number };
+
+  function armed() {
+    const ctx = makeChat();
+    const { chat, container, ws } = ctx;
     ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
-    chat.setSession("s1");
-    ws.fireMessage({ type: "taskList", tasks: [task()] });
-    expect(chat.viewedTaskIdAtom()).toBe("task-9");
+    chat.setSession("s1"); // builds the manager (the app does this in the callback)
+    const c = container as unknown as Geo;
+    c.scrollHeight = 5000;
+    c.clientHeight = 500;
+    const olderReqs = () =>
+      ws.sent.map((s) => JSON.parse(s) as Sent).filter((m) => m.type === "loadOlder");
+    const scrollEdge = () => {
+      c.scrollTop = 4000;
+      container.dispatchEvent(new Event("scroll"));
+      c.scrollTop = 80;
+      container.dispatchEvent(new Event("scroll"));
+    };
+    return { chat, container, ws, olderReqs, scrollEdge };
+  }
+
+  it("windowed logViewed arms the trigger; a top-zone edge sends ONE loadOlder per gap", () => {
+    const { ws, olderReqs, scrollEdge } = armed();
+    ws.fireMessage({
+      type: "logViewed", logId: "cold-1", entries: [], hasOlder: true, oldestIndex: 12,
+    });
+    scrollEdge();
+    const reqs = olderReqs();
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]!).toMatchObject({ logId: "cold-1", olderThan: 12 });
+    // In-flight: more edges do NOT pile up requests.
+    scrollEdge();
+    expect(olderReqs()).toHaveLength(1);
   });
 
-  it("navigation persists the NEW pointer, never a stale one", () => {
-    const { chat, ws } = makeChat();
-    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
-    chat.setSession("s1");
-    ws.fireMessage({ type: "taskList", tasks: [task()] });
-    expect(session.get("hotdog-viewed-task")).toBe("task-9");
-
-    // Open ANOTHER task: the key moves with the pointer.
-    ws.fireMessage({ type: "taskList", tasks: [task(), task({ taskId: "task-10" })] });
-    chat.viewSubagent("task-10");
-    expect(chat.viewedTaskIdAtom()).toBe("task-10");
-    expect(session.get("hotdog-viewed-task")).toBe("task-10");
-
-    // Close the view: the key goes.
-    chat.closeSubagentView();
-    expect(chat.viewedTaskIdAtom()).toBeNull();
-    expect(session.has("hotdog-viewed-task")).toBe(false);
-
-    // Re-open, then navigate to another session / a cold log / a fresh one:
-    // each route persists "no pointer".
-    chat.viewSubagent("task-9");
-    expect(session.get("hotdog-viewed-task")).toBe("task-9");
-    chat.switchSession("s2");
-    expect(chat.viewedTaskIdAtom()).toBeNull();
-    expect(session.has("hotdog-viewed-task")).toBe(false);
-
-    chat.viewSubagent("task-9");
-    ws.fireMessage({ type: "logViewed", logId: "l1", entries: [] });
-    expect(chat.viewedTaskIdAtom()).toBeNull();
-    expect(session.has("hotdog-viewed-task")).toBe(false);
-
-    chat.viewSubagent("task-9");
-    chat.createSession();
-    expect(chat.viewedTaskIdAtom()).toBeNull();
-    expect(session.has("hotdog-viewed-task")).toBe(false);
+  it("a delivered page prepends, re-targets the next page, and hasOlder=false closes the seam", () => {
+    const { chat, container, ws, olderReqs, scrollEdge } = armed();
+    ws.fireMessage({
+      type: "logViewed", logId: "cold-1", entries: [], hasOlder: true, oldestIndex: 12,
+    });
+    scrollEdge();
+    const reqId = olderReqs()[0]!.requestId;
+    ws.fireMessage({
+      type: "loadOlderResult",
+      requestId: reqId,
+      logId: "cold-1",
+      entries: [
+        { source: "input", content: "older question" },
+        { source: "llm", content: "older answer" },
+      ],
+      oldestIndex: 6,
+      hasOlder: true,
+    });
+    // Prepend landed in the real transcript (browse mode renders into it).
+    expect(container.querySelector(".message.user")!.textContent).toContain("older question");
+    scrollEdge();
+    const reqs = olderReqs();
+    expect(reqs).toHaveLength(2);
+    expect(reqs[1]!).toMatchObject({ olderThan: 6 }); // re-targeted at the new head
+    // The last page closes the window: no further requests, ever (this view).
+    ws.fireMessage({
+      type: "loadOlderResult", requestId: reqs[1]!.requestId, logId: "cold-1",
+      entries: [], oldestIndex: 0, hasOlder: false,
+    });
+    scrollEdge();
+    expect(olderReqs()).toHaveLength(2);
+    void chat;
   });
 
-  it("clearTasks (logout) kills the candidate and the key", () => {
-    const { chat, ws } = makeChat();
-    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
-    chat.setSession("s1");
-    // Candidate pending, never hydrated: logout must not leave it for the
-    // next login's taskList to resurrect.
-    chat.clearTasks();
-    expect(session.has("hotdog-viewed-task")).toBe(false);
-    ws.fireMessage({ type: "taskList", tasks: [task()] });
-    // A fresh taskList after logout never restores the old candidate.
-    expect(chat.viewedTaskIdAtom()).toBeNull();
+  it("a refusal frees the in-flight slot; the next edge retries the same window (no retry loop)", () => {
+    const { ws, olderReqs, scrollEdge } = armed();
+    ws.fireMessage({
+      type: "logViewed", logId: "cold-1", entries: [], hasOlder: true, oldestIndex: 12,
+    });
+    scrollEdge();
+    const reqId = olderReqs()[0]!.requestId;
+    ws.fireMessage({ type: "loadOlderResult", requestId: reqId, logId: "cold-1", error: "olderThan 12 is beyond log" });
+    // No auto-retry scheduled -- the wire stays quiet until the user acts.
+    expect(olderReqs()).toHaveLength(1);
+    // The window stands; the next edge is the retry, same olderThan.
+    scrollEdge();
+    expect(olderReqs()).toHaveLength(2);
+    expect(olderReqs()[1]!).toMatchObject({ olderThan: 12 });
+  });
+
+  it("an epoch_moved refusal CLOSES the seam: no prepend, no re-hit; navigation re-attests", () => {
+    const { ws, olderReqs, scrollEdge } = armed();
+    ws.fireMessage({
+      type: "logViewed", logId: "cold-1", entries: [], hasOlder: true, oldestIndex: 12, epochToken: 4,
+    });
+    scrollEdge();
+    const reqs = olderReqs();
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]!).toMatchObject({ olderThan: 12, epochToken: 4 });
+    // A mid-socket /rewind moved the epoch; the correlated refusal is the
+    // machine-readable class the seam closes on (re-hitting the stale index
+    // would page the WRONG entries).
+    ws.fireMessage({
+      type: "loadOlderResult",
+      requestId: reqs[0]!.requestId,
+      logId: "cold-1",
+      code: "epoch_moved",
+      error: "The session's epoch moved (epochToken 4 is no longer current).",
+    });
+    scrollEdge();
+    scrollEdge();
+    expect(olderReqs()).toHaveLength(1);
+    // A navigation re-attests and re-opens the seam with the NEW token.
+    ws.fireMessage({
+      type: "logViewed", logId: "cold-1", entries: [], hasOlder: true, oldestIndex: 30, epochToken: 9,
+    });
+    scrollEdge();
+    const after = olderReqs();
+    expect(after).toHaveLength(2);
+    expect(after[1]!).toMatchObject({ olderThan: 30, epochToken: 9 });
+  });
+
+  it("a delivered page adopts the echoed epochToken for the next request", () => {
+    const { ws, olderReqs, scrollEdge } = armed();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1", hasOlder: true, oldestIndex: 8 }); // no token
+    scrollEdge();
+    expect(olderReqs()[0]!).not.toHaveProperty("epochToken");
+    ws.fireMessage({
+      type: "loadOlderResult",
+      requestId: olderReqs()[0]!.requestId,
+      logId: "s1",
+      entries: [{ source: "input", content: "older" }],
+      oldestIndex: 4,
+      hasOlder: true,
+      epochToken: 7, // the server echoes the epoch it cut the page from
+    });
+    scrollEdge();
+    expect(olderReqs()[1]!).toMatchObject({ olderThan: 4, epochToken: 7 });
+  });
+
+  it("stale/mismatched replies drop: wrong id, wrong log -- never a prepend, never a freed slot misfire", () => {
+    const { container, ws, olderReqs, scrollEdge } = armed();
+    ws.fireMessage({
+      type: "logViewed", logId: "cold-1", entries: [], hasOlder: true, oldestIndex: 12,
+    });
+    scrollEdge();
+    const reqId = olderReqs()[0]!.requestId;
+    // Wrong requestId: dropped, slot still held.
+    ws.fireMessage({
+      type: "loadOlderResult", requestId: (reqId as number) + 99, logId: "cold-1",
+      entries: [{ source: "input", content: "stale" }], oldestIndex: 6, hasOlder: true,
+    });
+    expect(container.textContent).not.toContain("stale");
+    scrollEdge();
+    expect(olderReqs()).toHaveLength(1); // still one in flight
+    // Right id, wrong log (pane moved on): dropped.
+    ws.fireMessage({
+      type: "loadOlderResult", requestId: reqId, logId: "other-log",
+      entries: [{ source: "input", content: "wrong log" }], oldestIndex: 6, hasOlder: true,
+    });
+    expect(container.textContent).not.toContain("wrong log");
+  });
+
+  it("jump click while a page is in flight: one request, pin survives the page, wire stays quiet", () => {
+    // Jump-to-bottom exclusivity pin: the click touches only scroll/follow/
+    // its own visibility -- zero wire sends, zero browse-mode side effects.
+    const host = document.createElement("div");
+    const { chat, container, ws } = makeChat({ getJumpHost: () => host });
+    chat.setSession("s1"); // builds the manager on this host
+    const btn = host.querySelector(".jump-to-bottom") as HTMLElement;
+    expect(btn).not.toBeNull();
+    const olderReqsOf = () =>
+      ws.sent.map((s) => JSON.parse(s) as Sent).filter((m) => m.type === "loadOlder");
+    let base = 0;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => base + container.children.length * 100,
+    });
+    const c = container as unknown as Geo;
+    c.clientHeight = 300;
+    // Windowed live session (a windowed FULL replay attests it).
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1", hasOlder: true, oldestIndex: 8 });
+    // Paint the transcript tail through the live path.
+    ws.fireMessage({ type: "userMessage", content: "older live tail" });
+    ws.fireMessage({ type: "assistantMessage", content: "older answer" });
+    base = 2000; // the tail lays out ~2000px tall (long messages)
+    // Scroll up: pins drop, the top-zone edge requests the page.
+    c.scrollTop = 500;
+    container.dispatchEvent(new Event("scroll"));
+    c.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll"));
+    const reqs = olderReqsOf();
+    expect(reqs).toHaveLength(1);
+    expect(btn.hidden).toBe(false);
+    // CLICK with the page still in flight: instant pin, no new wire frames.
+    const sentBefore = ws.sent.length;
+    btn.click();
+    container.dispatchEvent(new Event("scroll")); // the browser's echo
+    expect(ws.sent.length).toBe(sentBefore); // chrome only: zero sends
+    expect(c.scrollTop).toBe(container.scrollHeight);
+    expect(btn.hidden).toBe(true);
+    expect(chat.sessionKindAtom()).toBeNull(); // the view kind rides sessionCreated only
+    // The page lands on the jumped (pinned) view: anchoring restores to the
+    // NEW bottom, the guarded echo swallows, follow survives.
+    ws.fireMessage({
+      type: "loadOlderResult", requestId: reqs[0]!.requestId, logId: "s1",
+      entries: [{ source: "input", content: "older" }, { source: "llm", content: "answer" }],
+      oldestIndex: 4, hasOlder: true,
+    });
+    container.dispatchEvent(new Event("scroll")); // the guarded restore echo
+    expect(olderReqsOf()).toHaveLength(1); // no re-fire from any of this
+    expect(c.scrollTop).toBe(container.scrollHeight); // STILL the bottom
+    expect(btn.hidden).toBe(true); // follow pinned through the anchor
+  });
+
+  it("full replay attests the window; a delta for the same session keeps it; another session clears it", () => {
+    const { chat, ws, olderReqs, scrollEdge } = armed();
+    // Windowed FULL replay (sessionCreated fields, see attach.ts).
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1", hasOlder: true, oldestIndex: 8 });
+    scrollEdge();
+    const reqs = olderReqs();
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]!).toMatchObject({ logId: "s1", olderThan: 8 });
+    ws.fireMessage({
+      type: "loadOlderResult", requestId: reqs[0]!.requestId, logId: "s1",
+      entries: [{ source: "input", content: "older live history" }], oldestIndex: 4, hasOlder: true,
+    });
+    // Delta reconnect for the SAME session: the held window head stays.
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1", replayDelta: true });
+    scrollEdge();
+    expect(olderReqs()[1]!).toMatchObject({ olderThan: 4 });
+    // Attach to ANOTHER session with no window fields: the seam closes.
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s2" });
+    chat.setSession("s2", false);
+    scrollEdge();
+    expect(olderReqs()).toHaveLength(2);
   });
 });

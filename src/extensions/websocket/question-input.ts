@@ -3,13 +3,16 @@
 // when the timeout elapses (per questionStrategy), or when the session is
 // cancelled/deleted.
 //
-// Strategy semantics:
+// Strategy semantics (interactive sessions -- task WORKER rows run `wait`
+// always; the host's getPolicy coerces any inherited strategy on a worker
+// row, owner rulings 2026-11-16, and releases held worker questions through
+// resolveUnanswered when the answerer (the delegating manager) goes away):
 //   wait    -- hold until a client answers (no timeout timer)
 //   default -- after questionTimeoutSecs, resolve with defaults
 //   cancel  -- after questionTimeoutSecs, interrupt the session (which
 //              cancels the pending question with defaults)
 
-import type { QuestionDef } from "@core/context/input.ts";
+import { markAnswersFollowup, markAnswersUnanswered, type QuestionDef } from "@core/context/input.ts";
 
 export type QuestionStrategy = "wait" | "default" | "cancel";
 
@@ -118,7 +121,8 @@ export class WebSocketQuestionBridge {
    * Settle the pending question with free text: the text answers the first
    * question, the rest take defaults. This is how a follow-up lands on a
    * session blocked in a question -- the text is the answer, not a new turn.
-   * False when nothing is pending.
+   * False when nothing is pending. The resolution carries the
+   * followup-answer marker (see markAnswersFollowup).
    */
   answerWithText(sessionId: string, text: string): boolean {
     const entry = this.#pending.get(sessionId);
@@ -128,6 +132,11 @@ export class WebSocketQuestionBridge {
     const answers = WebSocketQuestionBridge.defaults(entry.questions);
     const first = entry.questions[0];
     if (first) answers[first.key] = text;
+    // Provenance: this text is a FOLLOWUP answer (a manager task_followup on
+    // a worker row, or the host's followup routing), not a human at the
+    // question's channel. Stamped so the tool's result entry can say so
+    // instead of letting channel-driven isInteractive() call it interactive.
+    markAnswersFollowup(answers);
     entry.resolve(answers, false);
     return true;
   }
@@ -173,6 +182,28 @@ export class WebSocketQuestionBridge {
     this.#pending.delete(sessionId);
     if (entry.timer) clearTimeout(entry.timer);
     entry.resolve(WebSocketQuestionBridge.defaults(entry.questions), true);
+    return true;
+  }
+
+  /**
+   * Resolve the pending question with defaults AND the D10 unanswered marker
+   * (a Symbol-keyed non-enumerable property carrying `reason`), so the
+   * question tool renders `mode: "unanswered"` instead of passing defaults
+   * off as an answer. This is the WORKER-PATH entry point: the manager-gone
+   * closure and the terminal release call it; nothing on an interactive
+   * session's paths stamps anything (their cancel/timeout behavior stays
+   * byte-identical). Same delete-first idiom as cancel/answer: a raced second
+   * resolver finds no entry and no-ops, so no pending ever double-resolves.
+   */
+  resolveUnanswered(sessionId: string, reason: string): boolean {
+    const entry = this.#pending.get(sessionId);
+    if (!entry) return false;
+    this.#pending.delete(sessionId);
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.resolve(
+      markAnswersUnanswered(WebSocketQuestionBridge.defaults(entry.questions), reason),
+      true,
+    );
     return true;
   }
 

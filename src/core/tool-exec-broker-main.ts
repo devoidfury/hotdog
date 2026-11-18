@@ -41,6 +41,14 @@ interface PoolEntry {
   fenceId: string;
   /** Deferred hard-kill timer armed by dropEntry (the runner should drain on its own). */
   killTimer: ReturnType<typeof setTimeout> | null;
+  /** Set once this entry's process death has been reported (noteEntryGone fires from both exit and error). */
+  goneSent?: boolean;
+}
+
+/** One `release` frame's watched set: the entries THAT frame dropped. */
+interface ReleaseWatch {
+  seq: number;
+  entries: Set<PoolEntry>;
 }
 
 /** Broker-child state: the pool plus the knobs handed down as argv. */
@@ -53,6 +61,16 @@ interface BrokerState {
    * runner this child spawns, so no invoke can outrun a runner's tool map.
    */
   descriptors: WireToolDescriptor[];
+  /**
+   * Sessions with `release` frames awaiting confirmation, FIFO per session:
+   * each frame appends the entries it dropped, and acks drain from the head
+   * ONLY -- an ack for seq N therefore proves every entry dropped at seq
+   * <= N is process-dead. A frame with nothing to drop still queues (an
+   * empty bucket cannot jump ahead of a still-draining older bucket: an
+   * early ack would license the supervisor to rm a dir the older bucket's
+   * runner has bound).
+   */
+  pendingRelease: Map<string, ReleaseWatch[]>;
 }
 
 function poolKey(session: string, cls: string): string {
@@ -85,6 +103,7 @@ function runBroker(): void {
   const state: BrokerState = {
     pool: new Map(),
     descriptors: [],
+    pendingRelease: new Map(),
     ...parseBrokerArgs(process.argv.slice(2)),
   };
   writeSupervisor({ op: "ready" });
@@ -158,6 +177,9 @@ function handleFrame(line: string, state: BrokerState): void {
       return;
     case "reap":
       reapEntries(frame.session, frame.class, state);
+      return;
+    case "release":
+      releaseSession(frame.session, frame.seq, state);
       return;
     case "register":
       // The supervisor's first frame, so this lands before the first
@@ -265,6 +287,58 @@ function reapEntries(
   }
 }
 
+/**
+ * The `release` frame: session end. Drop the session's entries exactly like
+ * a session reap, append them (plus an empty bucket when nothing matched) to
+ * the session's FIFO watch queue, and drain acks from the head: `released`
+ * for seq N answers ONLY when every entry dropped at seq <= N is PROCESS-dead
+ * (noteEntryGone) -- a draining runner may still have the supervisor's
+ * scratch dir bound. A re-fired SESSION_END inside an earlier frame's drain
+ * window therefore cannot smuggle an early ack through its empty doomed set.
+ * Entries spawned after a release frame are not watched: the supervisor's
+ * plan() disarms the pending release the moment the session comes back to
+ * life, so a resumed session's fresh entry (and its scratch dir) are never
+ * in the ack's blast radius.
+ */
+function releaseSession(session: string, seq: number, state: BrokerState): void {
+  const watch: ReleaseWatch = { seq, entries: new Set() };
+  for (const [key, entry] of [...state.pool]) {
+    if (key.slice(0, key.lastIndexOf(" ")) !== session) continue;
+    watch.entries.add(entry);
+    dropEntry(entry, key, state);
+  }
+  const queue = state.pendingRelease.get(session);
+  if (queue) queue.push(watch);
+  else state.pendingRelease.set(session, [watch]);
+  drainReleases(session, state);
+}
+
+/** Pop and answer every head bucket with no live watches left (FIFO). */
+function drainReleases(session: string, state: BrokerState): void {
+  const queue = state.pendingRelease.get(session);
+  if (!queue) return;
+  while (queue.length > 0 && queue[0]!.entries.size === 0) {
+    const { seq } = queue.shift()!;
+    writeSupervisor({ op: "released", session, seq });
+  }
+  if (queue.length === 0) state.pendingRelease.delete(session);
+}
+
+/**
+ * A runner PROCESS death (exit or error handler): drop the entry from every
+ * watch bucket of its session, then drain. Fires from both handlers (a spawn
+ * ENOENT errors without ever exiting); the flag keeps it exactly-once per
+ * entry.
+ */
+function noteEntryGone(key: string, entry: PoolEntry, state: BrokerState): void {
+  if (entry.goneSent) return;
+  entry.goneSent = true;
+  const session = key.slice(0, key.lastIndexOf(" "));
+  const queue = state.pendingRelease.get(session);
+  if (queue) for (const watch of queue) watch.entries.delete(entry);
+  drainReleases(session, state);
+}
+
 function clearIdle(entry: PoolEntry): void {
   if (entry.idleTimer) {
     clearTimeout(entry.idleTimer);
@@ -361,7 +435,10 @@ function spawnEntry(key: string, state: BrokerState, fence?: WireFence): PoolEnt
     }
   });
   proc.on("error", (e: Error) => {
+    // A spawn error (ENOENT, EACCES) never follows with an exit event, so
+    // the release watch is closed here too.
     failEntry(entry, key, state, `executor spawn failed: ${formatError(e)}`);
+    noteEntryGone(key, entry, state);
   });
   proc.on("exit", (code) => {
     // entry.dead is set by dropEntry BEFORE the graceful EOF drain, so a code-0 exit after
@@ -374,6 +451,7 @@ function spawnEntry(key: string, state: BrokerState, fence?: WireFence): PoolEnt
       reaped ? "executor reaped" : `executor exited (code ${code ?? "signal"})`,
       reaped ? "debug" : "warn",
     );
+    noteEntryGone(key, entry, state);
   });
   return entry;
 }
@@ -494,6 +572,7 @@ export {
   handleFrame,
   spawnEntry,
   relayRunnerLine,
+  noteEntryGone,
 };
 
 if (import.meta.main) {

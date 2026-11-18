@@ -10,7 +10,6 @@ import type { LogInfo, SessionInfo } from "./sessions.tsx";
 import type {
   UploadFileWire,
   TaskInfoWire,
-  TaskActivityWire,
   TaskControlWire,
   TranscribeRequestWire,
   TranscriptReplyWire,
@@ -63,160 +62,20 @@ const sttEnabledAtom = reactiveState<boolean>(false);
 // degraded marker. Empty until the first attach.
 const toolExecAtom = reactiveState<string>("");
 
-// ── Subagent tasks (sidebar list + main-view transcript; see ./subagents.tsx)
-// Broadcast feed (S2C taskList/taskUpdate/taskActivity), deliberately kept
-// outside the App tree: activity deltas go straight into the MessageListManager
-// of an OPEN subagent view (imperative DOM path), so streaming task output
-// never re-renders the transcript. tasksAtom alone feeds the sidebar rows.
+// ── Subagent ticker (sidebar rows; see ./subagents.tsx) ───────────────────
+// Broadcast feed (S2C taskList/taskUpdate), deliberately kept outside the
+// App tree: tasksAtom alone feeds the sidebar rows. The transcript is a
+// plain SESSION view since B4: a live worker row opens via switchSession,
+// a settled/durable one via viewLog -- no second transcript surface, no
+// relay buffer. The kind/parent atoms below are the chrome's only signal.
 const tasksAtom = reactiveState<TaskInfoWire[]>([]);
-// The task whose transcript is on screen in the main view, or null in live
-// mode. The client-side browse pointer (the app renders the header label and
-// the composer's read-only posture from it); attach ends the mode.
-const viewedTaskIdAtom = reactiveState<string | null>(null);
-
-// ── Browse-pointer persistence (sessionStorage, per TAB) ───────────────────
-// WHICH subagent transcript was on screen survives an in-tab reload, so the
-// attach lands back on the task instead of painting the parent's transcript.
-// sessionStorage, never localStorage: localStorage is
-// shared across tabs, so tab B's pointer would retarget tab A's reload (the
-// hotdog-active-session doctrine). The workbench-tab precedent holds too:
-// storage resolves PER CALL, never cached -- tests install and tear down the
-// stub -- and every access is swallowed at this boundary.
-//
-// The persisted id is a RELOAD CANDIDATE, not a second source of truth:
-// `pendingViewedTaskId` is read once when the socket is created, and re-plays
-// through the SAME open path (viewSubagent) the moment the task exists in the
-// hydrated feed -- so the settled/live authority rules keep holding. Unknown
-// id in a taskList snapshot: the key is dropped and the boot behaves exactly
-// as today (the parent's transcript). Navigation clears go through
-// setViewedTaskPointer so the key always mirrors the pointer, never a stale
-// one behind it.
-const VIEWED_TASK_STORAGE_KEY = "hotdog-viewed-task";
-export { VIEWED_TASK_STORAGE_KEY };
-
-function viewedTaskStorage(): Storage | null {
-  return typeof window !== "undefined" && "sessionStorage" in window
-    ? (window as unknown as { sessionStorage: Storage }).sessionStorage
-    : null;
-}
-
-function saveViewedTaskId(taskId: string | null): void {
-  const storage = viewedTaskStorage();
-  if (!storage) return;
-  try {
-    if (taskId) storage.setItem(VIEWED_TASK_STORAGE_KEY, taskId);
-    else storage.removeItem(VIEWED_TASK_STORAGE_KEY);
-  } catch {
-    // blocked / quota'd storage: the pointer costs the reload, never the app
-  }
-}
-
-function loadViewedTaskId(): string | null {
-  const storage = viewedTaskStorage();
-  if (!storage) return null;
-  try {
-    return storage.getItem(VIEWED_TASK_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-/** The reload candidate, consumed exactly once (restore, gone-drop, or any
- *  user navigation). Owned by the createChat instance that reads it. */
-let pendingViewedTaskId: string | null = null;
-
-/** THE write to the browse pointer: atom + persisted key move together, so
- *  the key can never lag a clear (navigation away persists the NEW pointer). */
-function setViewedTaskPointer(taskId: string | null): void {
-  viewedTaskIdAtom(taskId);
-  saveViewedTaskId(taskId);
-}
-
-/** Accumulated display blocks: consecutive same-kind deltas merge into one block. */
-export type TaskActivityBlock =
-  | { kind: "text"; text: string }
-  | { kind: "reasoning"; text: string }
-  /** A human steering row. Client-seeded (taskFollowup's echo; the relay has
-   *  no live user lane) or server-surfaced (a settled task's durable log,
-   *  taskActivityFromLogEntries). Never merged: one row per follow-up, and it
-   *  renders through the session's own user-row path (handleUserMessage). */
-  | { kind: "user"; text: string }
-  /** The leading delegated task prompt, CLIENT-seeded on open (owner ruling
-   *  2026-11-15) from TaskInfoWire.description -- the live relay has no user
-   *  lane, so the row's only other carrier is the settled fold's leading
-   *  `user` item, whose wholesale replace retires this seed block. Renders
-   *  through the same user-row path; distinct from `user` so the seed can
-   *  never double up and never masquerades as a steer. */
-  | { kind: "prompt"; text: string }
-  /** A usage footer attestation (TaskActivityWire `usage`, both authorities).
-   *  No text lane of its own: it finalizes the assistant row it closes with
-   *  the footer meta, exactly like the session path folds TOKEN_USAGE. */
-  | {
-      kind: "usage";
-      ts?: number;
-      durationMs?: number;
-      ctx?: Omit<CtxUsage, "callMs">;
-      callMs?: number;
-      callDerived?: boolean;
-    }
-  | {
-      kind: "tool_call";
-      name: string;
-      args: string;
-      /** Relay-carried display descriptors (see TaskActivityWire): forwarded
-       *  to handleToolCall so the block reaches the session view's posture. */
-      argsSummary?: string;
-      display?: ToolDisplayWire[];
-    }
-  | {
-      kind: "tool_result";
-      name: string;
-      output: string;
-      error?: string;
-      /** Edit landing line (diff gutter numbers), same gate as the session frame. */
-      startLine?: number;
-    };
-
-const MAX_ACTIVITY_BLOCKS = 200;
-const MAX_TRACKED_TASKS = 50;
-const taskActivity = new Map<string, TaskActivityBlock[]>();
-
-/**
- * Task ids this client has seen SETTLE, kept across list refreshes and socket
- * drops. This is the client half of the settled/live authority split whose
- * server half is `handleTaskActivityRequest`: a settled task's transcript
- * authority is the worker's DURABLE SESSION LOG, never this module's relay
- * buffer (the buffer holds at most MAX_ACTIVITY_BLOCKS merged blocks of a
- * 300-item ring, i.e. the TAIL of a long conversation -- which is exactly the
- * "only the very last message" symptom this seam owns). So a settled id
- * (a) always re-requests on open, (b) makes the reply REPLACE the buffer
- * (seedTaskActivity's force branch), and (c) is re-read the moment the
- * running/queued -> terminal flip lands.
- * Seeded from every taskList snapshot and kept in step by taskUpdate, so a
- * reconnect that never saw the flip still knows the row is settled; a warm
- * retry re-uses the task id, and the same bookkeeping takes it back OUT when
- * the row reads live again (unsettled doctrine is byte-identical).
- */
-const settledTasks = new Set<string>();
-
-/** The wire's terminal tokens (core's isTerminalStatus set; the webui client
- *  deliberately reads `TaskInfoWire.status` as a string, since the browser
- *  must not need the core enum -- see protocol.ts TaskInfoWire). */
-function isSettledStatus(status: string): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
-/** Track one snapshot row's settled-ness; true when THIS row flipped live ->
- *  settled (the invalidation edge: the buffer's bytes just became stale). */
-function noteTaskSettled(taskId: string, status: string): boolean {
-  if (!isSettledStatus(status)) {
-    settledTasks.delete(taskId);
-    return false;
-  }
-  const flipped = !settledTasks.has(taskId);
-  settledTasks.add(taskId);
-  return flipped;
-}
+// The ATTACHED view's kind ("subagent" on a worker-row attach; null for an
+// interactive session) and its delegating manager, both from the
+// sessionCreated payload (B3's additive fields). Every attach rewrites them;
+// the app reads them for the header label, the chrome hide-outs, the steer
+// posture, and the leave affordance.
+const sessionKindAtom = reactiveState<string | null>(null);
+const sessionParentAtom = reactiveState<string | null>(null);
 
 function upsertTask(info: TaskInfoWire): void {
   const tasks = tasksAtom().slice();
@@ -226,293 +85,9 @@ function upsertTask(info: TaskInfoWire): void {
   tasksAtom(tasks);
 }
 
-/** Fold one wire item into `blocks` (consecutive same-kind deltas merge into
- *  one display block). The cap-free half of the buffer write, shared by the
- *  live append and the settled replace. */
-function appendActivityBlock(blocks: TaskActivityBlock[], activity: TaskActivityWire): void {
-  // The reset sentinel is a LIVE-stream retract (see appendTaskActivity); the
-  // settled fold never emits one, and a buffer that was just replaced has no
-  // in-flight prose to retract -- dropping it here is the honest no-op.
-  if (activity.kind === "reset") return;
-  const last = blocks[blocks.length - 1];
-  if (activity.kind === "text" || activity.kind === "reasoning") {
-    if (last && last.kind === activity.kind) {
-      // Merged in place: consecutive same-kind deltas are one display block,
-      // which keeps the buffer's block count (and the transcript replay's
-      // streaming segment) down against the MAX_ACTIVITY_BLOCKS cap.
-      (last as { kind: "text" | "reasoning"; text: string }).text += activity.content;
-    } else {
-      blocks.push({ kind: activity.kind, text: activity.content });
-    }
-  } else if (activity.kind === "user") {
-    // Its own row: a steering row never merges into prose, and prose after it
-    // starts a fresh streaming block (the tool_call branch's posture).
-    blocks.push({ kind: "user", text: activity.content });
-  } else if (activity.kind === "usage") {
-    // Footer attestation: its own block, numbers copied, never merged. It
-    // finalizes the streaming row that closes at the next commit (live lane)
-    // or lands with the fold's stamped footer (settled lane) -- see
-    // feedTaskActivity.
-    blocks.push({
-      kind: "usage",
-      ...(activity.ts !== undefined ? { ts: activity.ts } : {}),
-      ...(activity.durationMs !== undefined ? { durationMs: activity.durationMs } : {}),
-      ...(activity.ctx !== undefined ? { ctx: activity.ctx } : {}),
-      ...(activity.callMs !== undefined ? { callMs: activity.callMs } : {}),
-      ...(activity.callDerived === true ? { callDerived: true } : {}),
-    });
-  } else if (activity.kind === "tool_call") {
-    // The display descriptors ride the buffer alongside the truncated args:
-    // a view re-opened from the buffer must paint the same posture as the
-    // live feed did (replay/backfill parity with the session path).
-    blocks.push({
-      kind: "tool_call",
-      name: activity.name,
-      args: activity.args,
-      ...(activity.argsSummary !== undefined ? { argsSummary: activity.argsSummary } : {}),
-      ...(activity.display !== undefined ? { display: activity.display } : {}),
-    });
-  } else {
-    blocks.push({
-      kind: "tool_result",
-      name: activity.name,
-      output: activity.output,
-      ...(activity.error !== undefined ? { error: activity.error } : {}),
-      ...(activity.startLine !== undefined ? { startLine: activity.startLine } : {}),
-    });
-  }
-}
-
-/** Give a task the whole buffer write for a settled reply: the map slot is
- *  replaced (not appended), re-bumped to the newest eviction slot, and NOT
- *  trimmed to MAX_ACTIVITY_BLOCKS -- see seedTaskActivity's force branch for
- *  why the cap is live-only. */
-function setTaskActivityBlocks(taskId: string, blocks: TaskActivityBlock[]): void {
-  taskActivity.delete(taskId);
-  taskActivity.set(taskId, blocks);
-  // Map is insertion-ordered: evict the oldest task's transcript so a
-  // long-lived server session does not grow unbounded.
-  while (taskActivity.size > MAX_TRACKED_TASKS) {
-    const oldest = taskActivity.keys().next().value as string;
-    taskActivity.delete(oldest);
-  }
-}
-
-function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
-  if (activity.kind === "reset") {
-    // Mid-stream retry of the task agent (the buffer's counterpart of
-    // message-list.handleStreamReset): the trailing text/reasoning blocks
-    // are the dead attempt's streamed fragments -- drop them so the
-    // retry's deltas start a fresh block instead of merging into dead
-    // text. Tool blocks stay (a reset precedes tool execution), and a
-    // reset with nothing in flight is a no-op that must not even create
-    // the map entry: it would blind the seedTaskActivity guard and strand
-    // a later history replay. Sentinels never arrive via replay -- the
-    // server buffer consumes them (see recordTaskActivity).
-    const inFlight = taskActivity.get(taskId);
-    if (!inFlight) return;
-    while (inFlight.length > 0) {
-      const kind = inFlight[inFlight.length - 1]!.kind;
-      if (kind !== "text" && kind !== "reasoning") break;
-      inFlight.pop();
-    }
-    return;
-  }
-  let blocks = taskActivity.get(taskId);
-  if (!blocks) {
-    blocks = [];
-    setTaskActivityBlocks(taskId, blocks);
-  }
-  appendActivityBlock(blocks, activity);
-  if (blocks.length > MAX_ACTIVITY_BLOCKS) {
-    blocks.splice(0, blocks.length - MAX_ACTIVITY_BLOCKS);
-  }
-}
-
-/** Seed blocks from a server replay (taskActivityHistory).
- *
- * `force` is the SETTLED path (the id is in `settledTasks`): the durable log
- * is the ONE authority, so the reply REPLACES this client's buffer wholesale.
- * The echo rule, decided and pinned here because it is the whole merge design:
- * client-only steering echoes need no rescue -- a steer is echoed only after
- * the server ACCEPTED it (the taskControl reply), and an accepted follow-up is
- * fed to the worker, which writes the log's `input` record with origin
- * "user" that taskActivityFromLogEntries folds back as the `user` kind; a
- * refused steer is taken back out of the buffer by retractTaskEcho before any
- * replace can happen. So re-appending local echoes would duplicate the log's
- * user lane, and keeping "echoes not yet visible in the log" would need a
- * fuzzy text match that leaves a phantom row alive forever. Wholesale replace
- * is also the only rule idempotent across socket reconnects: two identical
- * replies produce byte-identical buffers. `repaint` is always true here (the
- * pane shows the bytes being replaced). The reply replaces RATHER THAN
- * APPENDS and is not trimmed to MAX_ACTIVITY_BLOCKS: that cap exists to hold
- * an unbounded LIVE stream down, while a settled transcript is bounded by the
- * log itself -- and trimming it here would re-cut the head of the transcript
- * this very request fetches (the MAX_TRACKED_TASKS eviction still applies).
- * An empty reply NEVER paints over a non-empty buffer (a missing/garbage log,
- * or one that folds to nothing, degrades to the buffer's honest bytes server
- * side), so the replace runs only when the reply carries items.
- *
- * Unsettled replies keep the LIVE doctrine byte-identically: skipped when a
- * live tail is accumulated (a view opened across the reconnect already has its
- * streamed items, and seeding would duplicate them -- the reconnect-
- * duplication protection), with the one exception of a buffer holding ONLY
- * client seeds -- steering echoes plus, since the 2026-11-15 ruling, the
- * leading prompt block (the view opened on an empty buffer, then the user
- * steered before the reply landed). It seeds: the server bytes are the older
- * half of the transcript, so they go after the prompt (which predates them
- * all) and the echoes keep their slots at the end. Returns whether the view
- * should render the buffer. */
-function seedTaskActivity(
-  taskId: string,
-  history: TaskActivityWire[],
-  force: boolean,
-): { landed: boolean; repaint: boolean } {
-  const existing = taskActivity.get(taskId);
-  if (force && history.length > 0) {
-    const blocks: TaskActivityBlock[] = [];
-    for (const activity of history) appendActivityBlock(blocks, activity);
-    setTaskActivityBlocks(taskId, blocks);
-    return { landed: true, repaint: true };
-  }
-  if (!existing || existing.length === 0) {
-    for (const activity of history) appendTaskActivity(taskId, activity);
-    return { landed: true, repaint: false };
-  }
-  // Client-side seeds -- steering echoes AND the leading prompt block (the
-  // latter can only be here on the UNSETTLED path: the settled branch above
-  // replaced the buffer wholesale, and the fold's own leading `user` item is
-  // the prompt there). The prompt goes FIRST (it predates every server
-  // byte), then the server bytes, then the echoes (sent after them).
-  const seeds = existing.filter((b) => b.kind === "user" || b.kind === "prompt");
-  if (seeds.length !== existing.length) return { landed: false, repaint: false };
-  taskActivity.delete(taskId);
-  const blocks: TaskActivityBlock[] = [];
-  for (const seed of seeds) {
-    if (seed.kind === "prompt") blocks.push({ kind: "prompt", text: seed.text });
-  }
-  for (const activity of history) appendActivityBlock(blocks, activity);
-  for (const seed of seeds) {
-    if (seed.kind === "user") blocks.push({ kind: "user", text: seed.text });
-  }
-  if (blocks.length > MAX_ACTIVITY_BLOCKS) {
-    blocks.splice(0, blocks.length - MAX_ACTIVITY_BLOCKS);
-  }
-  setTaskActivityBlocks(taskId, blocks);
-  return { landed: true, repaint: true };
-}
-
-/**
- * Seed the leading delegated task prompt into a UNSETTLED task's transcript
- * buffer (owner ruling 2026-11-15: the transcript opens with the prompt,
- * exactly once per task, under both authorities). The live relay cannot carry
- * it -- the worker's OUTPUT_EVENT.USER_MESSAGE has no provenance, so the
- * relay could not tell the composed prompt from a human steer (the settled
- * fold reads the log's `origin` instead and leads with the prompt itself).
- * TaskInfoWire.description IS the delegated prompt (describeTask's
- * single-line display form), and it is the row's only live carrier, so a
- * QUEUED task opens on the prompt alone.
- *
- * Exactly-once argument, by construction:
- *  - the guard (a `prompt` block already in the buffer) makes every later
- *    open a no-op, and only viewSubagent ever seeds;
- *  - the settled lane never seeds: the settled task's fold leads with the
- *    log's own prompt item, and the settle flip's WHOLESALE replace retires
- *    the seed block as that item arrives (never both, in either order);
- *  - a degraded settled reply (empty) keeps the seed block alive, so the
- *    transcript keeps its prompt across the replace path;
- *  - a warm retry (the id back in the ledger with the old fold in its
- *    buffer) is covered by the leading-user-row skip: the fold's prompt
- *    stands, no seed stacks on it;
- *  - the unsettled merge re-heads the prompt above the server bytes, so a
- *    socket-reload replay cannot double it or bury it.
- * The MAX_ACTIVITY_BLOCKS head-trim can evict it on a marathon live run; the
- * next open re-heads it (the cap bounds the stream, not the label).
- */
-function seedTaskPromptBlock(taskId: string): void {
-  // Settled authority is the durable fold; its leading `user` item is the
-  // prompt (and a degraded settled buffer stays the buffer's honest bytes).
-  if (settledTasks.has(taskId)) return;
-  const blocks = taskActivity.get(taskId);
-  if (blocks?.some((b) => b.kind === "prompt")) return;
-  // A warm-retry task left the settled ledger with a buffer that IS the old
-  // fold -- its leading user row is already the prompt. Skipping here is the
-  // one honest miss: a client-echo-only buffer (reachable only when nothing
-  // ever opened the pane) stays as the echo doctrine left it.
-  if (blocks && blocks[0]?.kind === "user") return;
-  const task = tasksAtom().find((t) => t.taskId === taskId);
-  const text = task?.description?.trim() ?? "";
-  if (text === "") return;
-  if (blocks) blocks.unshift({ kind: "prompt", text });
-  else setTaskActivityBlocks(taskId, [{ kind: "prompt", text }]);
-}
-
-/** The buffer's most recent LIVE usage attestation (no ts: relay frames),
- *  backing the footer of the commit a turn flip stamps -- the task pane's
- *  counterpart of message-list's per-turn hold, read from the buffer so no
- *  second holder gets invented. Ts-stamped settled-fold frames never feed
- *  it: their footer rode the fold's own commit. */
-function lastUsageMeta(
-  taskId: string,
-): Extract<TaskActivityBlock, { kind: "usage" }> | undefined {
-  const blocks = taskActivity.get(taskId);
-  if (!blocks) return undefined;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const block = blocks[i]!;
-    if (block.kind === "usage" && block.ts === undefined) return block;
-  }
-  return undefined;
-}
-
-function getTaskActivity(taskId: string): TaskActivityBlock[] {
-  return taskActivity.get(taskId) ?? [];
-}
-
-/** Whether the buffer holds anything the SERVER fed this task. Steering
- *  echoes are client-side only (the live relay has no user lane) and so is
- *  the seeded prompt row (TaskInfoWire.description) -- a buffer of nothing
- *  but seeds still needs the replay, otherwise a steer sent before the first
- *  open would be the whole transcript and a queued task would never grow
- *  past its prompt. */
-function hasFedActivity(taskId: string): boolean {
-  return getTaskActivity(taskId).some((b) => b.kind !== "user" && b.kind !== "prompt");
-}
-
-/** Follow-ups this client sent and has not heard back about, per task, in send
- *  order. The taskControl reply carries no correlation id, but one socket's
- *  replies return in request order (handleTaskFollowup answers every valid
- *  frame exactly once, blanks never reach the wire), so the head of this queue
- *  IS the steer the next followup reply speaks for. */
-const pendingFollowups = new Map<string, string[]>();
-
-/** Take the refused steer back out of the transcript buffer: it never entered
- *  the worker's context, so no later repaint of this view may imply it did.
- *  The row already on screen stays (the refusal notice lands right beside it);
- *  a text that no longer matches anything -- the buffer was evicted or re-seeded
- *  underneath us -- is left alone rather than guessed at. */
-function retractTaskEcho(taskId: string, text: string): void {
-  const blocks = taskActivity.get(taskId);
-  if (!blocks) return;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const block = blocks[i]!;
-    if (block.kind === "user" && block.text === text) {
-      blocks.splice(i, 1);
-      return;
-    }
-  }
-}
-
+/** Drop the ticker: the module-global feed must not outlive the socket. */
 function clearTasks(): void {
   tasksAtom([]);
-  taskActivity.clear();
-  settledTasks.clear();
-  pendingFollowups.clear();
-  // The module-global feed must not outlive the socket: a stale viewed-task
-  // pointer (or any residue) would blind the next login's serial run -- the
-  // persisted candidate and its key die with it, or the next login's taskList
-  // would restore a transcript nobody asked for.
-  pendingViewedTaskId = null;
-  setViewedTaskPointer(null);
 }
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);
@@ -536,11 +111,10 @@ const CONVERSATION_EVENT_TYPES: ReadonlySet<string> = new Set([
   "systemMessage",
 ]);
 
-// Stand-in manager while a browse mode (cold log OR an open subagent
-// transcript) is on: every manager-session transcript write is dropped.
-// The socket stays attached to its live session, and live events must not
-// append beneath the browsed window (see viewedLogId / viewedTaskIdAtom in
-// createChat). Explicit (not a Proxy) so the compiler catches
+// Stand-in manager while the cold-log browse mode is on: every live-session
+// transcript write is dropped. The socket stays attached to its live session,
+// and live events must not append beneath the browsed window (see
+// viewedLogId in createChat). Explicit (not a Proxy) so the compiler catches
 // any MessageListManager method added without a no-op here.
 const LOG_VIEW_SINK: MessageListManager = {
   handleUserMessage: () => {},
@@ -556,6 +130,7 @@ const LOG_VIEW_SINK: MessageListManager = {
   handleCompacting: () => {},
   handleCommandResult: () => {},
   handleQuestion: () => {},
+  setQuestionReadOnly: () => {},
   handleQuestionAnswered: () => {},
   handleTaskProgress: () => {},
   handleTokenUsage: () => {},
@@ -570,6 +145,8 @@ const LOG_VIEW_SINK: MessageListManager = {
   handleSystemMessage: () => {},
   destroy: () => {},
   renderLogEntries: () => {},
+  renderOlderEntries: () => {},
+  setHasOlder: () => {},
 };
 
 interface SessionCreatedMessage {
@@ -587,6 +164,19 @@ interface SessionCreatedMessage {
   /** The server replayed only the delta from the client's cursor, so the
    *  client keeps its transcript (it ends exactly at that cursor). */
   replayDelta?: boolean;
+  /** Lazy history (full replay only, see attach.ts): the replay shipped the
+   *  trailing window of conversation messages; older history lives below
+   *  `oldestIndex` (an epoch-log index -- hand it to loadOlder) inside the
+   *  epoch attested by `epochToken` (echo it back; the server refuses a
+   *  moved epoch with code "epoch_moved" rather than paging garbage).
+   *  Absent = the transcript holds everything the log attests. */
+  hasOlder?: boolean;
+  oldestIndex?: number;
+  epochToken?: number;
+  /** View kind (additive, B3): "subagent" on a worker-row attach; the
+   *  delegating manager's id rides beside it. Drives the webui chrome. */
+  kind?: string;
+  parentSessionId?: string | null;
 }
 
 interface SessionDeletedMessage {
@@ -654,6 +244,34 @@ interface LogViewedMessage {
   type: "logViewed";
   logId: string;
   entries: LogEntry[];
+  /** Lazy history (see handlers-logs.ts handleViewLog): present ONLY when
+   *  older history exists -- oldestIndex is the epoch-log index of the
+   *  oldest shipped entry (loadOlder's `olderThan`), epochToken the epoch
+   *  those indexes live in (loadOlder's staleness echo). */
+  hasOlder?: boolean;
+  oldestIndex?: number;
+  epochToken?: number;
+}
+
+/**
+ * Reply to C2S loadOlder (correlated by requestId, the searchLogs
+ * precedent). Refusals carry requestId + error only (LIST_DIR_RESULT
+ * posture); the client frees its in-flight slot and lets the next
+ * scroll-up edge retry -- no invented retry loop. The stale-epoch class
+ * (code "epoch_moved": a mid-socket /rewind, /undo, or /clear re-pointed
+ * the log) is NOT retryable on the held index -- it CLOSES the seam until the
+ * next attach/navigation re-attests the window.
+ */
+interface LoadOlderResultMessage {
+  type: "loadOlderResult";
+  requestId?: number;
+  logId?: string;
+  entries?: LogEntry[];
+  oldestIndex?: number;
+  hasOlder?: boolean;
+  epochToken?: number;
+  code?: string;
+  error?: string;
 }
 
 interface LogDeletedMessage {
@@ -762,18 +380,6 @@ interface TaskListMessage {
 interface TaskUpdateMessage {
   type: "taskUpdate";
   task: TaskInfoWire;
-}
-
-interface TaskActivityMessage {
-  type: "taskActivity";
-  taskId: string;
-  activity: TaskActivityWire;
-}
-
-interface TaskActivityHistoryMessage {
-  type: "taskActivityHistory";
-  taskId: string;
-  activity: TaskActivityWire[];
 }
 
 interface StreamingChunkMessage {
@@ -893,6 +499,7 @@ type ServerMessage =
   | LogsListedMessage
   | LogViewedMessage
   | LogDeletedMessage
+  | LoadOlderResultMessage
   | SearchResultsMessage
   | ConfigSnapshotResultWire
   | SetConfigKeyResultWire
@@ -914,8 +521,6 @@ type ServerMessage =
   | QuestionAnsweredMessage
   | TaskListMessage
   | TaskUpdateMessage
-  | TaskActivityMessage
-  | TaskActivityHistoryMessage
   | TaskControlWire
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
@@ -937,6 +542,9 @@ interface ChatConfig {
   host?: string;
   /** The #message-list element, handed out by the JSX tree via ref. */
   getMessageListContainer: () => HTMLElement | null;
+  /** Host for the jump-to-bottom button (the #input-area seam). Resolved
+   *  once, when setSession first builds the manager. */
+  getJumpHost?: () => HTMLElement | null;
   onSessionCreated?: (data: { sessionId: string; replayDelta?: boolean }) => void;
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
   onLogsUpdate?: (logs: LogInfo[]) => void;
@@ -973,6 +581,10 @@ interface ChatConfig {
    *  message-list.ts handleError: an errored turn is neither completed nor
    *  stopped). UI-layer notice only -- the frame itself is untouched. */
   onRunError?: () => void;
+  /** Requester-only taskControl reply landed (steer/interrupt outcome).
+   *  The app toasts refusals; acceptances need no notice (the change rides
+   *  taskUpdate, and a live steer's echo rides the worker's own stream). */
+  onTaskControl?: (r: TaskControlWire) => void;
 }
 
 export interface ChatController {
@@ -1075,20 +687,21 @@ export interface ChatController {
   sessionWorkingMap: Map<string, boolean>;
   messageListAtom: () => MessageListManager | null;
   getCurrentProfile: () => string;
-  // Subagent sidebar list + main-view transcript (broadcast feed; not tied
-  // to the active session). tasksAtom drives the per-manager sidebar rows;
-  // viewedTaskIdAtom is the browse pointer for the main pane.
+  // Subagent ticker (broadcast feed; not tied to the active session):
+  // tasksAtom drives the per-manager sidebar rows. The transcript is a plain
+  // session view (open = switchSession / viewLog), so what the pane needs is
+  // the ATTACHED view's kind -- "subagent" on a worker-row attach -- and its
+  // delegating manager (the leave affordance's landing), both from the
+  // sessionCreated payload.
   tasksAtom: Atom<TaskInfoWire[]>;
-  viewedTaskIdAtom: Atom<string | null>;
-  /** Open a task's transcript in the main view (manager stays attached; the
-   *  live task feed flows into the MessageListManager while viewing). */
-  viewSubagent: (taskId: string) => void;
-  /** Drop the browse pointer (the app re-switches to replay live output). */
-  closeSubagentView: () => void;
-  /** Steer the viewed subagent (C2S taskFollowup -- the existing, validated
-   *  steering route onto TaskManager.sendFollowUp). Text-only on the wire;
-   *  accepted steers echo into the viewed pane, refusals land via the
-   *  requester-only taskControl reply. */
+  sessionKindAtom: Atom<string | null>;
+  sessionParentAtom: Atom<string | null>;
+  /** Steer the worker task whose session is on screen (C2S taskFollowup --
+   *  the existing, validated steering route onto TaskManager.sendFollowUp).
+   *  Text-only on the wire; NO client echo: the drained steer re-enters the
+   *  worker's stream as its USER_MESSAGE event and reaches the watcher
+   *  through the session grammar exactly once. Refusals land via the
+   *  requester-only taskControl reply (the app toasts). */
   taskFollowup: (taskId: string, message: string) => void;
   /**
    * Stop/cancel a task (C2S taskInterrupt, the task_interrupt tool's own
@@ -1103,8 +716,6 @@ export interface ChatController {
    * broadcast; a refusal lands as the taskControl reply.
    */
   interruptTask: (taskId: string) => void;
-  requestTaskActivity: (taskId: string) => void;
-  getTaskActivity: (taskId: string) => TaskActivityBlock[];
   clearTasks: () => void;
 }
 
@@ -1112,6 +723,7 @@ export function createChat({
   token,
   host = window.location.host,
   getMessageListContainer,
+  getJumpHost,
   onSessionCreated,
   onSessionsUpdate,
   onLogsUpdate,
@@ -1128,9 +740,14 @@ export function createChat({
   onAuthFailure,
   onWorkingMapChange,
   onRunError,
+  onTaskControl,
 }: ChatConfig): ChatController {
   let ws: WebSocket | null = null;
   let messageList: MessageListManager | null = null;
+  // R3 read-only intent, held across manager (re)construction: a worker
+  // attach landing before the app builds the manager must still land
+  // read-only on the manager it builds.
+  let questionReadOnlyWanted = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let authFailed = false;
 
@@ -1204,15 +821,6 @@ export function createChat({
   let replayPending = false; // between sessionCreated and its cursor report
   let dirtySinceAttach = false; // live events arrived after the last attach
 
-  // Reload restore (see VIEWED_TASK_STORAGE_KEY): adopt the persisted per-tab
-  // browse pointer as THIS socket's candidate. It lands exactly once, when
-  // the task hydrates into the feed (taskList/taskUpdate/taskActivity). The
-  // attach's sessionCreated clear is NOT a navigation and does not consume
-  // it; the open itself routes through viewSubagent, so the settled/live
-  // authority rules keep holding. A full snapshot without the id drops the
-  // candidate and the key (unknown/gone = today's boot, nothing more).
-  pendingViewedTaskId = loadViewedTaskId();
-
   // Log-view mode: the cold log on screen, or null in live mode. The socket
   // stays attached to its live session while a log is browsed (viewLog only
   // reads entries; it never detaches), so live transcript events keep
@@ -1223,10 +831,30 @@ export function createChat({
   // suppressed tail once (no duplicates, no gaps).
   let viewedLogId: string | null = null;
 
+  // Lazy history window (see websocket/history-window.ts): the id of the
+  // transcript currently on screen whose head the server attested as
+  // non-durable (a cold log id OR the live session id), the epoch-log index
+  // of its oldest shipped entry, and the epochToken those indexes live in
+  // (the full-log epochStartIndex at attestation time -- echoed on every
+  // loadOlder; a mid-socket RESET moves the epoch, and the server's
+  // "epoch_moved" refusal then closes this seam rather than paging a stale
+  // index). null = the transcript holds everything. Lives in this closure
+  // like the replay cursor: it survives reconnects (a delta keeps the held
+  // window head honest) and dies with a page reload, where the next full
+  // replay re-attests it from the fields on its own sessionCreated /
+  // logViewed frames.
+  let historyWindow: { id: string; oldestIndex: number; epochToken: number | null } | null = null;
+  // One older page in flight per pane (the once-per-gap guard: scroll events
+  // fire continuously; the server round-trip is the pacing). No retry loop:
+  // a refusal frees the slot and the next scroll-up edge is the retry, and
+  // reconnect re-attests the window (the existing doctrine).
+  let olderReqSeq = 0;
+  let olderInFlight: number | null = null;
+
   // Browse modes are mutually exclusive: a log on screen ends the subagent
-  // transcript (the task feed stops painting into the log window), and
-  // opening a subagent ends the log view (chat-side now; the app clears its
-  // activeLogId mirror in the same click handler).
+  // session view (the viewed worker's stream stops painting into the log
+  // window), and opening a subagent ends the log view (chat-side now; the
+  // app clears its activeLogId mirror in the same click handler).
 
   function saveSessionId(id: string | null): void {
     savedSessionId = id;
@@ -1297,15 +925,20 @@ export function createChat({
         dirtySinceAttach = false;
         // An attach (switch-back, resume, or reconnect) replaces the visible
         // context; log view ends with it (app.onSessionCreated clears its
-        // mirror of this state), and so does a subagent transcript. The
-        // POINTER atom clears (the parent transcript owns the pane now) but
-        // the persisted key does NOT: this frame is a re-attach, not a
-        // navigation. The reload candidate lives in memory until it lands or
-        // a full snapshot denies the id; navigation entry points (switch /
-        // create / viewLog / closeSubagentView) are what persist a new
-        // pointer over the old one.
+        // mirror of this state). The view's KIND rides the payload: a
+        // worker-row attach IS the subagent view (the session surface IS the
+        // pane), so the chrome and the question surface follow from here.
         viewedLogId = null;
-        viewedTaskIdAtom(null);
+        const viewKind = data.kind === "subagent" ? "subagent" : null;
+        sessionKindAtom(viewKind);
+        sessionParentAtom(typeof data.parentSessionId === "string" ? data.parentSessionId : null);
+        // R3: a watcher sees a worker's question but can never answer it --
+        // the card renders read-only, awaiting the delegating manager. The
+        // flag also lands on the manager the app's onSessionCreated callback
+        // builds AFTER this frame (setSession below re-applies it), so the
+        // order of the two never hands a worker an interactive card.
+        questionReadOnlyWanted = viewKind === "subagent";
+        messageList?.setQuestionReadOnly(questionReadOnlyWanted);
         // On page reload the server can send working state before
         // sessionCreated, so restore it from the map here. The chat-log tell
         // needs no restore of its own: the attach burst ends by re-posting
@@ -1318,6 +951,25 @@ export function createChat({
           workingAtom(sessionWorkingMap.get(createdSid) ?? false);
         }
         onSessionCreated?.({ sessionId: data.sessionId, replayDelta: data.replayDelta === true });
+        // Lazy history: a windowed FULL replay says so on its own frame; a
+        // delta for the SAME session keeps the window head the transcript
+        // still holds (its oldest entry is unchanged); any other attach
+        // starts with nothing older until its frames attest otherwise.
+        // AFTER onSessionCreated because that call builds/clears the
+        // manager the flag lands on.
+        if (data.replayDelta === true && historyWindow && historyWindow.id === createdSid) {
+          // keep as-is
+        } else if (data.hasOlder === true && typeof data.oldestIndex === "number") {
+          historyWindow = {
+            id: createdSid,
+            oldestIndex: data.oldestIndex,
+            epochToken: typeof data.epochToken === "number" ? data.epochToken : null,
+          };
+        } else {
+          historyWindow = null;
+        }
+        olderInFlight = null;
+        messageList?.setHasOlder(historyWindow !== null);
         return;
       case "sessionDeleted":
         // Any tab's delete lands here: the app drops the dead row's stale
@@ -1367,15 +1019,64 @@ export function createChat({
       case "logViewed":
         // Enter log-view mode: from here, live-session transcript events are
         // dropped (LOG_VIEW_SINK) until the next attach or the log's death.
-        // A subagent transcript on screen ends here too -- the task feed must
-        // not keep painting into the log window (browse modes are exclusive).
+        // A subagent transcript on screen ends here too -- the viewed
+        // worker's stream must not keep painting into the log window
+        // (browse modes are exclusive).
         viewedLogId = data.logId;
-        // Navigation away from a subagent transcript persists the change:
-        // the log window owns the pane now, no stale pointer behind it.
-        setViewedTaskPointer(null);
-        pendingViewedTaskId = null;
         onLogViewed?.(data.logId, data.entries);
+        // Lazy history (after the app clear+render, which resets the
+        // manager's trigger state): the window head and its epoch token are
+        // the server's, not a client guess.
+        historyWindow =
+          data.hasOlder === true && typeof data.oldestIndex === "number"
+            ? {
+                id: data.logId,
+                oldestIndex: data.oldestIndex,
+                epochToken: typeof data.epochToken === "number" ? data.epochToken : null,
+              }
+            : null;
+        olderInFlight = null;
+        messageList?.setHasOlder(historyWindow !== null);
         return;
+      case "loadOlderResult": {
+        // Older-page reply, correlated by requestId (the searchLogs
+        // doctrine). Stale/duplicate ids drop; a page for a transcript the
+        // pane left mid-flight drops by id too. Prepend happens through the
+        // manager's anchoring seam (renderOlderEntries) -- never through the
+        // live-event sink, and never dirties the replay cursor (the tail the
+        // cursor describes is untouched).
+        if (data.requestId !== olderInFlight) return;
+        olderInFlight = null;
+        const held = historyWindow;
+        if (!held || (typeof data.logId === "string" && data.logId !== held.id)) return;
+        if (data.error !== undefined || !Array.isArray(data.entries)) {
+          if (data.code === "epoch_moved") {
+            // The epoch moved under the held window (a mid-socket /rewind,
+            // /undo, or /clear appended a RESET without any attach): the
+            // held index means a DIFFERENT entry now. Never re-hit it --
+            // close the seam; the next attach/navigation re-attests.
+            logger.warn("[chat] loadOlder epoch moved; seam closed:", data.error);
+            historyWindow = null;
+            messageList?.setHasOlder(false);
+            return;
+          }
+          // Honest refusal (bad index / dead log): the window stands, the
+          // in-flight slot is free, and the next scroll-up edge retries.
+          logger.warn("[chat] loadOlder refused:", data.error ?? "malformed reply");
+          return;
+        }
+        if (data.entries.length > 0) messageList?.renderOlderEntries(data.entries);
+        historyWindow =
+          data.hasOlder === true && typeof data.oldestIndex === "number"
+            ? {
+                id: held.id,
+                oldestIndex: data.oldestIndex,
+                epochToken: typeof data.epochToken === "number" ? data.epochToken : held.epochToken,
+              }
+            : null;
+        messageList?.setHasOlder(historyWindow !== null);
+        return;
+      }
       case "logDeleted":
         if (data.logId === viewedLogId) viewedLogId = null;
         onLogDeleted?.(data.logId);
@@ -1454,118 +1155,20 @@ export function createChat({
       // MessageListManager (imperative DOM path -- no App repaint, see the
       // feed state block above).
       case "taskList":
-        // The settled ledger follows the snapshot (an id re-appearing live --
-        // a warm retry -- leaves it again), so a reconnect that missed the
-        // flip still knows which rows read from the durable log.
-        for (const info of data.tasks) noteTaskSettled(info.taskId, info.status);
         tasksAtom(data.tasks.slice());
-        {
-          const candidate = pendingViewedTaskId;
-          if (candidate !== null && !data.tasks.some((t) => t.taskId === candidate)) {
-            // The authoritative full snapshot has no such task: honest
-            // degradation -- drop the candidate AND the persisted key, the
-            // boot behaves exactly as a boot that never had a pointer.
-            pendingViewedTaskId = null;
-            saveViewedTaskId(null);
-          } else {
-            tryRestoreViewedTask();
-          }
-        }
         return;
-      case "taskUpdate": {
-        const flipped = noteTaskSettled(data.task.taskId, data.task.status);
+      case "taskUpdate":
         upsertTask(data.task);
-        // The upsert may BE the hydration the reload candidate waits for.
-        tryRestoreViewedTask();
-        // Turn boundary for the task on screen: inRun=false means the
-        // streamed row has committed (noteWorking(false) idiom -- client
-        // clock ts, footer honest with no duration segment (no turn clock
-        // was watched here) but with the turn's last usage attestation;
-        // a no-op when no row is in flight).
-        if (data.task.taskId === viewedTaskIdAtom() && !data.task.inRun) {
-          // The footer's ctx/call segments ride the turn's last LIVE usage
-          // attestation (the task pane's counterpart of message-list's
-          // per-turn hold, read from the buffer -- see lastUsageMeta).
-          const last = lastUsageMeta(data.task.taskId);
-          messageList?.finalizeAssistant({
-            ts: Date.now(),
-            ...(last?.ctx !== undefined ? { ctx: last.ctx } : {}),
-            ...(last?.callMs !== undefined ? { callMs: last.callMs } : {}),
-            ...(last?.callDerived === true ? { callDerived: true } : {}),
-          });
-        }
-        // The settle flip is the invalidation edge: whatever this client
-        // cached for the task is the relay tail, and the log now holds the
-        // whole conversation. Re-request when there is a stale view to make
-        // honest -- the pane is on this task, or this client holds a buffer
-        // for it. The gate is deliberate rather than a request on every flip:
-        // a settled row this client knows nothing about has nothing stale (no
-        // buffer, no paint) and viewSubagent never lets a settled row paint
-        // from cache, so an unconditional request would make a fan-out run
-        // read every worker's durable log for a browser that is not looking.
-        // The reply REPLACES the buffer (seedTaskActivity's force branch); the
-        // buffer is NOT dropped here -- the pane on screen keeps its bytes
-        // until the authoritative ones land.
-        if (
-          flipped &&
-          (taskActivity.has(data.task.taskId) || data.task.taskId === viewedTaskIdAtom())
-        ) {
-          requestTaskActivity(data.task.taskId);
-        }
         return;
-      }
-      case "taskActivity": {
-        appendTaskActivity(data.taskId, data.activity);
-        // The reload candidate's hydration signal (2): if THIS frame names
-        // the pending task, the restore's open paints the whole buffer (this
-        // activity included), so skip the direct feed for this frame.
-        if (data.taskId === pendingViewedTaskId && tryRestoreViewedTask(true)) return;
-        if (data.taskId === viewedTaskIdAtom() && messageList) {
-          feedTaskActivity(messageList, data.activity);
-        }
-        return;
-      }
-      case "taskActivityHistory": {
-        // SETTLED task (id in the ledger): the reply is the durable log's
-        // fold, and it REPLACES whatever this client cached -- a warm stale
-        // cache never paints for a settled row. Unsettled reply: the live
-        // doctrine is byte-identical (a live tail already accumulated skips;
-        // an echoes-only buffer merges the server bytes under the echoes), so
-        // a skipped replay leaves the view exactly as the live feed painted
-        // it and the reconnect-duplication protection holds.
-        const seed = seedTaskActivity(
-          data.taskId,
-          data.activity || [],
-          settledTasks.has(data.taskId),
-        );
-        if (seed.landed && data.taskId === viewedTaskIdAtom() && messageList) {
-          if (seed.repaint) messageList.clear();
-          renderTaskTranscript(data.taskId);
-        }
-        return;
-      }
       case "taskControl": {
-        // Requester-only reply to our taskFollowup/taskInterrupt (the frame
-        // shape never left the server; the webui's steering composer drives
-        // it again). An accepted followup already echoed optimistically; a
-        // refusal must not pass silently -- it lands as a notice in the
-        // viewed transcript of the task it concerns, nowhere else. "Stop" is
-        // the composer's own word for the interrupt action (the sidebar row's
-        // "Cancel subagent" rides the same taskInterrupt, so one wording
-        // covers both affordances).
-        const waiting = data.action === "followup" ? pendingFollowups.get(data.taskId) : undefined;
-        const steer = waiting?.shift();
-        if (waiting && waiting.length === 0) pendingFollowups.delete(data.taskId);
-        if (!data.ok && data.taskId === viewedTaskIdAtom()) {
-          messageList?.handleSystemMessage({
-            content: `${data.action === "interrupt" ? "Stop" : "Steering"} refused: ${
-              data.error || "the task cannot accept it right now"
-            }`,
-          });
-        }
-        // A refused steer leaves no trace behind in the buffer (its row stays
-        // on screen under the notice, and a settled log never had it).
-        if (!data.ok && steer !== undefined) retractTaskEcho(data.taskId, steer);
+        // Requester-only reply to our taskFollowup/taskInterrupt. A refusal
+        // must not pass silently: it lands as the app's honest toast. The
+        // buffer retract dance is gone with the relay -- a refused steer
+        // never entered the worker's context and the transcript never painted
+        // it, so there is nothing to take back. "Stop" is the composer's own
+        // word for the interrupt action (the sidebar row's "Cancel subagent"
+        // rides the same taskInterrupt, so one wording covers both).
+        onTaskControl?.(data);
         return;
       }
       case "transcript": {
@@ -1595,18 +1198,17 @@ export function createChat({
     // be reconstructed as a delta, so the next reconnect falls back to a
     // full replay. Replay-burst events (replayPending) are exempt: they
     // arrive before the cursor report and are what it was measured for.
-    // Browse-mode suppression is exempt too (cold log OR an open subagent
-    // transcript): the events rendered nowhere, so the cursor still
-    // describes the live transcript exactly, and the next delta attach
-    // re-delivers the suppressed tail once (no duplicates, no gaps). The
-    // sidebar spinner (sessionState/working) and the header atoms keep
-    // flowing while suppressed -- only transcript rendering stops.
-    const browseViewActive = viewedLogId !== null || viewedTaskIdAtom() !== null;
+    // Cold-log browse suppression is exempt too: the events rendered
+    // nowhere, so the cursor still describes the live transcript exactly,
+    // and the next delta attach re-delivers the suppressed tail once (no
+    // duplicates, no gaps). The sidebar spinner (sessionState/working) and
+    // the header atoms keep flowing while suppressed -- only transcript
+    // rendering stops.
+    const browseViewActive = viewedLogId !== null;
     if (!replayPending && !browseViewActive && CONVERSATION_EVENT_TYPES.has(data.type)) {
       dirtySinceAttach = true;
     }
-    // Transcript writes go to the sink while another transcript (a cold log
-    // or a subagent's activity replay) is on screen. The
+    // Transcript writes go to the sink while a cold log is on screen. The
     // remaining work in the cases below (working/title/cursor atoms, the
     // error's optimistic working flip) is live-session state, not the
     // visible transcript, and runs either way.
@@ -1899,20 +1501,11 @@ export function createChat({
   }
 
   function createSession(opts: Record<string, unknown> = {}): void {
-    // Navigation to a fresh session: the pane's NEW pointer is "none" (the
-    // new session attaches live), so the persisted pointer moves with it.
-    pendingViewedTaskId = null;
-    setViewedTaskPointer(null);
     const profile = (opts.profile as string | undefined) || currentProfileAtom();
     send({ type: "createSession", ...opts, profile });
   }
 
   function switchSession(sessionId: string): void {
-    // Navigation away from a subagent transcript (when one is open): the
-    // pane's NEW pointer is "none" -- persist it now, not the stale one, and
-    // consume any reload candidate with it.
-    pendingViewedTaskId = null;
-    setViewedTaskPointer(null);
     send({ type: "switchSession", sessionId });
     sessionIdAtom(sessionId);
     messageList?.clear();
@@ -2006,7 +1599,16 @@ export function createChat({
       // list rebuilt by a later app boot) starts in the state the user left it.
       hideThinking: hideThinkingAtom(),
       onQuestionAnswer: (answers) => sendQuestionAnswer(answers),
+      // Lazy history: scrolling near the top pages older entries through the
+      // loadOlder seam (see requestOlderHistory + message-list's TOP_TRIGGER_PX).
+      onNearTop: () => requestOlderHistory(),
+      // Jump-to-bottom rides the composer seam (#input-area, via ref); the
+      // manager hides it while the view follows the bottom. No host: no button.
+      jumpHost: getJumpHost?.() ?? undefined,
     });
+    // The R3 read-only intent survives this construction (the worker attach
+    // may have landed before the manager existed).
+    messageList.setQuestionReadOnly(questionReadOnlyWanted);
     sessionIdAtom(sessionId);
     // A delta replay only sends the tail the transcript does not already
     // hold (it ends exactly at the attach cursor): clearing would lose the
@@ -2027,248 +1629,27 @@ export function createChat({
     send({ type: "switchProfile", sessionId, profileName });
   }
 
-  // ── Subagent main-view transcript ────────────────────────────────────────
-  // The task feed's frames ARE the transcript source: text/reasoning ride
-  // the streaming lanes, tool_call/tool_result ride the ToolBlock path
-  // (name pairing -- the activity relay carries no call ids), and the
-  // STREAM_RESET sentinel mirrors message-list's retry retract. Mapping one
-  // wire item is used by both halves of the view: the live feed (per frame)
-  // and the seed-on-open replay (buffer -> the same shapes).
-  function feedTaskActivity(list: MessageListManager, activity: TaskActivityWire): void {
-    switch (activity.kind) {
-      case "text":
-        list.handleStreamingChunk({ content: activity.content });
-        break;
-      case "reasoning":
-        list.handleStreamingReasoningChunk({ content: activity.content });
-        break;
-      case "user":
-        // The steering row: the SAME user-row renderer a session send rides
-        // (no second render path -- see subagents.tsx's header note).
-        list.handleUserMessage({ content: activity.content });
-        break;
-      case "usage": {
-        // Footer attestation, never a lane -- the task fold of the session
-        // TOKEN_USAGE handling. handleTokenUsage holds the gauge/call time for
-        // the NEXT commit (the tool-call boundary and the turn flip already
-        // finalize with them, and flag one per-response bar for a text-less
-        // response). A DERIVED call time never enters the hold -- the held
-        // path carries no derived-disclosure -- it lands on the stamped
-        // commit only. A frame with a `ts` is the settled fold's: the log
-        // stamps the commit here, footer and all (absent fields ride absent;
-        // appendFooterRow itself refuses a footer without a trustworthy ts).
-        const { ts, durationMs, ctx, callMs, callDerived } = activity;
-        list.handleTokenUsage({
-          ...(ctx !== undefined ? { ctxUsed: ctx.used } : {}),
-          ...(ctx?.total !== undefined ? { ctxTotal: ctx.total } : {}),
-          ...(ctx?.cached !== undefined ? { cachedTokens: ctx.cached } : {}),
-          ...(ctx?.prompt !== undefined ? { promptTokens: ctx.prompt } : {}),
-          ...(ctx?.completion !== undefined ? { completionTokens: ctx.completion } : {}),
-          ...(callMs !== undefined && callDerived !== true ? { durationMs: callMs } : {}),
-        });
-        if (ts !== undefined) {
-          list.finalizeAssistant({
-            ts,
-            ...(durationMs !== undefined ? { durationMs } : {}),
-            ...(ctx !== undefined ? { ctx } : {}),
-            ...(callMs !== undefined ? { callMs } : {}),
-            ...(callDerived === true ? { callDerived: true } : {}),
-          });
-        }
-        break;
-      }
-      case "tool_call":
-        // handleToolCall finalizes the in-flight text row itself (tool
-        // boundary), so the streamed prose commits exactly like a live turn.
-        // The relay-carried descriptors are forwarded verbatim: the block
-        // gets the identical display-DSL posture (read box, inline diff,
-        // code block) the session path renders -- and the undefined-vs-""
-        // argsSummary tri-state survives (absent = client heuristic, "" =
-        // no summary, no fallback).
-        list.handleToolCall({
-          name: activity.name,
-          args: activity.args,
-          ...(activity.argsSummary !== undefined ? { argsSummary: activity.argsSummary } : {}),
-          ...(activity.display !== undefined ? { display: activity.display } : {}),
-        });
-        break;
-      case "tool_result":
-        list.handleToolResult({
-          name: activity.name,
-          ...(activity.output !== undefined ? { output: activity.output } : {}),
-          ...(activity.error !== undefined ? { error: activity.error } : {}),
-          ...(activity.startLine !== undefined ? { startLine: activity.startLine } : {}),
-        });
-        break;
-      case "reset":
-        list.handleStreamReset();
-        break;
-    }
-  }
-
-  /** Replay a task's buffered activity into the main transcript. Consecutive
-   *  same-kind deltas are already merged into one block (appendTaskActivity),
-   *  so a block is one streaming segment, not a delta. A task that already
-   *  settled (or evicted from the snapshot) gets its trailing row committed
-   *  quiet -- no ts was observed, so the footer honestly renders nothing. */
-  function renderTaskTranscript(taskId: string): void {
-    if (!messageList) return;
-    for (const block of getTaskActivity(taskId)) {
-      feedTaskActivity(messageList, blockToActivity(block));
-    }
-    const task = tasksAtom().find((t) => t.taskId === taskId);
-    if (!task || (task.status !== "running" && task.status !== "queued")) {
-      messageList.finalizeAssistant();
-    }
-  }
-
-  function blockToActivity(block: TaskActivityBlock): TaskActivityWire {
-    switch (block.kind) {
-      case "text":
-      case "reasoning":
-        return { kind: block.kind, content: block.text };
-      case "prompt":
-        // Renders through the session's user-row path, same as the settled
-        // fold's leading prompt item -- one renderer for one row grammar.
-        return { kind: "user", content: block.text };
-      case "usage":
-        return {
-          kind: "usage",
-          ...(block.ts !== undefined ? { ts: block.ts } : {}),
-          ...(block.durationMs !== undefined ? { durationMs: block.durationMs } : {}),
-          ...(block.ctx !== undefined ? { ctx: block.ctx } : {}),
-          ...(block.callMs !== undefined ? { callMs: block.callMs } : {}),
-          ...(block.callDerived === true ? { callDerived: true } : {}),
-        };
-      case "tool_call":
-        return {
-          kind: "tool_call",
-          name: block.name,
-          args: block.args,
-          ...(block.argsSummary !== undefined ? { argsSummary: block.argsSummary } : {}),
-          ...(block.display !== undefined ? { display: block.display } : {}),
-        };
-      case "tool_result":
-        return {
-          kind: "tool_result",
-          name: block.name,
-          output: block.output,
-          ...(block.error !== undefined ? { error: block.error } : {}),
-          ...(block.startLine !== undefined ? { startLine: block.startLine } : {}),
-        };
-      case "user":
-        return { kind: "user", content: block.text };
-    }
-  }
-
-  /** Open a task's transcript in the main view. The socket stays attached to
-   *  the manager session (a task agent is NOT an attachable session -- its
-   *  worker id never rides the wire); task frames already bypass the
-   *  session guard, and the manager's own transcript events are suppressed
-   *  exactly like log view (LOG_VIEW_SINK + cursor exemption).
-   *
-   *  The cache wins only for an UNSETTLED task: a buffer the server already
-   *  fed IS the live relay view, and re-requesting it would only re-fetch the
-   *  ring's tail (the doctrine: an unsettled transcript is the buffer, byte
-   *  for byte). A SETTLED task always re-requests -- its authority is the
-   *  worker's durable log, so a warm stale cache must never paint (the
-   *  settledTasks ledger + seedTaskActivity's force branch), and the paint
-   *  below is a placeholder that the authoritative reply replaces.
-   *
-   *  The buffer opens on the delegated prompt: an UNSETTLED task gets the
-   *  client seed (see seedTaskPromptBlock -- a queued task shows the prompt
-   *  alone), a SETTLED task's fold leads with the log's own prompt row.
-   *
-   *  THE open path for every pointer move -- click AND the reload restore
-   *  (tryRestoreViewedTask) -- so the pointer write (atom + persisted key)
-   *  and the authority rules below apply to both identically. */
-  function viewSubagent(taskId: string): void {
-    if (!messageList) return;
-    viewedLogId = null; // browse modes are exclusive (see viewedLogId)
-    // An open (user click or restore) owns the pointer from here: a pending
-    // reload candidate is no longer anyone's intent.
-    pendingViewedTaskId = null;
-    setViewedTaskPointer(taskId);
-    messageList.clear();
-    seedTaskPromptBlock(taskId);
-    if (!hasFedActivity(taskId) || settledTasks.has(taskId)) requestTaskActivity(taskId);
-    renderTaskTranscript(taskId);
-  }
-
-  /** Reload restore: when the persisted pointer's task shows up in the
-   *  hydrated feed, open it through viewSubagent EXACTLY ONCE (the candidate
-   *  is consumed on the way in, so later snapshots/frames never re-open it).
-   *  `feedHydrated` proves existence for callers whose very frame is the
-   *  hydration signal (a taskActivity delta); snapshot/flush callers leave it
-   *  false and are gated on the task feed itself. Returns whether the open
-   *  happened; false leaves the candidate pending (manager not built yet, or
-   *  the task has not hydrated -- a later feed frame or the taskList
-   *  gone-clear decides). */
-  function tryRestoreViewedTask(feedHydrated = false): boolean {
-    const candidate = pendingViewedTaskId;
-    if (candidate === null) return false;
-    if (!messageList) return false; // setSession builds it on attach
-    if (!feedHydrated && !tasksAtom().some((t) => t.taskId === candidate)) return false;
-    viewSubagent(candidate);
-    return true;
-  }
-
-  /** Drop the browse pointer; the app follows with a re-switch to the
-   *  manager (the onCloseLogView idiom) which replays the live transcript,
-   *  and the sessionCreated case resets suppression on the attach burst.
-   *  Navigation: the key follows the pointer (and a never-yet-applied reload
-   *  candidate dies with the intent it represented). */
-  function closeSubagentView(): void {
-    pendingViewedTaskId = null;
-    setViewedTaskPointer(null);
-  }
-
   /**
-   * Steer the task through the EXISTING validated route (C2S taskFollowup ->
-   * handleTaskFollowup -> TaskManager.sendFollowUp: running task with a live
-   * turn, or the follow-up is eaten as a pending question's answer). The
-   * frame shape is byte-unchanged from the retired panel's steer form; the
-   * server validates (taskId + nonblank message) and answers the requester
-   * with a taskControl reply.
-   *
-   * The task activity relay has no userMessage lane (steer content enters the
-   * worker's context through the steering seam, never its OutputEvent stream,
-   * and the worker's USER_MESSAGE event carries no provenance -- the relay
-   * could not tell it from the composed task prompt). So THIS client is the
-   * row's carrier while the task runs, and it rides the transcript's one
-   * source: the activity buffer gets the block (a pane switch or a reopen
-   * repaints it exactly like a streamed block; the MessageListManager path
-   * renders it, never a second renderer), and the viewed pane sees it now --
-   * the same now-you-see-it UX a session steering gives. A settled task's
-   * reload reads the durable log instead, which records the same row
-   * (taskActivityFromLogEntries' user kind). A refusal arrives on taskControl
-   * (below) and says so.
+   * Steer the worker task whose session is on screen through the EXISTING
+   * validated route (C2S taskFollowup -> handleTaskFollowup ->
+   * TaskManager.sendFollowUp: running task with a live turn, or the
+   * follow-up is eaten as a pending question's answer). No client echo and
+   * no pending-echo ledger: the drained steer rides the worker's own
+   * USER_MESSAGE event through the live-tail producer, so the watcher sees
+   * it exactly once live (settled views read the log's origin:"user" lane
+   * -- the existing rule), and a refusal has nothing to retract because it
+   * never painted a row. Refusals land on taskControl (see onTaskControl).
    */
   function taskFollowup(taskId: string, message: string): void {
     const text = message.trim();
     if (!taskId || !text) return;
     send({ type: "taskFollowup", taskId, message: text });
-    appendTaskActivity(taskId, { kind: "user", content: text });
-    const waiting = pendingFollowups.get(taskId);
-    if (waiting) waiting.push(text);
-    else pendingFollowups.set(taskId, [text]);
-    if (taskId === viewedTaskIdAtom() && messageList) {
-      messageList.handleUserMessage({ content: text });
-    }
   }
 
   /** Cancel a live task (C2S taskInterrupt -> TaskManager.interruptTask). */
   function interruptTask(taskId: string): void {
     if (!taskId) return;
     send({ type: "taskInterrupt", taskId });
-  }
-
-  // Ask for a task's buffered activity (transcript opened after a refresh; the
-  // live feed only covers events from connection time on). No-op while the
-  // socket is down; the next open re-requests.
-  function requestTaskActivity(taskId: string): void {
-    if (!taskId) return;
-    send({ type: "taskActivityRequest", taskId });
   }
 
   function getCurrentProfile(): string {
@@ -2287,6 +1668,28 @@ export function createChat({
 
   function viewLog(logId: string): void {
     send({ type: "viewLog", logId });
+  }
+
+  /**
+   * Lazy history: the scroll-up trigger (the manager's top-zone edge). Fires
+   * the ONE loadOlder page the pane may have in flight (once-per-gap guard).
+   * No window / a page already open / a closed socket: silence. A refusal frees the slot and the next
+   * edge retries; a disconnect re-attests the window through the attach
+   * burst -- the existing reconnect doctrine, no invented retry loop.
+   */
+  function requestOlderHistory(): void {
+    const win = historyWindow;
+    if (!win || olderInFlight !== null) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    olderReqSeq++;
+    olderInFlight = olderReqSeq;
+    send({
+      type: "loadOlder",
+      requestId: olderReqSeq,
+      logId: win.id,
+      olderThan: win.oldestIndex,
+      ...(win.epochToken !== null ? { epochToken: win.epochToken } : {}),
+    });
   }
 
   function deleteLog(logId: string): void {
@@ -2442,13 +1845,10 @@ export function createChat({
     toggleHideThinking,
     transcribe,
     tasksAtom,
-    viewedTaskIdAtom,
-    viewSubagent,
-    closeSubagentView,
+    sessionKindAtom,
+    sessionParentAtom,
     taskFollowup,
     interruptTask,
-    requestTaskActivity,
-    getTaskActivity,
     clearTasks,
   };
 }

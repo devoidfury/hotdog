@@ -149,8 +149,6 @@ interface SidebarProps {
    *  card filters it to its own manager (null-parent tasks match no row and
    *  never render -- same scoping rule the retired strip enforced). */
   tasks: TaskInfoWire[];
-  /** Task whose transcript the main view is showing (row highlight). */
-  viewedTaskId: string | null;
   /** Subagents-section collapse, shared across cards (view setting; the
    *  feed only ever populates the attached manager anyway). */
   subagentsCollapsed: boolean;
@@ -162,8 +160,9 @@ interface SidebarProps {
   onCancel: (sessionId: string) => void;
   onViewLog: (logId: string) => void;
   /** Open a task row in the main view: the app routes by row kind (see
-   *  openTargetFor) -- live tasks ride chat.viewSubagent, durable restart-
-   *  survivor rows ride the cold log-view machinery (chat.viewLog). */
+   *  openTargetFor) -- live rows attach their worker session
+   *  (chat.switchSession), settled and durable restart-survivor rows ride
+   *  the cold log-view machinery (chat.viewLog). */
   onOpenTask: (taskId: string, task: TaskInfoWire) => void;
   /** A task row's context menu (right-click + kebab + keyboard twins; the
    *  app builds the honest task action set on the shared ContextMenu
@@ -451,6 +450,14 @@ function SearchHitRow(p: { hit: SearchHitWire; query: string; onActivate: () => 
       {hit.live ? "live" : "log"}
     </span>,
   );
+  // B5: attested subagent hits (the log Recent Logs hides) say so, with
+  // the delegation task as the handle. Absent on interactive hits -- the
+  // row renders exactly as before.
+  if (hit.subagentOf) {
+    line1.push(
+      <span className="search-subagent" title={hit.subagentOf}>subagent of {hit.subagentOf}</span>,
+    );
+  }
 
   const line3: JsxChild[] = [
     <span className="row-date">{formatDateTime(hit.lastActivityAt)}</span>,
@@ -613,7 +620,7 @@ export function Sidebar(p: SidebarProps) {
                 tasks={owned}
                 now={p.now}
                 collapsed={p.subagentsCollapsed}
-                viewedTaskId={p.viewedTaskId}
+                viewedSessionId={p.activeSessionId}
                 onToggle={p.onToggleSubagents}
                 onOpenTask={p.onOpenTask}
                 onTaskMenu={p.onTaskMenu}
@@ -714,7 +721,7 @@ export function Sidebar(p: SidebarProps) {
                 tasks={log.subagents}
                 now={p.now}
                 collapsed={p.subagentsCollapsed}
-                viewedTaskId={p.viewedTaskId}
+                viewedSessionId={p.activeSessionId}
                 onToggle={p.onToggleSubagents}
                 onOpenTask={p.onOpenTask}
                 onTaskMenu={p.onTaskMenu}

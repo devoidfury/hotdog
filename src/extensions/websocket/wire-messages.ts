@@ -16,14 +16,13 @@ import {
   MAX_STREAMING_TOOL_CALL_ARGS_CHARS,
   S2C,
   type S2CType,
-  type TaskActivityWire,
   type ToolDisplayWire,
   wireImages,
 } from "./protocol.ts";
 
 /**
  * TaskInfo -> TaskInfoWire for the two task frames (snapshot TASK_LIST and
- * relay TASK_UPDATE): the core fields ride untouched, plus ONE derived
+ * scoped TASK_UPDATE): the core fields ride untouched, plus ONE derived
  * display field -- `agentLogPath`, the absolute log file path of the worker's
  * session, gated by the same core helper the cold-log rows use (omitted when
  * the id fails the path gate or there is no agent yet). The webui row menu
@@ -289,54 +288,6 @@ export function s2cStreamingToolCall(
     name: o.name,
     args: capped,
   };
-}
-
-/** Per-tool display-metadata view the task-activity relay resolves from the
- *  producing (worker) agent's own tool registry -- the same ToolMetadata
- *  keys createChannel hands to s2cToolCall for live session frames. */
-export interface TaskActivityToolMeta {
-  argDisplay?: Record<string, ArgDisplay>;
-  headerKeys?: readonly string[];
-  display?: ToolDisplaySpec[];
-}
-
-/**
- * Attach the display-DSL posture fields to one serialized task-activity item
- * so the subagent transcript reaches the SAME ToolBlock postures as a live
- * session view (read file box, edit inline diff, bash code block; owner
- * ruling 2026-11-13). s2cToolCall/s2cToolResult stay the byte-home: the fold
- * (with its headerKeys tri-state) and the declared-spec copy are computed
- * here with the same calls from the same raw event fields -- the fold reads
- * the FULL event.input exactly like the session frame (the relay's truncated
- * `args` is a transport cap, never a posture input), and start_line gets the
- * same positive-integer gate. One computation, two envelopes: no drift
- * possible between the session path and the relay. A tool with no resolved
- * metadata rides the same hint-free fold the session frame computes (parity,
- * not presence) and no `display`; the result kind rides `startLine` only for
- * a positive integer.
- */
-export function taskActivityWithPosture(
-  activity: TaskActivityWire,
-  event: OutputEvent,
-  toolMeta: (toolName: string) => TaskActivityToolMeta | undefined,
-): TaskActivityWire {
-  if (activity.kind === "tool_call" && event.type === OUTPUT_EVENT.TOOL_CALL) {
-    const meta = toolMeta(activity.name);
-    const summary = meta?.headerKeys
-      ? summarizeHeaderArgs(event.input, meta.headerKeys, meta.argDisplay)
-      : summarizeToolArgs(event.input, undefined, meta?.argDisplay);
-    const display = wireToolDisplay(meta?.display);
-    return {
-      ...activity,
-      ...(meta?.headerKeys !== undefined || summary ? { argsSummary: summary } : {}),
-      ...(display ? { display } : {}),
-    };
-  }
-  if (activity.kind === "tool_result" && event.type === OUTPUT_EVENT.TOOL_RESULT) {
-    const startLine = Number(toolContentMeta(event.content, "start_line"));
-    return Number.isInteger(startLine) && startLine > 0 ? { ...activity, startLine } : activity;
-  }
-  return activity;
 }
 
 /** Loose source for TOKEN_USAGE: live events and raw log entries both fit. */

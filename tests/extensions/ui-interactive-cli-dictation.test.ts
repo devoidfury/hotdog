@@ -2,9 +2,9 @@
 // insert at caret). Driven with a fake TTY input stream and a fake readline
 // Interface, mirroring clipboard-paste.test.ts.
 
-import { describe, it, expect, mock, afterEach } from "bun:test";
+import { describe, it, expect, mock, afterEach, afterAll } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type readline from "node:readline";
@@ -82,6 +82,18 @@ function fakeCapture(): { capture: () => AudioCapture; stop: MockFn; cancel: Moc
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 10));
+
+const madeDirs = new Set<string>();
+function dictationDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "dictation-test-"));
+  madeDirs.add(dir);
+  return dir;
+}
+
+afterAll(() => {
+  for (const dir of madeDirs) rmSync(dir, { recursive: true, force: true });
+  madeDirs.clear();
+});
 
 describe("DictationInterceptor", () => {
   let lastRig: Rig | null = null;
@@ -186,7 +198,7 @@ describe("createArecordCapture", () => {
   it("records via the capture command, finalizing the wav on SIGINT", async () => {
     // Stub "arecord": ignores the format args, takes the last argv entry as
     // the output path, writes bytes and exits when SIGINT arrives.
-    const dir = mkdtempSync(join(tmpdir(), "dictation-test-"));
+    const dir = dictationDir();
     const stub = join(dir, "fake-arecord.sh");
     writeFileSync(
       stub,
@@ -218,7 +230,7 @@ describe("createArecordCapture", () => {
   it("stop rejects (no hang) when the capture command exits early", async () => {
     // e.g. arecord dies on a device error mid-recording: close fires while
     // the user is still talking, so it has already fired by the time of stop.
-    const dir = mkdtempSync(join(tmpdir(), "dictation-test-"));
+    const dir = dictationDir();
     const stub = join(dir, "dying-arecord.sh");
     writeFileSync(stub, "#!/bin/sh\nexit 1\n");
     chmodSync(stub, 0o755);

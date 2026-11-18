@@ -69,7 +69,7 @@ These values resolve at the moment they are consumed, so a published change gove
 | handoff | `handoffTool.autoIncludeFilesUnderBytes` | per handoff; an invalid published value loudly refuses the next file-carrying handoff and recovers on the next valid publish |
 | loop control | `loopDetect.repeatThreshold`, `pingPongThreshold`, `loop.maxLoops` | per turn / per loop check; the detection window derives from the current thresholds |
 | context | the `compaction` block, `contextLimit`, `toolCallRepair.maxRepairsPerTurn` | per run / per turn |
-| ask-a-question | `websocket.questionTimeoutSecs`, `questionStrategy` | at question arm; an in-flight question keeps its armed timer |
+| ask-a-question | `websocket.questionTimeoutSecs`, `questionStrategy` | at question arm; an in-flight question keeps its armed timer; task-worker rows always resolve `wait` (no worker-facing timer, so the read is moot there and the inherited value is coerced with a warn) |
 | upload limits | `uploadLimits` block | per send; each send-path read resolves the ceilings from the live generation |
 | scheduling | `modelGroups` | per placement and per workflow group resolution (a reader over the live config bag) |
 | skills | `skills.path` | per lookup: listings and re-reads answer the current generation; a publish that unsets the path falls back to the boot value, so a bad write cannot zero a running loader |

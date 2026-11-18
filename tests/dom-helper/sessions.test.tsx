@@ -46,7 +46,7 @@ const noop = (): void => {};
 // Search closed by default; individual search tests override `search`.
 const CLOSED_SEARCH = { open: false, query: "", pending: false, results: null } as const;
 
-function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; logsCollapsed?: boolean; tasks?: TaskInfoWire[]; viewedTaskId?: string | null; subagentsCollapsed?: boolean; now?: number }): Mounted {
+function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; logsCollapsed?: boolean; tasks?: TaskInfoWire[]; subagentsCollapsed?: boolean; now?: number }): Mounted {
   return mount(
     <Sidebar
       sessions={opts.sessions ?? []}
@@ -63,7 +63,6 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       logsMin={96}
       logsMax={450}
       tasks={opts.tasks ?? []}
-      viewedTaskId={opts.viewedTaskId ?? null}
       subagentsCollapsed={opts.subagentsCollapsed ?? false}
       now={opts.now ?? STAMP}
       onCreate={noop}
@@ -478,7 +477,7 @@ describe("formatDateTime", () => {
 
 function mountInteractive(
   container: Element,
-  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; activeSessionId?: string | null; activeLogId?: string | null; tasks?: TaskInfoWire[]; viewedTaskId?: string | null; subagentsCollapsed?: boolean; now?: number },
+  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; activeSessionId?: string | null; activeLogId?: string | null; tasks?: TaskInfoWire[]; subagentsCollapsed?: boolean; now?: number },
   calls: string[],
 ): Mounted {
   return mount(
@@ -497,7 +496,6 @@ function mountInteractive(
       logsMin={96}
       logsMax={450}
       tasks={opts.tasks ?? []}
-      viewedTaskId={opts.viewedTaskId ?? null}
       subagentsCollapsed={opts.subagentsCollapsed ?? false}
       now={opts.now ?? STAMP}
       onCreate={() => calls.push("create")}
@@ -776,8 +774,9 @@ describe("Recent Logs titlebar", () => {
 // The collapsible disclosure under a live session row: header "Subagents" +
 // chevron (#logs-toggle grammar), one row per task agent with a status glyph,
 // a chipLabel idiom label, and an elapsed clock. Rows are the task feed
-// scoped to that manager; clicking a row asks the app to open the task's
-// transcript in the main view (openTask routing).
+// scoped to that manager; clicking a row asks the app to open the worker
+// (B4: live rows become the session view, settled rows its durable log;
+// openTargetFor decides, the row just routes the task id).
 
 const subTask = (over: Partial<TaskInfoWire> & { taskId: string }): TaskInfoWire => ({
   description: `task ${over.taskId}`,
@@ -789,6 +788,9 @@ const subTask = (over: Partial<TaskInfoWire> & { taskId: string }): TaskInfoWire
   activeMs: 1000,
   inRun: true,
   turnStartedAt: STAMP - 1000,
+  // B4: a live task's worker session is what a row opens; fixtures carry one
+  // by default (openTargetFor returns null -- informational row -- without it).
+  agentSessionId: "w-" + over.taskId,
   ...over,
 });
 
@@ -909,15 +911,16 @@ describe("Subagents section", () => {
       {
         sessions: [liveSession()],
         tasks: [subTask({ taskId: "run:alpha#1" }), subTask({ taskId: "run:beta#2" })],
-        viewedTaskId: "run:beta#2",
+        activeSessionId: "w-run:beta#2",
       },
       calls,
     );
     const rows = root.querySelectorAll(".subagent-row");
     (rows[0] as HTMLElement).click();
     expect(calls).toEqual(["openTask:run:alpha#1"]);
-    // The viewed task highlights in the list (same aria-current idiom as the
-    // session/log rows), and re-clicking it re-routes (the main view re-opens).
+    // B4: the row marks when its WORKER SESSION is the pane (activeSessionId
+    // is the viewed session), same aria-current idiom as session/log rows.
+    // Re-clicking re-routes (the pane re-opens the worker session).
     expect(rows[1]!.getAttribute("class")).toContain("active");
     expect(rows[1]!.getAttribute("aria-current")).toBe("true");
     expect(rows[0]!.getAttribute("class")).not.toContain("active");
@@ -1132,6 +1135,7 @@ function hit(o: Partial<SearchHitWire> & { logId: string }): SearchHitWire {
     snippets: o.snippets ?? [],
     ...(o.profile ? { profile: o.profile } : {}),
     ...(o.model ? { model: o.model } : {}),
+    ...(o.subagentOf ? { subagentOf: o.subagentOf } : {}),
   };
 }
 
@@ -1186,6 +1190,26 @@ describe("search panel", () => {
     // live/cold scope tag distinguishes the attach verb for each hit.
     expect(rows[0]!.querySelector(".search-scope")?.textContent).toBe("log");
     expect(rows[1]!.querySelector(".search-scope-live")?.textContent).toBe("live");
+  });
+
+  it("attested-subagent hits carry the muted 'subagent of <desc>' label; plain hits render untouched", () => {
+    const root = render({
+      search: {
+        open: true,
+        query: "needle",
+        pending: false,
+        results: [
+          hit({ logId: "w1", snippets: ["x"], subagentOf: "audit the parser" }),
+          hit({ logId: "i1", profile: "owner", snippets: ["x"] }),
+        ],
+      },
+    });
+    const rows = root.querySelectorAll(".search-hit");
+    // B5 label: the hidden worker log says whose delegation it was.
+    const label = rows[0]!.querySelector(".search-subagent");
+    expect(label?.textContent).toBe("subagent of audit the parser");
+    // Interactive hit: NO label node, row byte-identical to the old render.
+    expect(rows[1]!.querySelector(".search-subagent")).toBeNull();
   });
 
   it("magnifier, close, input and row activation route to the app handlers", () => {

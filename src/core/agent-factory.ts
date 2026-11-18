@@ -50,7 +50,12 @@ export function wireSessionEndReap(hooks: HookSystem, link: ToolExecLink): void 
   hooks.on(
     HOOKS.SESSION_END,
     ({ sessionId }: { sessionId?: string }) => {
-      if (typeof sessionId === "string" && sessionId !== "") link.reap?.(sessionId);
+      if (typeof sessionId !== "string" || sessionId === "") return;
+      // `release` (the real broker) reaps the session's entries AND carries
+      // the scratch-reclaim confirmation with it; a link without it (fakes,
+      // older hosts) keeps the plain pool reap.
+      if (link.release) link.release(sessionId);
+      else link.reap?.(sessionId);
     },
     "tool-exec-plane",
   );

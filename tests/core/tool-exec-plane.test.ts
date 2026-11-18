@@ -19,16 +19,29 @@ import {
   type WireFence,
 } from "@core/tool-exec-protocol.ts";
 import { tmpdir } from "node:os";
-import { existsSync, readdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { execFenceBackend } from "@utils/exec-plan.ts";
 import {
   createFencePlanner,
   postureDrift,
+  registerLiveTmpDir,
   sharedToolExecBroker,
+  sweepStaleTmpDirs,
+  unregisterLiveTmpDir,
   toolExecPlaneSettings,
   toolExecModeLabel,
+  ToolExecBroker,
 } from "@core/tool-exec-broker.ts";
+import { TMP_PARENT } from "../helpers.ts";
 import { BashTool } from "@extensions/bash-tool/index.ts";
 import { ReadTool } from "@extensions/core-tools/read.ts";
 import { GrepTool } from "@extensions/core-tools/grep.ts";
@@ -578,6 +591,7 @@ describe("createFencePlanner", () => {
     expect(plan!("unit:probe", "rw", roots)).toBe(first); // memoized, same identity
     // A different class replans (null hosts stay null on every tuple).
     expect(plan!("unit:probe", "net", roots) === null || first !== null).toBe(true);
+    plan!.releaseAll!(); // the test's scratch dirs die with the test
   });
 });
 
@@ -608,7 +622,8 @@ describe("createFencePlanner scratch dir (one per session)", () => {
       );
       expect(rw).toBeNull();
       expect(net).toBeNull();
-      expect(scratchCount(s)).toBe(0); // probe-first: no backend, no dir
+      expect(scratchCount(s)).toBe(0); // probe-first: no dir
+      plan.releaseAll!();
       return;
     }
     const a = scratchOf(rw);
@@ -618,6 +633,7 @@ describe("createFencePlanner scratch dir (one per session)", () => {
     expect(a).not.toMatch(/-(rw|net)-/); // class never enters the name
     expect(existsSync(a!)).toBe(true);
     expect(scratchCount(s)).toBe(1);
+    plan.releaseAll!(); // the test's scratch dirs die with the test
   });
 
   it("distinct sessions get distinct dirs; dropSession mints a fresh one for ITS session only; nothing is rm()d", () => {
@@ -634,6 +650,7 @@ describe("createFencePlanner scratch dir (one per session)", () => {
       );
       expect(f1).toBeNull();
       expect(f2).toBeNull();
+      plan.releaseAll!();
       return;
     }
     const a = scratchOf(f1)!;
@@ -649,5 +666,272 @@ describe("createFencePlanner scratch dir (one per session)", () => {
     expect(existsSync(b)).toBe(true);
     expect(scratchCount(s1)).toBe(2); // old + fresh, neither removed
     expect(scratchCount(s2)).toBe(1);
+    // dropSession orphans the old dir by design; the test cleans up after
+    // both itself (releaseAll only tracks the current mappings).
+    rmSync(a, { recursive: true, force: true });
+    plan.releaseAll!();
+    expect(scratchCount(s1)).toBe(0);
+    expect(scratchCount(s2)).toBe(0);
+  });
+});
+
+// ── Scratch reclaim (arm / finish / all) ──────────────────────────────────────
+//
+// SESSION_END arms a session's scratch reclaim (2026-11 ENOSPC hunt: dirs were
+// left behind forever); the child's CONFIRMED entry death (finishRelease) is
+// what licenses the rm. A resumed session's plan() disarms. The child's own
+// death purges everything (releaseAll). On a backend-less host no dir is ever
+// minted and the dance is a must-not-throw no-op.
+
+describe("createFencePlanner scratch reclaim", () => {
+  const scratchOf = (fence: WireFence | null): string | null =>
+    fence?.prefix.find((a) => a.startsWith(join(tmpdir(), "hotdog-exec-"))) ?? null;
+
+  it("finishRelease reclaims the armed session's dir; a resumed session mints a fresh one; siblings survive", () => {
+    const plan = createFencePlanner("probe")!;
+    const tag = `${process.pid}`;
+    const s1 = `unit-rel-a-${tag}`;
+    const s2 = `unit-rel-b-${tag}`;
+    const roots = [tmpdir()];
+    const f1 = plan(s1, "rw", roots);
+    const f2 = plan(s2, "rw", roots);
+    if (execFenceBackend() === null) {
+      process.stderr.write(
+        "[tool-exec-plane] no jail backend on this host: scratch reclaim is VACUOUS here (the arm/finish dance must merely not throw)\n",
+      );
+      plan.armRelease!(s1, 1);
+      plan.finishRelease!(s1, 1);
+      plan.releaseAll!();
+      return;
+    }
+    const a = scratchOf(f1)!;
+    const b = scratchOf(f2)!;
+    expect(existsSync(a)).toBe(true);
+    plan.armRelease!(s1, 1);
+    plan.finishRelease!(s1, 1);
+    expect(existsSync(a)).toBe(false); // the real mkdtemp'd dir is GONE
+    expect(existsSync(b)).toBe(true); // unrelated session: its dir survives the teardown signal
+    // The resumed session: the memo dropped with the mapping, so the next plan
+    // mints a FRESH dir -- and a different fence id, which is what makes the
+    // child's fence-mismatch replace rule respawn any entry still standing.
+    const f1b = plan(s1, "rw", roots);
+    const aFresh = scratchOf(f1b)!;
+    expect(aFresh).not.toBe(a);
+    expect(existsSync(aFresh)).toBe(true);
+    expect(f1b!.id).not.toBe(f1!.id);
+    plan.releaseAll!();
+    expect(existsSync(b)).toBe(false);
+    expect(existsSync(aFresh)).toBe(false);
+  });
+
+  it("re-arm vs stale ack: only the CURRENT arm's seq reclaims (double SESSION_END)", () => {
+    // The re-fire shape: SESSION_END#1 arms seq 1, its ack drains LATE (a
+    // runner still bound); SESSION_END#2 re-arms at seq 2. The stale seq-1
+    // ack must not satisfy the newer arm, and the seq-2 ack (which the
+    // child's FIFO drain only answers once every entry dropped at seq <= 2
+    // is process-dead) reclaims exactly once.
+    const plan = createFencePlanner("probe")!;
+    const s = `unit-rel-gen-${process.pid}`;
+    const roots = [tmpdir()];
+    const f = plan(s, "rw", roots);
+    if (execFenceBackend() === null) {
+      plan.armRelease!(s, 1);
+      plan.armRelease!(s, 2);
+      plan.finishRelease!(s, 1);
+      plan.finishRelease!(s, 2);
+      plan.releaseAll!();
+      return;
+    }
+    const d = scratchOf(f)!;
+    expect(existsSync(d)).toBe(true);
+    plan.armRelease!(s, 1);
+    plan.armRelease!(s, 2); // re-fired SESSION_END
+    plan.finishRelease!(s, 1); // the LATE stale ack
+    expect(existsSync(d)).toBe(true); // generation gate: the dir lives
+    plan.finishRelease!(s, 99); // any other unknown generation
+    expect(existsSync(d)).toBe(true);
+    plan.finishRelease!(s, 2); // the current generation's ack
+    expect(existsSync(d)).toBe(false);
+    // The double-delivery of the same generation must not rm twice (and the
+    // forgotten mapping means there is nothing to rm).
+    plan.finishRelease!(s, 2);
+  });
+
+  it("plan() disarms an armed release: a late ack must not rm a live session's dir", () => {
+    const plan = createFencePlanner("probe")!;
+    const s = `unit-rel-c-${process.pid}`;
+    const roots = [tmpdir()];
+    const f = plan(s, "rw", roots);
+    plan.armRelease!(s, 1); // SESSION_END lands...
+    const f2 = plan(s, "net", roots); // ...but the session revived before the ack
+    if (execFenceBackend() === null) {
+      plan.finishRelease!(s, 1);
+      plan.releaseAll!();
+      return;
+    }
+    const d = scratchOf(f)!;
+    expect(scratchOf(f2)).toBe(d); // resume reuses the current dir
+    plan.finishRelease!(s, 1); // the late ack: disarmed, a no-op
+    expect(existsSync(d)).toBe(true); // the dir LIVES (a live plan outranks a stale ack)
+    plan.releaseAll!();
+    expect(existsSync(d)).toBe(false);
+  });
+
+  it("finishRelease without arm is a no-op; releaseAll purges every session (the broker-death shape)", () => {
+    const plan = createFencePlanner("probe")!;
+    const tag = `${process.pid}`;
+    const s1 = `unit-rel-d-${tag}`;
+    const s2 = `unit-rel-e-${tag}`;
+    const roots = [tmpdir()];
+    const d1 = scratchOf(plan(s1, "rw", roots));
+    const d2 = scratchOf(plan(s2, "rw", roots));
+    plan.finishRelease!(s1, 1); // never armed: touches nothing
+    if (execFenceBackend() === null) {
+      plan.releaseAll!();
+      return;
+    }
+    expect(existsSync(d1!)).toBe(true);
+    expect(existsSync(d2!)).toBe(true);
+    plan.armRelease!(s2, 1);
+    plan.releaseAll!(); // death purges armed AND unarmed sessions
+    expect(existsSync(d1!)).toBe(false);
+    expect(existsSync(d2!)).toBe(false);
+    const d1b = scratchOf(plan(s1, "rw", roots))!; // the next broker plans fresh
+    expect(d1b).not.toBe(d1);
+    expect(existsSync(d1b)).toBe(true);
+    plan.releaseAll!();
+  });
+});
+
+// ── Stale tmp sweep (the boot janitor) ────────────────────────────────────────
+
+describe("sweepStaleTmpDirs", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  it("removes old own-prefix dirs; keeps young own-prefix ones, foreign prefixes, and files", () => {
+    const base = mkdtempSync(join(TMP_PARENT, "hotdog-sweep-unit-"));
+    try {
+      const oldExec = join(base, "hotdog-exec-unit-old-AAA");
+      const youngExec = join(base, "hotdog-exec-unit-young-BBB");
+      const oldBrowser = join(base, "hotdog-agent-browser-unit-old-CCC");
+      const foreign = join(base, "someone-elses-stuff");
+      for (const d of [oldExec, youngExec, oldBrowser, foreign]) mkdirSync(d);
+      writeFileSync(join(oldExec, "tmpfile"), "x"); // the rm is recursive
+      const old = new Date(Date.now() - 4 * DAY_MS);
+      for (const d of [oldExec, oldBrowser, foreign]) utimesSync(d, old, old);
+      // Re-age oldExec AFTER the child write: the entry-creation bumped its
+      // dir mtime; without the re-age the freshness pass would (correctly)
+      // spare it. The entry file is aged too -- a fully abandoned dir.
+      const oldChild = join(oldExec, "tmpfile");
+      utimesSync(oldChild, old, old);
+      utimesSync(oldExec, old, old);
+      writeFileSync(join(base, "hotdog-exec-unit-afile"), "not a dir");
+      expect(sweepStaleTmpDirs("hotdog-exec-", base)).toBe(1);
+      expect(existsSync(oldExec)).toBe(false);
+      expect(existsSync(youngExec)).toBe(true); // young = possibly live: NEVER sweep (multi-process safety)
+      expect(existsSync(oldBrowser)).toBe(true); // foreign to THIS prefix (the browser sweep's job)
+      expect(existsSync(foreign)).toBe(true);
+      expect(existsSync(join(base, "hotdog-exec-unit-afile"))).toBe(true); // files are not ours
+      expect(sweepStaleTmpDirs("hotdog-agent-browser-", base)).toBe(1);
+      expect(existsSync(oldBrowser)).toBe(false);
+      expect(existsSync(youngExec)).toBe(true);
+      // An unreadable base logs and returns 0, never throws.
+      expect(sweepStaleTmpDirs("hotdog-exec-", join(base, "never-existed"))).toBe(0);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("live-dir immunity: registered dirs survive at any age; entry freshness rescues stale-mtime dirs", () => {
+    const base = mkdtempSync(join(TMP_PARENT, "hotdog-sweep-immune-"));
+    try {
+      const DAY = 24 * 60 * 60 * 1000;
+      const old = new Date(Date.now() - 4 * DAY);
+      const mkOld = (name: string): string => {
+        const d = join(base, name);
+        mkdirSync(d);
+        utimesSync(d, old, old);
+        return d;
+      };
+      const registered = mkOld("hotdog-exec-unit-registered");
+      registerLiveTmpDir(registered); // the owner checked it in before any sweep ran
+      const unregistered = mkOld("hotdog-exec-unit-unregistered");
+      const freshEntry = mkOld("hotdog-exec-unit-freshentry");
+      // The dir mtime says dead; an entry append-style touch says alive.
+      const child = join(freshEntry, "runner-tmp");
+      writeFileSync(child, "x");
+      utimesSync(freshEntry, old, old); // creating the entry bumped the DIR mtime; re-age it
+      expect(sweepStaleTmpDirs("hotdog-exec-", base)).toBe(1);
+      expect(existsSync(unregistered)).toBe(false);
+      expect(existsSync(registered)).toBe(true); // registered? age never applies
+      expect(existsSync(freshEntry)).toBe(true); // entry-level freshness pass
+      const protected2 = mkOld("hotdog-exec-unit-protected2");
+      registerLiveTmpDir(protected2); // registered AFTER the first sweep
+      const other = mkOld("hotdog-exec-unit-other");
+      expect(sweepStaleTmpDirs("hotdog-exec-", base)).toBe(1); // only `other`
+      expect(existsSync(other)).toBe(false);
+      expect(existsSync(protected2)).toBe(true); // immunity at any age
+      unregisterLiveTmpDir(protected2);
+      expect(sweepStaleTmpDirs("hotdog-exec-", base)).toBe(1);
+      expect(existsSync(protected2)).toBe(false); // owner released it: food again
+      expect(existsSync(registered)).toBe(true); // still immune
+    } finally {
+      // registered dirs are immune to the sweep by design; the test is the owner.
+      unregisterLiveTmpDir(join(base, "hotdog-exec-unit-registered"));
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("a live planner's mapped dir survives a default-base sweep at any age", () => {
+    // The reachability from the review: another `new ToolExecBroker()` (or a
+    // second planner) janitor-sweeping the REAL tmpdir must never eat this
+    // planner's live `scratchDirs` mapping, even with an old mtime.
+    const plan = createFencePlanner("probe")!;
+    const s = `unit-rel-sweepimmune-${process.pid}`;
+    const f = plan(s, "rw", [tmpdir()]);
+    if (execFenceBackend() === null) {
+      process.stderr.write(
+        "[tool-exec-plane] no jail backend on this host: live-dir planner sweep immunity is VACUOUS here\n",
+      );
+      return;
+    }
+    const d = f!.prefix.find((a) => a.startsWith(join(tmpdir(), "hotdog-exec-")))!;
+    const DAY = 24 * 60 * 60 * 1000;
+    const old = new Date(Date.now() - 4 * DAY);
+    utimesSync(d, old, old);
+    sweepStaleTmpDirs("hotdog-exec-"); // default base, default now
+    expect(existsSync(d)).toBe(true); // registered by the planner: immune
+    // releaseAll unregisters AND rm's (its own dirs, its own decision).
+    plan.releaseAll!();
+    expect(existsSync(d)).toBe(false);
+  });
+
+  it("broker construction sweeps old own-prefix dirs off the critical path", async () => {
+    // The janitor runs in an unref'd deferred timer reading tmpdir() AT FIRE
+    // TIME, so TMPDIR points at the sandbox for the construction window only;
+    // inside it, only old `hotdog-exec-*` entries are food.
+    const base = mkdtempSync(join(TMP_PARENT, "hotdog-sweep-boot-"));
+    const savedTmpDir = process.env.TMPDIR;
+    const oldExec = join(base, `hotdog-exec-unit-boot-${process.pid}`);
+    const young = join(base, `hotdog-exec-unit-bootyoung-${process.pid}`);
+    try {
+      mkdirSync(oldExec);
+      mkdirSync(young);
+      const old = new Date(Date.now() - 4 * DAY_MS);
+      utimesSync(oldExec, old, old);
+      process.env.TMPDIR = base;
+      try {
+        const broker = new ToolExecBroker({ fence: "off" });
+        await new Promise((r) => setTimeout(r, 50)); // the deferred janitor lands
+        expect(existsSync(oldExec)).toBe(false);
+        expect(existsSync(young)).toBe(true);
+        await broker.close();
+      } finally {
+        if (savedTmpDir === undefined) delete process.env.TMPDIR;
+        else process.env.TMPDIR = savedTmpDir;
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

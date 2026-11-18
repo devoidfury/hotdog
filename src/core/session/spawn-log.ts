@@ -3,7 +3,9 @@
  * task-lanes/ and sessions/ dirs (resolved config: taskSpawnsPath). One
  * spawn line per spawn (engine-owned parked spawns carry `parked: true` and
  * optionally their `run` dir), one agent line when the worker's own session
- * id is known, one end line per terminal transition. A later process
+ * id is known, one end line per terminal transition, and one promote line
+ * when a human adopts a worker log (D6: the id stops reading as a joined
+ * worker). A later process
  * lifetime reads it to surface restart orphans (plan_status section, honest
  * task_status answers) and to rebuild the webui subagent lineage
  * (lineage(): per-task records for the sidebar feed) -- detection and
@@ -77,6 +79,14 @@ export class SpawnLog {
   #dirReady = false;
   #orphans: Promise<OrphanedTask[]> | null = null;
   #lineage: Promise<LineageRecord[]> | null = null;
+  /** Joins appended by THIS lifetime. The once-cached lineage view cannot
+   *  see them (boot-snapshot doctrine); the list filter's live half reads
+   *  this set (joinedAgentSessionIds). */
+  #liveJoined = new Set<string>();
+  /** Promotions recorded by THIS lifetime (recordPromote). */
+  #livePromoted = new Set<string>();
+  /** Promote ids the lineage read attested (boot file; refreshed with it). */
+  #bootPromoted = new Set<string>();
 
   /** `pidAliveFn` is the restart-simulation test seam (default: signal-0 check). */
   constructor(path: string, pidAliveFn?: (pid: number) => boolean) {
@@ -114,7 +124,43 @@ export class SpawnLog {
    *  the subagent's transcript. A line for an id with no live spawn record
    *  stays inert on read (same stance as a stray end line). */
   recordAgent(taskId: string, agentSessionId: string): void {
+    // The list filter's live half: the boot lineage cache predates this
+    // line, so the id is remembered beside the append (one add; the
+    // fire-and-forget chain and the line format are untouched).
+    this.#liveJoined.add(agentSessionId);
     this.#append({ ev: "agent", id: taskId, agent: agentSessionId });
+  }
+
+  /** D6 promotion: a human claimed this worker's log (manual Continue).
+   *  The line is keyed by the WORKER session id -- no task-id collision,
+   *  and older readers skip the foreign ev like any other. Read as: joined
+   *  ids minus promote ids (see joinedAgentSessionIds). */
+  recordPromote(agentSessionId: string): void {
+    this.#livePromoted.add(agentSessionId);
+    this.#append({ ev: "promote", id: agentSessionId });
+  }
+
+  /**
+   * Session ids attested as WORKER logs: the once-cached boot lineage view's
+   * `agentSessionId`s UNION this lifetime's live joins, minus promotions
+   * (sidecar promote lines plus this lifetime's recordPromote calls). The
+   * union is what the Recent Logs filter consumes: a current-process spawn
+   * is hidden WITHOUT a restart, closing the boot-cache gap the lineage
+   * snapshot doctrine otherwise leaves. The lineage view's live-pid-open
+   * drop rule stays as-is (other processes' live workers are a documented
+   * edge). Torn lines skip like everywhere else; an `agent` line whose
+   * spawn record is gone stays inert, so an unattested log is never
+   * excluded (no attestation, no claim).
+   */
+  joinedAgentSessionIds(): Promise<Set<string>> {
+    return this.lineage().then((recs) => {
+      const ids = new Set<string>();
+      for (const rec of recs) if (rec.agentSessionId !== null) ids.add(rec.agentSessionId);
+      for (const id of this.#liveJoined) ids.add(id);
+      for (const id of this.#bootPromoted) ids.delete(id);
+      for (const id of this.#livePromoted) ids.delete(id);
+      return ids;
+    });
   }
 
   #append(rec: Record<string, unknown>): void {
@@ -212,6 +258,9 @@ export class SpawnLog {
     const observedAt = Date.now();
     const host = hostname();
     const byId = new Map<string, { rec: LineageRecord; pid?: number; host?: string }>();
+    // D6 promote lines ride the same read (they name worker session ids,
+    // not task ids, so they never enter the per-task records).
+    const promoted = new Set<string>();
     for (const ev of parseJsonLines(text, "skip")) {
       if (typeof ev.id !== "string") continue;
       if (ev.ev === "spawn") {
@@ -239,8 +288,11 @@ export class SpawnLog {
           cur.rec.endedAt = typeof ev.t === "string" ? Date.parse(ev.t) || null : null;
           cur.rec.outcome = typeof ev.outcome === "string" ? ev.outcome : "";
         }
+      } else if (ev.ev === "promote") {
+        promoted.add(ev.id);
       }
     }
+    this.#bootPromoted = promoted;
     const out: LineageRecord[] = [];
     for (const { rec, pid, host: recHost } of byId.values()) {
       if (rec.outcome === null && recHost === host && pid !== undefined && this.#pidAlive(pid)) continue;

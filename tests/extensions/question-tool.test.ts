@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { QuestionTool, create } from "@extensions/question-tool/index.ts";
+import { markAnswersFollowup, markAnswersUnanswered } from "@core/context/input.ts";
 import type { CoreContext, ToolContext } from "@core/extensions/types.ts";
 
 describe("QuestionTool", () => {
@@ -152,6 +153,26 @@ describe("QuestionTool", () => {
       expect(result.metadata!.get("mode")).toBe("interactive");
       expect(result.metadata!.get("questions_asked")).toBe("1");
       expect(result.metadata!.get("questions_answered")).toBe("1");
+    });
+
+    it("labels a followup-marked answer honestly even while a watcher is attached", async () => {
+      // Worker-row grammar (B3 carry, fixed in B4): the delegating manager's
+      // task_followup answered the held question and the bridge stamped the
+      // followup marker. isInteractive() is channel-driven, so plain "interactive"
+      // would claim a human at a channel that never answered.
+      const input = {
+        isInteractive: () => true,
+        collectAnswers: async () => markAnswersFollowup({ a: "manager answer" }),
+      };
+      const result = await tool.execute(
+        JSON.stringify({ questions: [{ key: "a", prompt: "Q?" }] }),
+        makeCtx(input),
+      );
+      expect(result.success).toBe(true);
+      expect(result.metadata!.get("mode")).toBe("followup-answer");
+      expect(result.metadata!.get("questions_answered")).toBe("1");
+      // The marker is symbol-keyed/non-enumerable: the answer JSON stays clean.
+      expect(JSON.parse(result.output)).toEqual({ a: "manager answer" });
     });
 
     it("carries the toolCallId from the tool context on the question event", async () => {
@@ -502,5 +523,54 @@ describe("QuestionTool create() extension", () => {
     const ext = create({} as CoreContext);
     const registry = { register: (name: string, tool: unknown) => { expect(name).toBe('question'); expect(tool).toBeInstanceOf(QuestionTool); }, getAll: () => [] };
     await (ext.hooks!['tools:register'] as Function)(registry);
+  });
+});
+
+// ── D10 honesty marker: marked resolutions render mode "unanswered" ────────
+// A worker-path resolution (manager-gone release, terminal release) arrives
+// with the Symbol-keyed non-enumerable marker on the answers object. The
+// tool must say "not answered" with the reason -- never ToolResult.ok of the
+// defaults JSON. UNMARKED results (every interactive path, defaults included)
+// keep the byte-identical ok-JSON shape.
+
+describe("QuestionTool - unanswered marker (D10)", () => {
+  const tool = new QuestionTool();
+  function makeCtx(input: unknown): ToolContext {
+    const values: Record<string, unknown> = { input };
+    return { get: (key: string) => values[key] } as unknown as ToolContext;
+  }
+
+  it("renders mode unanswered + honest proceed-text carrying the reason, never the defaults JSON", async () => {
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: async () =>
+        markAnswersUnanswered({ path: "fallback" }, "the delegating manager's run was cancelled"),
+    };
+    const result = await tool.execute(
+      JSON.stringify({ questions: [{ key: "path", prompt: "Which path?", default: "fallback" }] }),
+      makeCtx(input),
+    );
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("the question was not answered");
+    expect(result.output).toContain("the delegating manager's run was cancelled");
+    expect(result.output).toContain("proceed without an answer and state the missing assumption");
+    expect(result.output).not.toContain("fallback");
+    expect(result.metadata!.get("mode")).toBe("unanswered");
+    expect(result.metadata!.get("questions_answered")).toBe("0");
+  });
+
+  it("an UNMARKED default-resolution (interactive policy) keeps the ok-JSON shape byte-identically", async () => {
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: async () => ({ path: "fallback" }),
+    };
+    const result = await tool.execute(
+      JSON.stringify({ questions: [{ key: "path", prompt: "Which path?", default: "fallback" }] }),
+      makeCtx(input),
+    );
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output)).toEqual({ path: "fallback" });
+    expect(result.metadata!.get("mode")).toBe("interactive");
+    expect(result.metadata!.get("questions_answered")).toBe("1");
   });
 });

@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { main } from "@core/main.ts";
 import { resetLoggerForTesting } from "@utils/logger.ts";
+import { resetRemovedKeyWarningsForTesting } from "@core/config/index.ts";
 
 // Same capture harness as tests/core/rescue.test.ts (local on purpose: main()
 // mutates argv/env/console).
@@ -42,6 +43,11 @@ async function runMain(
     console.log = origLog;
     process.env = origEnv;
     resetLoggerForTesting();
+    // The removed-key nudge dedupes PER PROCESS (config/index.ts's documented
+    // ceiling); main() just warned its fixture's keys, so clear the ledger --
+    // otherwise the next test file in a shared runner loads silently and its
+    // own once-per-load pin fails on this file's wake.
+    resetRemovedKeyWarningsForTesting();
   }
 }
 

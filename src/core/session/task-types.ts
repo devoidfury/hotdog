@@ -69,6 +69,13 @@ export interface TaskInfo {
   inRun: boolean;
   /** Wall start of the in-flight turn; null when none. Live display = activeMs + (now - turnStartedAt); frozen at activeMs while null. */
   turnStartedAt: number | null;
+  /**
+   * True while this task's worker is blocked in a question-tool wait waiting
+   * for its delegating manager (mirrors TaskEntry.questionYielded). The
+   * manager-scoped TASK frames carry it so the nested subagent row shows the
+   * badge; the flip itself notifies (onTaskQuestionAsked / onTaskQuestionSettled).
+   */
+  questionPending: boolean;
 }
 
 /**
@@ -245,6 +252,22 @@ export interface SpawnTaskOptions {
   onTurnStart?: () => void;
 }
 
+/** Info handed to TaskManagerOptions.onWorkerSessionStarted. D4: the three
+ *  ids are DISTINCT and never conflated -- `taskId` is the TaskManager spawn
+ *  id, `workerSid` the worker's own session id (entry.agentSessionId, key of
+ *  its durable log), `managerSid` the delegating session (null for
+ *  session-less/engine spawns). */
+export interface WorkerSessionStartedInfo {
+  taskId: string;
+  workerSid: string;
+  managerSid: string | null;
+  /** Resolved worker profile name (entry.agentConfig.profileName). */
+  profile: string;
+  /** LIVE accessor over the task entry's agent; null after terminal release
+   *  (finalizeTurn nulls entry.agent -- see the TaskEntry contract). */
+  getAgent: () => AgentLike | null;
+}
+
 export interface TaskManagerOptions {
   modelRegistry: Record<string, ModelConfig>;
   config: CoreConfigWithExtensions;
@@ -302,6 +325,29 @@ export interface TaskManagerOptions {
    * would sit behind the question forever.
    */
   resolvePendingQuestion?: (sessionId: string, text: string) => boolean;
+  /**
+   * B2 host seam (the shape `resolvePendingQuestion` established): release a
+   * worker's HELD question WITHOUT answering it -- the host wires this to its
+   * bridge's `resolveUnanswered` (defaults + the D10 unanswered marker, so
+   * the tool says "not answered", never passes defaults off as a reply).
+   * Fired by `releaseQuestionsForManager` when the delegating manager goes
+   * away (its run is cancelled): the answerer is gone, the worker proceeds
+   * honestly -- timers never guess (D1: no worker-facing timer). Returns
+   * whether a pending was actually settled. The worker task itself is NOT
+   * interrupted by this release.
+   */
+  releaseWorkerQuestion?: (sessionId: string, reason: string) => boolean;
+  /**
+   * B1 host seam (the shape `resolvePendingQuestion` established): fired at
+   * the recordAgentSession site -- after the worker agent is built and its
+   * durable-log key stamped on the entry, BEFORE the first turn, so the
+   * host's session row exists before any question can arm. The agent
+   * travels as an ACCESSOR over the live entry: `getAgent()` reads
+   * entry.agent and goes null when finalizeTurn releases it (the TaskEntry
+   * contract: the log becomes the only transcript source). A throwing host
+   * callback is logged, never propagated (the observer-relay guard doctrine).
+   */
+  onWorkerSessionStarted?: (info: WorkerSessionStartedInfo) => void;
   /**
    * Reader for the config modelGroups map (B3 live-surface convention): the
    * scheduler calls it per placement instead of pinning the boot bag's map at

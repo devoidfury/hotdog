@@ -1,93 +1,31 @@
-// The SessionRegistry: live session metadata, channels, connection/broadcast
-// bookkeeping, the pending-auth map, idle cleanup, and the SIGTERM drain.
-// Split out of server.ts, which keeps only the wiring.
+// The SessionRegistry: the facade every websocket handler imports. B1 split
+// its two concerns into sibling modules -- agent-sessions.ts (the session
+// book: rows, birth kind, lifecycle, list projection, worker rows, the idle
+// sweep, the drain) and channel-hub.ts (sockets, channels, broadcast
+// scoping, pending-auth reap) -- and this class keeps its exported surface
+// unchanged, delegating to the two, so no call site changed. The facade is
+// transitional: handlers migrate to the collaborators batch by batch, and it
+// dies when the last delegator does.
 
-import crypto from "node:crypto";
-import { HOOKS, createHooks } from "@core/hooks.ts";
-import { OUTPUT_EVENT } from "@core/context/output.ts";
 import type { ForkCut } from "@core/context/rewind.ts";
-import { SessionManager, type AgentLike } from "@core/session/index.ts";
-import { indexSessionModel, indexUserInput, getSessionRow } from "@core/session/session-index.ts";
-import { formatError } from "@core/error.ts";
-import { logger } from "@utils/logger.ts";
-import { trySessionPath } from "@core/session/session-log.ts";
-import { getPinnedIds } from "./pin-store.ts";
-import type { TurnLanes } from "@core/session/turn-lanes.ts";
+import type { AgentLike } from "@core/session/index.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
-import { WebSocketChannel } from "./websocket-channel.ts";
-import { S2C, type TaskActivityWire } from "./protocol.ts";
-import { taskWire, taskLineageWire } from "./wire-messages.ts";
+import { type WebSocketChannel } from "./websocket-channel.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
+import type { WorkerSessionStartedInfo } from "@core/session/task-types.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
-import { sharedExecFenceDisplay, toolExecModeLabel, sharedToolExecDegraded } from "@core/tool-exec-broker.ts";
-import {
-  getRecordCount,
-  seedRecordCount,
-} from "@extensions/session-log/record-count.ts";
-import type { Agent } from "@core/agent.ts";
-import { AgentError } from "@core/error.ts";
 import type { SttTarget } from "@core/config/stt.ts";
 import type { HotdogServerSocket } from "./socket.ts";
+import type { TurnLanes } from "@core/session/turn-lanes.ts";
 import {
-  DRAIN_POLL_MS,
-  DRAIN_SETTLE_MS,
-  DRAIN_TIMEOUT_MS,
-  MAX_HOT_IDLE_SESSIONS,
-  MAX_SUBAGENT_LINEAGE_ROWS,
-  MAX_TASK_ACTIVITY_HISTORY_ITEMS,
-  MAX_TASK_ACTIVITY_HISTORY_TASKS,
-  PENDING_AUTH_TIMEOUT_MS,
-} from "./constants.ts";
+  AgentSessions,
+  type CreateSessionOptions,
+  type SessionMetadata,
+  type SwitchProfileOptions,
+} from "./agent-sessions.ts";
+import { ChannelHub } from "./channel-hub.ts";
 
-interface SessionMetadata {
-  profile: string;
-  /**
-   * Explicit session name, independent of the active profile. null means the
-   * display name follows `profile`; an explicit title survives profile
-   * switches.
-   */
-  title: string | null;
-  model: string;
-  createdAt: number;
-  lastActivityAt: number;
-  connectedClients: number;
-  /**
-   * EXPLICIT per-session question policy (C2S create message). Unset means
-   * "no explicit choice": the defaults are read at question-armed time
-   * (createWsServer's getPolicy, through the live surface) -- a session row
-   * never freezes a boot copy of them (B3). An armed question keeps the
-   * policy its timer was armed with (P8 benign twin).
-   */
-  questionStrategy?: string;
-  questionTimeoutSecs?: number;
-  /**
-   * Last token_usage snapshot (per-call totalTokens + contextWindow), the
-   * same numbers the chat token bubble shows. Cached for the sidebar's ctx
-   * segment; absent until the session's first usage event.
-   */
-  ctxUsed?: number;
-  ctxTotal?: number;
-  /** A pending question from the websocket question bridge is blocking this
-   *  session (sidebar badges the card awaiting_question). Absent = false;
-   *  kept in step by the bridge hooks via setQuestionPending. */
-  questionPending?: boolean;
-}
-
-interface CreateSessionOptions {
-  profile?: string;
-  model?: string;
-  questionStrategy?: string;
-  questionTimeoutSecs?: number;
-  /** Adopt an existing session id (cold-log resume keeps its identity). */
-  sessionId?: string;
-}
-
-interface SwitchProfileOptions {
-  sessionId: string;
-  profileName: string;
-}
-
-interface SessionRegistryOptions {
+export interface SessionRegistryOptions {
   buildAgent: (config: {
     model?: string;
     sessionId?: string;
@@ -117,39 +55,37 @@ interface SessionRegistryOptions {
 }
 
 export class SessionRegistry {
-  #sessionManager: SessionManager;
-  #buildAgent: (config: {
-    model?: string;
-    sessionId?: string;
-    profileName?: string;
-  }) => Promise<AgentLike>;
-  #cleanupTimer: ReturnType<typeof setInterval> | null = null;
-  #timeoutMin: number;
-  #allConnections = new Set<HotdogServerSocket<unknown>>();
-  // Sockets that opened without a validated token and are waiting on the
-  // protocol AUTH handshake (webui upgrades arrive unauthenticated). The
-  // cleanup loop reaps these: without it a client could hold an anonymous
-  // socket open forever.
-  #pendingAuth = new Map<HotdogServerSocket<unknown>, number>();
-  #metadata: Map<string, SessionMetadata>;
-  #channels: Map<string, Set<WebSocketChannel>>;
-  #profiles: Record<string, SwitchProfile>;
-  #onSessionDeleted: ((sessionId: string) => void) | null;
-  #taskManager: TaskManager | null = null;
-  #taskActivityHistory = new Map<string, TaskActivityWire[]>();
-  /** Resolved STT backend; every sessionCreated payload advertises its presence as sttEnabled.
-   *  Re-pointable: a config write to sttUrl/sttModel re-resolves and swaps it here, so the
-   *  NEXT upload (handlers-transcribe.ts reads this per request) and the next attach see the
-   *  new backend while an upload already in flight keeps the target it started with. */
-  #sttTarget: SttTarget | null;
-  #getToolExecResolved: () => Record<string, unknown>;
+  #sessions: AgentSessions;
+  #hub: ChannelHub;
+
+  constructor(options: SessionRegistryOptions) {
+    // The two collaborators know each other only through these closures:
+    // the book reaches the hub for channel teardown, its broadcasts, and the
+    // pending-auth reaper on the sweep ticker; the hub reaches the book for
+    // row lookups and the private SessionManager.
+    this.#sessions = new AgentSessions({
+      ...options,
+      closeChannels: (sessionId) => this.#hub.closeChannels(sessionId),
+      broadcast: (msg) => this.#hub.broadcast(msg),
+      reapPendingAuth: () => this.#hub.reapPendingAuth(),
+    });
+    this.#hub = new ChannelHub({
+      getSession: (sessionId) => this.#sessions.get(sessionId),
+      getRow: (sessionId) => this.#sessions.getRow(sessionId),
+      getSessionManager: () => this.#sessions.getSessionManager(),
+    });
+  }
+
+  static sendSafe(ws: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
+    ChannelHub.sendSafe(ws, msg);
+  }
 
   get sttTarget(): SttTarget | null {
-    return this.#sttTarget;
+    return this.#sessions.sttTarget;
   }
 
   get sttEnabled(): boolean {
-    return this.#sttTarget !== null;
+    return this.#sessions.sttEnabled;
   }
 
   /**
@@ -159,164 +95,51 @@ export class SessionRegistry {
    * re-resolve must not spam every open panel).
    */
   setSttTarget(next: SttTarget | null): boolean {
-    const before = this.#sttTarget !== null;
-    this.#sttTarget = next;
-    return before !== (next !== null);
+    return this.#sessions.setSttTarget(next);
   }
 
-  /**
-   * Tool-exec plane posture for the webui status strip, resolved PER SESSION:
-   * the label describes the session the client is attached to, so its runtime
-   * `/fence` override (if any) is what the strip shows -- sessions that never
-   * toggled follow the boot config. Read per payload so the degraded flag is
-   * current at attach time. A live toggle pushes the new label to this
-   * session's clients (C2S execFence answers with a sessionState key
-   * "toolExec" via broadcastScoped, built from this method), and the next
-   * attach or session switch re-reads it.
-   */
+  /** Tool-exec plane posture for the webui status strip (per-session). */
   toolExecLabel(sessionId: string): string {
-    // Plane keys read PER PAYLOAD through the injected source: with a reader
-    // (the real server's wiring) a swapped generation changes the label of
-    // the NEXT payload -- the strip no longer holds the boot bag ref.
-    const resolved = this.#getToolExecResolved();
-    return toolExecModeLabel(
-      resolved,
-      sharedToolExecDegraded(),
-      sharedExecFenceDisplay(sessionId, resolved),
-    );
+    return this.#sessions.toolExecLabel(sessionId);
   }
 
   /** Publish the TaskManager whose observer feeds the webui subagent feed. */
   setTaskManager(taskManager: TaskManager | null): void {
-    this.#taskManager = taskManager;
+    this.#sessions.setTaskManager(taskManager);
   }
 
   getTaskManager(): TaskManager | null {
-    return this.#taskManager;
+    return this.#sessions.getTaskManager();
   }
 
   /** Send to sockets whose active session is `sessionId`: task traffic never crosses sessions. */
   broadcastScoped(sessionId: string, msg: Record<string, unknown>): void {
-    if (!sessionId) return;
-    for (const ws of this.#allConnections) {
-      if (ws.activeSessionId === sessionId) SessionRegistry.sendSafe(ws, msg);
-    }
+    this.#hub.broadcastScoped(sessionId, msg);
   }
 
-  /** Buffer activity for reconnect replay (C2S TASK_ACTIVITY_REQUEST).
-   * Bounded: items per task, tasks per server (oldest-inserted evicted).
-   * The live-only `reset` sentinel is consumed here as a trim, never stored:
-   * the retry replaces the dead attempt, so its trailing streamed items leave
-   * the buffer too -- a transcript view rebuilt after reconnect must not
-   * resurrect text the live view already dropped. */
-  recordTaskActivity(taskId: string, activity: TaskActivityWire): void {
-    if (activity.kind === "reset") {
-      const buffered = this.#taskActivityHistory.get(taskId);
-      // Trim trailing streamed items (the dead attempt's text/reasoning);
-      // tool blocks are untouched, mirroring handleStreamReset. No entry for
-      // an unknown task means nothing streamed: nothing to trim.
-      if (buffered) {
-        while (buffered.length > 0) {
-          const kind = buffered[buffered.length - 1]!.kind;
-          if (kind !== "text" && kind !== "reasoning") break;
-          buffered.pop();
-        }
-      }
-      return;
-    }
-    let items = this.#taskActivityHistory.get(taskId);
-    if (!items) {
-      items = [];
-      this.#taskActivityHistory.set(taskId, items);
-      while (this.#taskActivityHistory.size > MAX_TASK_ACTIVITY_HISTORY_TASKS) {
-        const oldest = this.#taskActivityHistory.keys().next().value as string;
-        this.#taskActivityHistory.delete(oldest);
-      }
-    }
-    items.push(activity);
-    if (items.length > MAX_TASK_ACTIVITY_HISTORY_ITEMS) {
-      items.splice(0, items.length - MAX_TASK_ACTIVITY_HISTORY_ITEMS);
-    }
-  }
-
-  getTaskActivityHistory(taskId: string): TaskActivityWire[] {
-    return this.#taskActivityHistory.get(taskId) ?? [];
-  }
-
-  /** Current subagent task snapshot for one socket (sent when it attaches to a
-   * session): this lifetime's tasks, plus the sidecar-rebuilt durable rows for
-   * managers whose tasks predate a restart (taskLineageWire owns their honest
-   * grammar). Awaited: the sidecar read is real I/O (once-cached per process). */
+  /** Current subagent task snapshot for one socket (sent when it attaches). */
   async sendTaskSnapshot(ws: HotdogServerSocket<unknown>): Promise<void> {
-    const sessionId = ws.activeSessionId;
-    if (!sessionId || !this.#taskManager) return;
-    const live = this.#taskManager
-      .listTasks()
-      .filter((t) => t.sessionId === sessionId)
-      .map(taskWire);
-    const durable = (await this.#taskManager.lineageTasks())
-      .filter((r) => r.sessionId === sessionId)
-      .slice(-MAX_SUBAGENT_LINEAGE_ROWS)
-      .map(taskLineageWire);
-    SessionRegistry.sendSafe(ws, {
-      type: S2C.TASK_LIST,
-      tasks: [...live, ...durable],
-    });
-  }
-
-  constructor({
-    buildAgent,
-    llmClient,
-    sessionTimeoutMin = 30,
-    profiles = {},
-    sttTarget = null,
-    onSessionDeleted,
-    turnLanes,
-    toolExecResolved = {},
-  }: SessionRegistryOptions) {
-    this.#buildAgent = buildAgent;
-    this.#timeoutMin = sessionTimeoutMin;
-    this.#sttTarget = sttTarget;
-    this.#getToolExecResolved =
-      typeof toolExecResolved === "function"
-        ? toolExecResolved
-        : () => toolExecResolved ?? {};
-    this.#metadata = new Map();
-    this.#channels = new Map();
-    this.#profiles = profiles;
-    this.#onSessionDeleted = onSessionDeleted ?? null;
-
-    this.#sessionManager = new SessionManager({
-      hooks: createHooks(),
-      extensions: null,
-      buildAgent: buildAgent as (
-        config: Record<string, unknown>,
-      ) => Promise<AgentLike>,
-      llmClient: llmClient,
-      turnLanes,
-    });
+    await this.#sessions.sendTaskSnapshot(ws);
   }
 
   registerConnection(ws: HotdogServerSocket<unknown>): void {
-    this.#allConnections.add(ws);
+    this.#hub.registerConnection(ws);
   }
 
   unregisterConnection(ws: HotdogServerSocket<unknown>): void {
-    this.#allConnections.delete(ws);
+    this.#hub.unregisterConnection(ws);
   }
 
   addPendingAuth(ws: HotdogServerSocket<unknown>): void {
-    this.#pendingAuth.set(ws, Date.now());
+    this.#hub.addPendingAuth(ws);
   }
 
   removePendingAuth(ws: HotdogServerSocket<unknown>): void {
-    this.#pendingAuth.delete(ws);
+    this.#hub.removePendingAuth(ws);
   }
 
   broadcast(msg: Record<string, unknown>): void {
-    for (const ws of this.#allConnections) {
-      SessionRegistry.sendSafe(ws, msg);
-    }
+    this.#hub.broadcast(msg);
   }
 
   /**
@@ -324,18 +147,7 @@ export class SessionRegistry {
    * for the adopting socket, which already refreshed its sidebar.
    */
   broadcastExcept(except: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
-    for (const ws of this.#allConnections) {
-      if (ws === except) continue;
-      SessionRegistry.sendSafe(ws, msg);
-    }
-  }
-
-  static sendSafe(ws: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
-    try {
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify(msg));
-      }
-    } catch {}
+    this.#hub.broadcastExcept(except, msg);
   }
 
   async create({
@@ -348,47 +160,13 @@ export class SessionRegistry {
     sessionId: string;
     agent: AgentLike;
   }> {
-    // Caller-supplied id (cold-log adoption) wins: the agent adopts the log's
-    // own id or the session loses its identity across restarts.
-    const proposedSessionId = sessionId ?? crypto.randomUUID();
-
-    const agent = await this.#buildAgent({
+    return this.#sessions.create({
+      profile,
       model,
-      sessionId: proposedSessionId,
-      profileName: profile,
-    });
-    const actualSessionId = agent.sessionId || proposedSessionId;
-
-    this.#metadata.set(actualSessionId, {
-      profile: profile || "default",
-      title: null,
-      model: agent.model || "",
-      createdAt: Date.now(),
-      lastActivityAt: Date.now(),
-      connectedClients: 0,
-      // Explicit caller values only (unset = resolve at question-armed time);
-      // the old per-session copy of the host defaults froze the boot values.
       questionStrategy,
       questionTimeoutSecs,
+      sessionId,
     });
-
-    this.#sessionManager.registerAgent(agent, {
-      // Build-config shape (profileName, not profile): forkSession reuses this entry
-      // metadata as the fork's buildAgent config, so the keys must match what #buildAgent reads.
-      profileName: profile || "default",
-      model,
-    });
-
-    // Seed the writer-side record count from the existing log ONCE (cold-log
-    // adoption brings its file; a fresh id seeds 0). The sidebar's live-row
-    // messageCount then rides the append chokepoint (record-count.ts), never
-    // a registry-side tally -- parity with the cold rows is structural.
-    await seedRecordCount(actualSessionId);
-
-    this.#trackModelChanges(actualSessionId);
-    this.#trackUsage(actualSessionId);
-    this.#trackUserInput(actualSessionId);
-    return { sessionId: actualSessionId, agent };
   }
 
   /**
@@ -401,220 +179,70 @@ export class SessionRegistry {
     sourceSessionId: string,
     opts: { cut: ForkCut },
   ): Promise<{ sessionId: string; agent: AgentLike }> {
-    const meta = this.#metadata.get(sourceSessionId);
-    if (!meta) {
-      throw new AgentError(`Cannot fork unknown session: ${sourceSessionId}`);
-    }
-
-    const { sessionId: newSessionId } = await this.#sessionManager.forkSession(
-      sourceSessionId,
-      opts,
-    );
-    const agent = this.#sessionManager.getAgentBySessionId(newSessionId);
-    if (!agent) {
-      throw new AgentError(`Forked session vanished: ${newSessionId}`);
-    }
-
-    this.#metadata.set(newSessionId, {
-      profile: meta.profile,
-      title: null,
-      model: agent.model || meta.model,
-      createdAt: Date.now(),
-      lastActivityAt: Date.now(),
-      connectedClients: 0,
-      questionStrategy: meta.questionStrategy,
-      questionTimeoutSecs: meta.questionTimeoutSecs,
-      // No count to carry: the fork's log starts empty and the kept messages
-      // ride addMessage -> CONTEXT_MESSAGE -> the writer chokepoint, which
-      // counts them into the fork's own tally as they land.
-    });
-
-    this.#trackModelChanges(newSessionId);
-    this.#trackUsage(newSessionId);
-    this.#trackUserInput(newSessionId);
-    return { sessionId: newSessionId, agent };
-  }
-
-  #trackModelChanges(sessionId: string): void {
-    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
-    if (!agent || !agent.hooks || typeof agent.hooks.on !== "function") return;
-    agent.hooks.on(HOOKS.MODEL_CHANGE, async ({ newModel }: { newModel: string }) => {
-      const meta = this.#metadata.get(sessionId);
-      if (meta) meta.model = newModel;
-      await indexSessionModel(sessionId, newModel);
-    });
-  }
-
-  /**
-   * Mirror live user input into the index title (set-once: the first
-   * title-worthy message wins). CONTEXT_MESSAGE fires on every addMessage,
-   * cold-resume replay included; the title IS NULL guard makes replays
-   * honest no-ops that never clobber and never rebroadcast. Harness-role
-   * messages (tool results, system injections) must NOT title: only what
-   * the user asked becomes the headline. A real set broadcasts the sessions
-   * list (the sidebar-refresh idiom) so the row gains its middle line live.
-   */
-  #trackUserInput(sessionId: string): void {
-    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
-    if (!agent || !agent.hooks || typeof agent.hooks.on !== "function") return;
-    agent.hooks.on(
-      HOOKS.CONTEXT_MESSAGE,
-      ({ message }: { message?: { role?: unknown; content?: unknown } }) => {
-        if (message?.role !== "user") return;
-        try {
-          if (indexUserInput(sessionId, message.content)) {
-            this.broadcast({ type: S2C.SESSIONS, sessions: this.list() });
-          }
-        } catch (err) {
-          logger.error(`[websocket] live title mirror failed: ${formatError(err)}`);
-        }
-      },
-    );
-  }
-
-  /**
-   * Cache the last token_usage snapshot per session for the sidebar's ctx
-   * segment (used = the call's totalTokens -- the number the chat bubble
-   * shows; total = contextWindow). Subscribed on the session event bus, so
-   * cold-resume replays seed it too; deleteSession drops the subscription
-   * with the session.
-   */
-  #trackUsage(sessionId: string): void {
-    this.#sessionManager.onSessionEvents(sessionId, (event) => {
-      if (event.type !== OUTPUT_EVENT.TOKEN_USAGE) return;
-      const meta = this.#metadata.get(sessionId);
-      if (!meta) return;
-      meta.ctxUsed = event.totalTokens || 0;
-      if (typeof event.contextWindow === "number" && Number.isFinite(event.contextWindow)) {
-        meta.ctxTotal = event.contextWindow;
-      }
-    });
+    return this.#sessions.fork(sourceSessionId, opts);
   }
 
   get(
     sessionId: string,
   ): { agent: AgentLike; metadata: SessionMetadata } | null {
-    const metadata = this.#metadata.get(sessionId);
-    if (!metadata) return null;
-    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
-    if (!agent) return null;
-    return { agent, metadata };
+    return this.#sessions.get(sessionId);
   }
 
-  list(): Array<{
-    id: string;
-    profile: string;
-    title: string | null;
-    model: string;
-    createdAt: number;
-    lastActivityAt: number;
-    connectedClients: number;
-    /**
-     * Conversation message count (the sidebar metric): the session-log
-     * writer's committed-record tally -- what listSessionLogs reports for
-     * this session's file at this moment (same rule: only user input and
-     * model responses count; tool traffic and bookkeeping records never do).
-     * Omitted while the count is unknowable (a failed seed), never
-     * fabricated.
-     */
-    messageCount?: number;
-    ctxUsed?: number;
-    ctxTotal?: number;
-    /** Server-persisted sidebar pin (pin-store.ts); always present so a
-     *  payload rebuilds the client's pin marks outright. */
-    pinned: boolean;
-    /** True while a pending question blocks the session (sidebar badge);
-     *  always present, same rebuild-outright rule as pinned. */
-    questionPending: boolean;
-    /** Absolute JSONL log path (sidebar "Copy log file path"); omitted when
-     *  the id fails the core path helper's safety gate. */
-    logPath?: string;
-  }> {
-    const result: Array<{
-      id: string;
-      profile: string;
-      title: string | null;
-      model: string;
-      createdAt: number;
-      lastActivityAt: number;
-      connectedClients: number;
-      messageCount?: number;
-      ctxUsed?: number;
-      ctxTotal?: number;
-      pinned: boolean;
-      questionPending: boolean;
-      logPath?: string;
-    }> = [];
-    const pinnedIds = getPinnedIds();
-    for (const [id, meta] of this.#metadata) {
-      const agent = this.#sessionManager.getAgentBySessionId(id);
-      const logPath = trySessionPath(id);
-      const recordCount = getRecordCount(id);
-      result.push({
-        id,
-        profile: meta.profile,
-        // Priority chain: rename (in-memory meta) > derived (index row) >
-        // nothing. Renames stay in-memory only, exactly as before.
-        title: meta.title ?? getSessionRow(id)?.title ?? null,
-        model: agent?.model || meta.model,
-        createdAt: meta.createdAt,
-        lastActivityAt: meta.lastActivityAt,
-        connectedClients: meta.connectedClients,
-        ...(recordCount !== undefined ? { messageCount: recordCount } : {}),
-        ...(meta.ctxUsed !== undefined ? { ctxUsed: meta.ctxUsed } : {}),
-        ...(meta.ctxTotal !== undefined ? { ctxTotal: meta.ctxTotal } : {}),
-        pinned: pinnedIds.has(id),
-        questionPending: meta.questionPending === true,
-        ...(logPath !== undefined ? { logPath } : {}),
-      });
-    }
-    return result;
+  /** Raw row lookup INCLUDING worker rows (get() stays the live-agent
+   *  oracle; worker rows read null there by design until the attach
+   *  migration). */
+  getRow(sessionId: string): SessionMetadata | null {
+    return this.#sessions.getRow(sessionId);
+  }
+
+  /**
+   * Register a worker's session row (born from the TaskManager's
+   * onWorkerSessionStarted seam). Book-only: no private-SessionManager
+   * entry, no bus, no run loop. Idempotent on a double event.
+   */
+  registerWorker(info: WorkerSessionStartedInfo): void {
+    this.#sessions.registerWorker(info);
+  }
+
+  /**
+   * Release a worker row at its task's terminal event (marks it terminal,
+   * nulls the agent accessor; no channel force-close). Unknown sid is a
+   * no-op; the idle sweep reclaims released rows that hold zero clients.
+   */
+  releaseWorker(workerSid: string): void {
+    this.#sessions.releaseWorker(workerSid);
+  }
+
+  list() {
+    return this.#sessions.list();
   }
 
   delete(sessionId: string): boolean {
-    const meta = this.#metadata.get(sessionId);
-    if (!meta) return false;
-
-    const channels = this.#channels.get(sessionId);
-    if (channels) {
-      for (const ch of channels) {
-        ch.close();
-      }
-      this.#channels.delete(sessionId);
-    }
-
-    // The manager owns a private hook system, so its delete notice never
-    // reaches extensions; re-fire it on the agent's (shared) hooks so
-    // per-session extension state and tool-exec pool entries are reclaimed
-    // when the session dies -- the same contract deleteSession promises on
-    // hosts whose manager shares core.hooks. Fire-and-forget, after the
-    // removal, mirroring task-execution's terminal-then-notify ordering.
-    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
-    this.#sessionManager.deleteSession(sessionId);
-    agent?.hooks?.notifyHooks(HOOKS.SESSION_END, { sessionId });
-    // The registry's SessionManager is built without taskConfig (this host's
-    // TaskManager is the published one), so its delete cascade cannot reach
-    // the tasks -- interrupt them here or a deleted session's delegates run
-    // forever with nobody to receive results.
-    this.#taskManager?.interruptTasksForSession(sessionId);
-    this.#metadata.delete(sessionId);
-    this.#onSessionDeleted?.(sessionId);
-    return true;
+    return this.#sessions.delete(sessionId);
   }
 
   /** True if the session has at least one connected channel. */
   hasChannels(sessionId: string): boolean {
-    return (this.#channels.get(sessionId)?.size ?? 0) > 0;
+    return this.#hub.hasChannels(sessionId);
+  }
+
+  /** Watcher count for one session (ONE map lookup; the live-tail
+   *  producer's zero-watcher gate reads this before any mapping). */
+  channelCount(sessionId: string): number {
+    return this.#hub.channelCount(sessionId);
+  }
+
+  /** Deliver one frame to the sockets attached to `sessionId` (the worker
+   *  live-tail path; scope semantics per activeSessionId, see ChannelHub). */
+  publish(sessionId: string, frame: Record<string, unknown>): void {
+    this.#hub.publish(sessionId, frame);
   }
 
   /** Mirror the question bridge's pending state onto the row (sidebar
    *  awaiting_question badge). Returns whether the flag actually changed,
    *  so callers can broadcast the list only on real transitions. */
   setQuestionPending(sessionId: string, pending: boolean): boolean {
-    const meta = this.#metadata.get(sessionId);
-    if (!meta || Boolean(meta.questionPending) === pending) return false;
-    meta.questionPending = pending;
-    return true;
+    return this.#sessions.setQuestionPending(sessionId, pending);
   }
 
   /**
@@ -623,14 +251,11 @@ export class SessionRegistry {
    * purely the label shown in the UI.
    */
   rename(sessionId: string, newName: string): boolean {
-    const meta = this.#metadata.get(sessionId);
-    if (!meta) return false;
-    meta.title = newName;
-    return true;
+    return this.#sessions.rename(sessionId, newName);
   }
 
   listProfiles(): Record<string, SwitchProfile> {
-    return { ...this.#profiles };
+    return this.#sessions.listProfiles();
   }
 
   /**
@@ -645,118 +270,31 @@ export class SessionRegistry {
     sessionId,
     profileName,
   }: SwitchProfileOptions): Promise<{ success: boolean; error?: string }> {
-    const meta = this.#metadata.get(sessionId);
-    if (!meta) {
-      return { success: false, error: "Session not found" };
-    }
-
-    const profile = this.#profiles[profileName];
-    if (!profile) {
-      return { success: false, error: `Profile "${profileName}" not found` };
-    }
-
-    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
-    if (agent) {
-      const fromProfile = agent.profileName;
-      agent.applyProfile(profileName, profile);
-      meta.model = agent.model;
-      // Fire-and-forget: notifyHooks swallows handler errors, and the switch
-      // must not fail because a log/index write did.
-      agent.hooks?.notifyHooks(HOOKS.PROFILE_SWITCH, {
-        agent: agent as Agent,
-        fromProfile,
-        toProfile: profileName,
-      });
-    }
-    meta.profile = profileName;
-    meta.lastActivityAt = Date.now();
-
-    return { success: true };
+    return this.#sessions.switchProfile({ sessionId, profileName });
   }
 
   createChannel(
     sessionId: string,
     ws: HotdogServerSocket<unknown>,
   ): WebSocketChannel | undefined {
-    const session = this.get(sessionId);
-    if (!session) return undefined;
-
-    // One lookup expression for the session agent's tool registry metadata;
-    // every display-hint resolver below reads a key off it.
-    const metaOf = (toolName: string) =>
-      (session.agent as Partial<Pick<Agent, "toolRegistry">> | null)?.toolRegistry?.getMetadata?.(toolName);
-
-    const channel = new WebSocketChannel({
-      sessionManager: this.#sessionManager,
-      ws,
-      sessionId,
-      broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
-      // Live TOOL_CALL args summaries and display parts read the tool's
-      // display hints off the session agent's registry (same metadata the
-      // terminal sink consults); the wire carries only the resolved result.
-      argDisplay: (toolName) => metaOf(toolName)?.argDisplay,
-      headerKeys: (toolName) => metaOf(toolName)?.headerKeys,
-      display: (toolName) => metaOf(toolName)?.display,
-    });
-
-    if (!this.#channels.has(sessionId)) {
-      this.#channels.set(sessionId, new Set());
-    }
-    this.#channels.get(sessionId)!.add(channel);
-
-    session.metadata.connectedClients += 1;
-    session.metadata.lastActivityAt = Date.now();
-
-    return channel;
+    return this.#hub.createChannel(sessionId, ws);
   }
 
   removeChannel(sessionId: string, channel: WebSocketChannel): void {
-    channel.detach(sessionId);
-
-    const channels = this.#channels.get(sessionId);
-    if (!channels) return;
-    channels.delete(channel);
-
-    const meta = this.#metadata.get(sessionId);
-    if (meta) {
-      meta.connectedClients = Math.max(0, meta.connectedClients - 1);
-    }
+    this.#hub.removeChannel(sessionId, channel);
   }
 
   // Prevents idle cleanup of the session.
   touch(sessionId: string): void {
-    const meta = this.#metadata.get(sessionId);
-    if (meta) {
-      meta.lastActivityAt = Date.now();
-    }
+    this.#sessions.touch(sessionId);
   }
 
   startCleanupLoop(timeoutMin: number): void {
-    this.#timeoutMin = timeoutMin;
-    if (this.#cleanupTimer) return;
-    this.#cleanupTimer = setInterval(() => {
-      this.#cleanupIdleSessions();
-      this.#reapPendingAuth();
-    }, 60_000);
+    this.#sessions.startCleanupLoop(timeoutMin);
   }
 
   stopCleanupLoop(): void {
-    if (this.#cleanupTimer) {
-      clearInterval(this.#cleanupTimer);
-      this.#cleanupTimer = null;
-    }
-  }
-
-  #cleanupIdleSessions(): void {
-    const now = Date.now();
-    const timeoutMs = this.#timeoutMin * 60 * 1000;
-    // Idle past the timeout and holding no clients, most recently active first.
-    const stale = [...this.#metadata.entries()]
-      .filter(([, meta]) => meta.connectedClients === 0 && now - meta.lastActivityAt > timeoutMs)
-      .sort((a, b) => b[1].lastActivityAt - a[1].lastActivityAt);
-    // Keep the recent few hot (the in-memory agent makes a return visit
-    // instant). Older ones go cold (log-only); logs are never deleted here.
-    for (const [id] of stale.slice(MAX_HOT_IDLE_SESSIONS)) this.delete(id);
+    this.#sessions.stopCleanupLoop();
   }
 
   /**
@@ -766,64 +304,32 @@ export class SessionRegistry {
    * a started tool call replays as outcome-unknown). Queued messages that
    * never reached a turn were never logged -- honest loss.
    */
-  async drainSessions(timeoutMs = DRAIN_TIMEOUT_MS): Promise<void> {
-    const manager = this.#sessionManager;
-    const running = () =>
-      manager.sessionIds().filter((id) => manager.isSessionRunning(id));
-    const deadline = Date.now() + timeoutMs;
-    while (running().length > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, DRAIN_POLL_MS));
-    }
-    for (const id of running()) {
-      manager.interrupt(id);
-    }
-    // Give the interrupts a beat to unwind (abort propagation, turn end)
-    // before the caller stops the server.
-    const settleDeadline = Date.now() + DRAIN_SETTLE_MS;
-    while (running().length > 0 && Date.now() < settleDeadline) {
-      await new Promise((r) => setTimeout(r, DRAIN_POLL_MS));
-    }
-  }
-
-  // Close sockets that never completed the AUTH handshake. A validated
-  // token lands in ws.authToken (routeMessage), so authenticated sockets
-  // just leave the map without being touched.
-  #reapPendingAuth(): void {
-    const now = Date.now();
-    for (const [ws, since] of this.#pendingAuth) {
-      if (ws.authToken) {
-        this.#pendingAuth.delete(ws);
-      } else if (now - since > PENDING_AUTH_TIMEOUT_MS) {
-        this.#pendingAuth.delete(ws);
-        try {
-          ws.close(4001, "Authentication timeout");
-        } catch {}
-      }
-    }
+  async drainSessions(timeoutMs?: number): Promise<void> {
+    await this.#sessions.drainSessions(timeoutMs);
   }
 
   get size(): number {
-    return this.#metadata.size;
+    return this.#sessions.size;
   }
 
   /** @internal */
-  getSessionManager(): SessionManager {
-    return this.#sessionManager;
+  getSessionManager() {
+    return this.#sessions.getSessionManager();
   }
 
   /** @internal */
   get _test_metadata(): Map<string, SessionMetadata> {
-    return this.#metadata;
+    return this.#sessions._test_metadata;
   }
 
   /** @internal */
   get _test_pendingAuth(): Map<HotdogServerSocket<unknown>, number> {
-    return this.#pendingAuth;
+    return this.#hub._test_pendingAuth;
   }
 
   /** @internal */
   _test_cleanupIdleSessions(): void {
-    this.#cleanupIdleSessions();
-    this.#reapPendingAuth();
+    this.#sessions._test_cleanupIdleSessions();
+    this.#hub.reapPendingAuth();
   }
 }

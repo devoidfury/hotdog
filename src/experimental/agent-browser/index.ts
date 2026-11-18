@@ -53,6 +53,7 @@ import {
 } from "@core/extensions/types.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
 import { sessionsDir, isSafeSessionId } from "@core/session/session-log.ts";
+import { sweepStaleTmpDirs, registerLiveTmpDir } from "@core/tool-exec-broker.ts";
 import { assertPublicHost } from "@extensions/fetch-tool/index.ts";
 import { logger } from "@utils/logger.ts";
 import type { Agent } from "@core/agent.ts";
@@ -387,6 +388,15 @@ export class AgentBrowserTool {
   #opTimeoutMs: number;
   /** sessionId -> view name -> view. Caller sessions survive tool calls. */
   #sessions = new Map<string, Map<string, OpenView>>();
+  /**
+   * The untrusted-session screenshot fallback: ONE dir per activation,
+   * mkdtemp'd on the first fallback save and reused (the per-save mkdtemp
+   * collapsed the tmpfs into hundreds of one-file dirs in the 2026-11
+   * ENOSPC hunt). Stale leftovers of DEAD processes are reclaimed by the
+   * activation-time age sweep in create(); this instance's own dir is
+   * always young (every save touches it), so the sweep never eats it.
+   */
+  #fallbackShotDir: Promise<string> | null = null;
 
   constructor(options: AgentBrowserToolOptions) {
     this.#allowLoopback = options.allowLoopback;
@@ -437,6 +447,17 @@ export class AgentBrowserTool {
     if (!views) return;
     for (const entry of views.values()) this.#closeView(entry);
     this.#sessions.delete(sessionId);
+  }
+
+  /** The one fallback dir of this activation (see #fallbackShotDir); mkdtemp'd lazily. */
+  async #fallbackShotsDir(): Promise<string> {
+    this.#fallbackShotDir ??= mkdtemp(join(tmpdir(), "hotdog-agent-browser-"));
+    const dir = await this.#fallbackShotDir;
+    // Live immunity for the age sweep (any age, same process): a view kept
+    // open for days without a save leaves a stale-looking dir another
+    // activation's janitor would otherwise eat.
+    registerLiveTmpDir(dir);
+    return dir;
   }
 
   /** View count for a session (tests / diagnostics). */
@@ -939,7 +960,7 @@ export class AgentBrowserTool {
       }
     }
 
-    const path = await saveScreenshot(bytes, ext, sessionId);
+    const path = await saveScreenshot(bytes, ext, sessionId, () => this.#fallbackShotsDir());
     // The measured frame travels with the image: its pixels ARE that frame
     // (at dpr pixels per CSS px), so aiming in the picture cannot drift from
     // the frame the raw-click gate enforces.
@@ -1057,16 +1078,22 @@ async function recompressJpeg(png: Buffer): Promise<Buffer | null> {
 /**
  * Save under the session's directory (sessionsDir, honoring HOTDOG_SESSIONS_DIR;
  * tests point that at a tmp dir). A missing/unsafe sessionId must not traverse
- * or litter the real dir, so those saves land in a private tmp directory.
+ * or litter the real dir, so those saves land in the tool's shared fallback
+ * dir (one per activation, reused across saves; reclaimed by age sweep).
  */
-async function saveScreenshot(bytes: Buffer, ext: string, sessionId: string): Promise<string> {
+async function saveScreenshot(
+  bytes: Buffer,
+  ext: string,
+  sessionId: string,
+  fallbackDir: () => Promise<string>,
+): Promise<string> {
   let dir: string;
   let id = "session";
   if (isSafeSessionId(sessionId)) {
     dir = sessionsDir();
     id = sessionId;
   } else {
-    dir = await mkdtemp(join(tmpdir(), "hotdog-agent-browser-"));
+    dir = await fallbackDir();
   }
   await mkdir(dir, { recursive: true });
   const path = join(dir, `agent-browser-${id}-${Date.now()}.${ext}`);
@@ -1080,6 +1107,17 @@ export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema (single key, by ruling).
   const config = getExtensionConfig<{ allowLoopback: boolean }>(core, "agentBrowser");
   const allowLoopback = config.allowLoopback === true;
+
+  // Boot janitor for the fallback family (the 2026-11 ENOSPC hunt): sweeps
+  // DEAD processes' leftover `hotdog-agent-browser-*` dirs by age, with the
+  // exec sweep's immunity layers (see sweepStaleTmpDirs): this process's own
+  // live fallback dirs are registered (any age), entry-level freshness keeps
+  // recently-active dirs, and the residual cross-process risk (a dir silent
+  // for 3 straight days) self-heals -- the fallback dir is mkdir -p'd on the
+  // next save. Deferred and unref'd: off the activation path, never keeps
+  // the host alive.
+  const janitor = setTimeout(() => sweepStaleTmpDirs("hotdog-agent-browser-"), 0);
+  janitor.unref?.();
 
   // Evaluate prompt-surface probe (ruling 4): user-gate's own resolved block,
   // read per call through the knob -- absent or disabled means no interactive

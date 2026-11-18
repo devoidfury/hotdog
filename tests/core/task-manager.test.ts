@@ -5,7 +5,7 @@ import { readdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { TaskManager } from "@core/session/task-manager.ts";
-import { TaskHandle, TASK_STATUS, MAX_TERMINAL_TASKS } from "@core/session/task-types.ts";
+import { TaskHandle, TASK_STATUS, MAX_TERMINAL_TASKS, type WorkerSessionStartedInfo } from "@core/session/task-types.ts";
 import { makeProviderHealth } from "@core/session/provider-health.ts";
 import { contentToText } from "@core/context/message.ts";
 import { createHooks } from "@core/hooks.ts";
@@ -2739,7 +2739,6 @@ describe("task questions (lane handoff + manager wake)", () => {
     } as never);
     await settle(() => manager._test_tasks.get("task-sess")!.agent !== null, "agent build");
 
-    expect(manager.getTaskSession("task-sess")).toBe("mgr-1");
     expect(manager.getTaskAgentSession("task-sess")).toBe("worker-1");
     expect(manager.getTaskAgentSession("nope")).toBeUndefined();
 
@@ -2794,6 +2793,178 @@ describe("task questions (lane handoff + manager wake)", () => {
 
     releaseRun();
     await settle(() => manager.taskStatus("task-fu2") === TASK_STATUS.COMPLETED, "completion");
+  });
+});
+
+// ── B2: releaseQuestionsForManager (the manager-gone closure seam) and the
+// questionPending badge on the task wire. The ruled posture (owner rulings
+// 2026-11-16): no worker-facing timer -- when the delegating manager's run is
+// cancelled, the HOST calls this and the worker's held question resolves
+// immediately as "answerer gone, proceed" through the bridge seam. The
+// manager-DELETE cascade (interruptTasksForSession) stays exactly as before;
+// this seam never interrupts anything.
+
+describe("releaseQuestionsForManager + the questionPending badge (B2)", () => {
+  /** Worker whose run rejects on abort, like the real agent under the
+   *  entry's abort controller (same fake the question-block suites use). */
+  function makeRejectingWorker(sessionId: string) {
+    const worker: Record<string, unknown> = {
+      sessionId,
+      abortSignal: null,
+      notifyCompletion: () => {},
+      run: () =>
+        new Promise<never>((_res, rej) => {
+          (worker.abortSignal as AbortSignal).addEventListener("abort", () =>
+            rej(LlmError.Cancelled("aborted")),
+          );
+        }),
+    };
+    return worker as never;
+  }
+
+  function makeManager(buildAgent: () => Promise<never>, extra: Record<string, unknown> = {}) {
+    return new TaskManager({
+      buildAgent: async () => buildAgent(),
+      modelRegistry: { "n1/qwen": { name: "n1/qwen" }, default: "n1/qwen" } as never,
+      config: {} as never,
+      maxIterations: 100,
+      taskProfile: "default",
+      ...extra,
+    } as never);
+  }
+
+  it("releases the held question with the reason, keeps the task RUNNING, and the badge flips notify both ways", async () => {
+    const worker = makeRejectingWorker("worker-rel");
+    const released: Array<[string, string]> = [];
+    const manager = makeManager(async () => worker, {
+      releaseWorkerQuestion: (sid: string, reason: string) => {
+        released.push([sid, reason]);
+        return true;
+      },
+    });
+    const events: Array<{ questionPending: boolean; status: string }> = [];
+    manager.setObserver((ev) => {
+      if (ev.kind === "task" && ev.task.taskId === "task-rel") {
+        events.push({ questionPending: ev.task.questionPending, status: ev.task.status });
+      }
+    });
+
+    await manager.spawnTask("task-rel", "work", { managerAgent: { sessionId: "mgr-rel" } } as never);
+    await settle(() => manager._test_tasks.get("task-rel")!.agent !== null, "agent build");
+    const info = () => manager.listTasks().find((t) => t.taskId === "task-rel")!;
+    expect(info().questionPending).toBe(false);
+
+    manager.onTaskQuestionAsked("worker-rel", [{ key: "q", prompt: "Q?" }]);
+    await settle(() => manager.listTasks().find((t) => t.taskId === "task-rel")!.questionPending === true, "yield lands");
+    expect(info().questionPending).toBe(true);
+
+    expect(
+      manager.releaseQuestionsForManager("mgr-rel", "the delegating manager's run was cancelled"),
+    ).toBe(1);
+    expect(released).toEqual([["worker-rel", "the delegating manager's run was cancelled"]]);
+    // NOT an interrupt: the release leaves the worker task RUNNING (a kill
+    // is interrupt_task/manager/user territory, D2).
+    expect(manager.taskStatus("task-rel")).toBe(TASK_STATUS.RUNNING);
+
+    // The settle (what the real bridge resolution fires through the host
+    // hook) flips the badge back; both flips rode the observer.
+    await manager.onTaskQuestionSettled("worker-rel");
+    expect(info().questionPending).toBe(false);
+    expect(events.some((e) => e.questionPending === true && e.status === TASK_STATUS.RUNNING)).toBe(true);
+    expect(events.some((e) => e.questionPending === false && e.status === TASK_STATUS.RUNNING)).toBe(true);
+
+    expect(manager.interruptTask("task-rel")).toBe(true);
+    await settle(() => manager.taskStatus("task-rel") === TASK_STATUS.CANCELLED, "cancel");
+  });
+
+  it("releases only the named manager's held RUNNING tasks", async () => {
+    const workerA = makeRejectingWorker("worker-a");
+    const workerB = makeRejectingWorker("worker-b");
+    const queue: never[] = [workerA, workerB];
+    const released: string[] = [];
+    const manager = makeManager(async () => queue.shift()!, {
+      releaseWorkerQuestion: (sid: string) => {
+        released.push(sid);
+        return true;
+      },
+    });
+
+    await manager.spawnTask("task-a", "work", { managerAgent: { sessionId: "mgr-a" } } as never);
+    await manager.spawnTask("task-b", "work", { managerAgent: { sessionId: "mgr-b" } } as never);
+    await settle(
+      () =>
+        manager._test_tasks.get("task-a")!.agent !== null &&
+        manager._test_tasks.get("task-b")!.agent !== null,
+      "both agents built",
+    );
+    // Only A holds a question; B runs on.
+    manager.onTaskQuestionAsked("worker-a", [{ key: "q", prompt: "Q?" }]);
+    await settle(() => manager.listTasks().find((t) => t.taskId === "task-a")!.questionPending === true, "A yields");
+
+    expect(manager.releaseQuestionsForManager("mgr-a", "gone")).toBe(1);
+    expect(released).toEqual(["worker-a"]);
+    // mgr-b never held one; an unknown manager releases nothing.
+    expect(manager.releaseQuestionsForManager("mgr-b", "gone")).toBe(0);
+    expect(manager.releaseQuestionsForManager("mgr-unknown", "gone")).toBe(0);
+
+    expect(manager.interruptTask("task-a")).toBe(true);
+    expect(manager.interruptTask("task-b")).toBe(true);
+    await settle(
+      () =>
+        manager.taskStatus("task-a") === TASK_STATUS.CANCELLED &&
+        manager.taskStatus("task-b") === TASK_STATUS.CANCELLED,
+      "both cancelled",
+    );
+  });
+
+  it("terminal while a question is held clears the badge (frame + snapshot false; late settle no-ops)", async () => {
+    // The order the settle hook can never reach: a terminal transition races
+    // ahead of the settle (bare interruptTask; the manager-delete cascade).
+    // #setStatus owns the badge clear BEFORE its notify, so the terminal
+    // TASK_UPDATE and every retained snapshot carry questionPending false.
+    const worker = makeRejectingWorker("worker-term");
+    const manager = makeManager(async () => worker);
+    const events: Array<{ questionPending: boolean; status: string }> = [];
+    manager.setObserver((ev) => {
+      if (ev.kind === "task" && ev.task.taskId === "task-term") {
+        events.push({ questionPending: ev.task.questionPending, status: ev.task.status });
+      }
+    });
+    await manager.spawnTask("task-term", "work", { managerAgent: { sessionId: "mgr-t" } } as never);
+    await settle(() => manager._test_tasks.get("task-term")!.agent !== null, "agent build");
+    manager.onTaskQuestionAsked("worker-term", [{ key: "q", prompt: "Q?" }]);
+    await settle(() => manager.listTasks().find((t) => t.taskId === "task-term")!.questionPending === true, "yield");
+
+    expect(manager.interruptTask("task-term")).toBe(true);
+    await settle(() => manager.taskStatus("task-term") === TASK_STATUS.CANCELLED, "cancel");
+
+    const info = manager.listTasks().find((t) => t.taskId === "task-term")!;
+    expect(info.status).toBe(TASK_STATUS.CANCELLED);
+    expect(info.questionPending).toBe(false);
+    const terminalEvent = events.at(-1)!;
+    expect(terminalEvent.status).toBe(TASK_STATUS.CANCELLED);
+    expect(terminalEvent.questionPending).toBe(false);
+
+    // The late bridge resolution fires the settle hook afterwards: it
+    // early-returns on the cleared flag (lane stays #finalizeTurn-owned) and
+    // adds no frame, no flip, no lie.
+    const framesBefore = events.length;
+    await manager.onTaskQuestionSettled("worker-term");
+    expect(events.length).toBe(framesBefore);
+    expect(manager.listTasks().find((t) => t.taskId === "task-term")!.questionPending).toBe(false);
+  });
+
+  it("a host without the seam: the method is a honest no-op (returns 0, state untouched)", async () => {
+    const worker = makeRejectingWorker("worker-noseam");
+    const manager = makeManager(async () => worker);
+    await manager.spawnTask("task-noseam", "work", { managerAgent: { sessionId: "mgr-n" } } as never);
+    await settle(() => manager._test_tasks.get("task-noseam")!.agent !== null, "agent build");
+    manager.onTaskQuestionAsked("worker-noseam", [{ key: "q", prompt: "Q?" }]);
+    await settle(() => manager.listTasks().find((t) => t.taskId === "task-noseam")!.questionPending === true, "yield");
+    expect(manager.releaseQuestionsForManager("mgr-n", "gone")).toBe(0);
+    expect(manager.listTasks().find((t) => t.taskId === "task-noseam")!.questionPending).toBe(true);
+    expect(manager.interruptTask("task-noseam")).toBe(true);
+    await settle(() => manager.taskStatus("task-noseam") === TASK_STATUS.CANCELLED, "cancel");
   });
 });
 
@@ -3004,5 +3175,131 @@ describe("terminal-record eviction (improvement #6)", () => {
     expect(manager.taskStatus("r-0")).toBe(TASK_STATUS.COMPLETED);
     expect(manager.taskStatus("r-1")).toBeNull(); // oldest ended, gone first
     expect(manager._test_tasks.size).toBe(MAX_TERMINAL_TASKS);
+  });
+});
+
+// ── B1 worker-row seam: TaskManagerOptions.onWorkerSessionStarted ──────────
+
+describe("onWorkerSessionStarted (B1 worker-row birth seam)", () => {
+  it("fires at the recordAgentSession site before the first turn, with distinct ids and a LIVE accessor that nulls at finalize", async () => {
+    const events: string[] = [];
+    const infos: WorkerSessionStartedInfo[] = [];
+    let agentRef: Record<string, unknown> | null = null;
+    let releaseRun!: () => void;
+    const buildAgent = async (_config: Record<string, unknown>) => {
+      agentRef = {
+        sessionId: "worker-seam-1",
+        context: [],
+        run: async () => {
+          events.push("run");
+          await new Promise<void>((r) => {
+            releaseRun = r;
+          });
+          return "done";
+        },
+        notifyCompletion: () => {},
+      };
+      return agentRef as never;
+    };
+    const manager = new TaskManager({
+      buildAgent,
+      modelRegistry: {} as never,
+      config: {} as never,
+      maxIterations: 100,
+      taskProfile: "default",
+      onWorkerSessionStarted: (info) => {
+        infos.push(info);
+        events.push("seam");
+      },
+    });
+
+    const handle = await manager.spawnTask("t-seam", "Do it", {
+      managerAgent: { sessionId: "sess-a" },
+    });
+    await settle(() => infos.length === 1, "seam fires once");
+    // Before the first turn: the seam lands at the recordAgentSession site,
+    // so the host's row exists before any question can arm.
+    expect(events[0]).toBe("seam");
+    const info = infos[0]!;
+    expect(events).toContain("run"); // the task actually ran
+    // D4: DISTINCT ids, never conflated.
+    expect(info.taskId).toBe("t-seam");
+    expect(info.workerSid).toBe("worker-seam-1");
+    expect(info.managerSid).toBe("sess-a");
+    expect(info.profile).toBe("default");
+    // The agent travels as a LIVE accessor: entry.agent is in hand exactly at
+    // the call site...
+    expect(info.getAgent()).toBe(agentRef);
+    releaseRun();
+    await settle(() => handle.status === TASK_STATUS.COMPLETED, "t-seam -> COMPLETED");
+    // ...and goes null once finalizeTurn nulls entry.agent (the log becomes
+    // the only transcript source -- the TaskEntry contract).
+    expect(info.getAgent()).toBeNull();
+    expect(infos).toHaveLength(1);
+  });
+
+  it("reports a session-less (engine-style) spawn with managerSid null", async () => {
+    const infos: WorkerSessionStartedInfo[] = [];
+    const manager = new TaskManager({
+      buildAgent: async () =>
+        ({
+          sessionId: "worker-seam-null",
+          context: [],
+          run: async () => "done",
+          notifyCompletion: () => {},
+        }) as never,
+      modelRegistry: {} as never,
+      config: {} as never,
+      maxIterations: 100,
+      taskProfile: "default",
+      onWorkerSessionStarted: (info: WorkerSessionStartedInfo) => infos.push(info),
+    });
+    await manager.spawnTask("t-seam0", "Do it");
+    await settle(() => infos.length === 1, "seam fires");
+    expect(infos[0]!.managerSid).toBeNull();
+    expect(infos[0]!.workerSid).toBe("worker-seam-null");
+    await settle(() => manager.taskStatus("t-seam0") === TASK_STATUS.COMPLETED, "completion");
+  });
+
+  it("a throwing host callback does not disturb task execution (observer-guard doctrine)", async () => {
+    // Capture logger.error output via the "log" hook (no mock.module).
+    resetLoggerForTesting();
+    const hooks = createHooks();
+    const logged: string[] = [];
+    hooks.on("log", (data) => {
+      const ev = data as LogEvent;
+      if (ev.level === "error") logged.push(ev.message);
+    });
+    initializeLogger({ hooks, minLevel: "error", target: "none" });
+    try {
+      let seamCalls = 0;
+      const manager = new TaskManager({
+        buildAgent: async () =>
+          ({
+            sessionId: "worker-seam-boom",
+            context: [],
+            run: async () => "still done",
+            notifyCompletion: () => {},
+          }) as never,
+        modelRegistry: {} as never,
+        config: {} as never,
+        maxIterations: 100,
+        taskProfile: "default",
+        onWorkerSessionStarted: () => {
+          seamCalls++;
+          throw new Error("host row table exploded");
+        },
+      });
+      const handle = await manager.spawnTask("t-throw", "Do it");
+      await settle(() => handle.status === TASK_STATUS.COMPLETED, "t-throw -> COMPLETED");
+      expect(seamCalls).toBe(1);
+      // The throw is logged, not propagated: the task ran, settled, and the
+      // seam fired exactly once.
+      const line = logged.find((m) => m.includes("t-throw"));
+      expect(line).toBeDefined();
+      expect(line).toContain("host row table exploded");
+    } finally {
+      resetLoggerForTesting();
+    }
   });
 });

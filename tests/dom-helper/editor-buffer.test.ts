@@ -10,31 +10,43 @@ import {
   TAB_STOP,
   allSelText,
   applySaveResult,
+  backwardWordCol,
   backspace,
   bufferFromContent,
+  bufferFromStash,
   colForX,
   confirmDiscard,
   contentOf,
   dedentChars,
   dedentLines,
   deleteForward,
+  deleteWord,
   docEnd,
+  duplicateLine,
+  forwardWordCol,
   hitPos,
   indentTab,
   insertText,
   markSaved,
+  moveWordHorizontal,
   pressEnter,
+  quoteContentRange,
   redo,
   selectAll,
+  selectInsideQuotes,
   selectWordAt,
   setCaret,
+  smartEnd,
   smartHome,
+  toggleLineComment,
+  typeChar,
   undo,
   visualCol,
   colAtVisual,
   wordRange,
   xForCol,
   type EditorSession,
+  type TextBuffer,
 } from "@extensions/webui/ui/editor-buffer.ts";
 import { MAX_FILE_READ_CHARS, MAX_FILE_WRITE_BYTES, MAX_READ_LINES } from "@extensions/websocket/protocol.ts";
 
@@ -413,5 +425,277 @@ describe("content-based dirty (owner ruling 2026-11-16)", () => {
     b = undo(b); // "x" -- no longer the baseline
     expect(contentOf(b)).toBe("x");
     expect(b.dirty).toBe(true);
+  });
+});
+
+// ── The cheap keyboard layer (TASK K): word geometry, word delete, quote
+//    select, comment toggle, duplicate line. Bindings live in editor.tsx;
+//    the app-level pins ride app.test.tsx.
+
+describe("word-boundary geometry (the three-class VS Code-ish split)", () => {
+  it("forward: identifier runs whole, gaps are crossed, EOL is its own stop", () => {
+    expect(forwardWordCol("hello world", 0)).toBe(5); // end of "hello"
+    expect(forwardWordCol("hello world", 5)).toBe(11); // gap + "world" -> EOL
+    expect(forwardWordCol("hello world", 11)).toBe(11); // dead at EOL (the caller crosses)
+    expect(forwardWordCol("hello  world", 5)).toBe(12); // multi-space gap
+    expect(forwardWordCol("a  ", 1)).toBe(3); // gap to EOL, no phantom word
+    expect(forwardWordCol("  x", 0)).toBe(3); // leading gap + word
+    expect(forwardWordCol("", 0)).toBe(0);
+    expect(forwardWordCol("a\tb", 1)).toBe(3); // a tab is whitespace
+  });
+  it("identifier = [letter|number|_], UNICODE: CJK is one run, digits stick", () => {
+    expect(forwardWordCol("foo_bar9 x", 0)).toBe(8); // underscore + digits ride the run
+    expect(forwardWordCol("你好 world", 0)).toBe(2); // 你好 = ONE identifier run
+    expect(forwardWordCol("你好 world", 2)).toBe(8); // gap + "world"
+    expect(backwardWordCol("你好世界", 4)).toBe(0); // the WHOLE CJK run is one word
+    expect(backwardWordCol("你好 world", 8)).toBe(3); // back over "world", stop at the gap
+  });
+  it("punctuation is its own run and STOPS at whitespace and word chars", () => {
+    expect(forwardWordCol("foo-bar", 0)).toBe(3); // word, stop at the '-'
+    expect(forwardWordCol("foo-bar", 3)).toBe(4); // the '-' run alone
+    expect(forwardWordCol("foo-bar", 4)).toBe(7); // "bar"
+    expect(forwardWordCol("a ++ b", 2)).toBe(4); // "++" stops AT the spaces
+    expect(forwardWordCol("a ++ b", 4)).toBe(6); // gap + "b"
+    expect(backwardWordCol("foo - bar", 9)).toBe(6);
+    expect(backwardWordCol("foo - bar", 6)).toBe(4); // the gap + '-' -> stop past it
+    expect(backwardWordCol("foo - bar", 4)).toBe(0); // gap + "foo"
+  });
+  it("surrogate pairs read whole: boundaries never split an emoji", () => {
+    const line = "a\u{1F600}b"; // a, pair (cols 1-2), b
+    expect(forwardWordCol(line, 0)).toBe(1);
+    expect(forwardWordCol(line, 1)).toBe(3); // the emoji punctuation run, whole
+    expect(forwardWordCol(line, 3)).toBe(4);
+    expect(backwardWordCol(line, 4)).toBe(3);
+    expect(backwardWordCol(line, 3)).toBe(1); // back over the WHOLE pair
+    expect(backwardWordCol(line, 1)).toBe(0);
+  });
+  it("moveWordHorizontal: the plain-arrow line wrap, the buffer edge is dead, shift extends", () => {
+    let b = caretAt(bufferFromContent("abc\ndef"), 0, 3);
+    b = moveWordHorizontal(b, 1, false); // EOL -> next line col 0
+    expect(b.sels[b.primary]!.head).toEqual({ line: 1, col: 0 });
+    b = moveWordHorizontal(b, -1, false); // col 0 -> previous line's end
+    expect(b.sels[b.primary]!.head).toEqual({ line: 0, col: 3 });
+    const deadBack = moveWordHorizontal(caretAt(b, 0, 0), -1, false);
+    expect(deadBack.sels[deadBack.primary]!.head).toEqual({ line: 0, col: 0 }); // no move, no step
+    const deadFwd = moveWordHorizontal(caretAt(bufferFromContent("abc"), 0, 3), 1, false); // EOL AND last line
+    expect(deadFwd.sels[deadFwd.primary]!.head).toEqual({ line: 0, col: 3 });
+    let e = caretAt(bufferFromContent("ab cd ef"), 0, 0);
+    e = moveWordHorizontal(e, 1, true);
+    expect(e.sels[e.primary]!.anchor).toEqual({ line: 0, col: 0 }); // anchor rides
+    expect(e.sels[e.primary]!.head).toEqual({ line: 0, col: 2 });
+  });
+  it("a plain word-move collapses a multi-caret list to the primary (the arrow doctrine)", () => {
+    let b = caretAt(bufferFromContent("aa bb\ncc dd"), 0, 0);
+    b = {
+      ...b,
+      sels: [
+        { anchor: { line: 0, col: 0 }, head: { line: 0, col: 0 } },
+        { anchor: { line: 1, col: 3 }, head: { line: 1, col: 3 } },
+      ],
+      primary: 1,
+    };
+    b = moveWordHorizontal(b, 1, false);
+    expect(b.sels).toHaveLength(1);
+    expect(b.sels[0]!.head).toEqual({ line: 1, col: 5 });
+  });
+});
+
+describe("word delete (alt+Backspace / alt+Delete)", () => {
+  it("backward to the boundary; each press is ONE block step (no coalescing); undo back to baseline is CLEAN", () => {
+    let b = caretAt(bufferFromContent("alpha beta gamma\n"), 0, 10);
+    b = deleteWord(b, -1, 0);
+    expect(contentOf(b)).toBe("alpha  gamma\n");
+    expect(b.sels[b.primary]!.head).toEqual({ line: 0, col: 6 });
+    expect(b.undo).toHaveLength(1);
+    b = deleteWord(b, -1, 1); // gap + "alpha" go together (forward's mirror)
+    expect(contentOf(b)).toBe(" gamma\n");
+    expect(b.undo).toHaveLength(2); // one step PER PRESS, even inside COALESCE_MS
+    expect(contentOf(undo(b))).toBe("alpha  gamma\n");
+    const back = undo(undo(b));
+    expect(contentOf(back)).toBe("alpha beta gamma\n");
+    expect(back.dirty).toBe(false); // undo-to-baseline reads clean (derived)
+  });
+  it("forward deletes to the next boundary; EOL/col-0 eat the line break like Delete/backspace", () => {
+    let b = caretAt(bufferFromContent("alpha beta\n"), 0, 0);
+    expect(contentOf(deleteWord(b, 1, 0))).toBe(" beta\n");
+    b = caretAt(bufferFromContent("ab\ncd\n"), 0, 2); // EOL: the join
+    expect(contentOf(deleteWord(b, 1, 0))).toBe("abcd\n");
+    b = caretAt(bufferFromContent("ab\ncd\n"), 1, 0); // col 0 back: the join
+    expect(contentOf(deleteWord(b, -1, 0))).toBe("abcd\n");
+  });
+  it("dead at the buffer edges: identity, no step, no dirty", () => {
+    const b = caretAt(bufferFromContent(""), 0, 0); // the ONE dead-in-both-places spot
+    expect(deleteWord(b, -1, 0)).toBe(b);
+    expect(deleteWord(b, 1, 0)).toBe(b);
+    const firstChar = caretAt(bufferFromContent("x"), 0, 0);
+    expect(deleteWord(firstChar, -1, 0)).toBe(firstChar); // doc start, backward
+    const docEol = caretAt(bufferFromContent("x"), 0, 1);
+    expect(deleteWord(docEol, 1, 0)).toBe(docEol); // doc end, forward
+  });
+  it("with any selection the selection goes instead (the plain-delete doctrine); zero-width carets survive", () => {
+    let b = bufferFromContent("hello world");
+    b = {
+      ...b,
+      sels: [
+        { anchor: { line: 0, col: 0 }, head: { line: 0, col: 2 } },
+        { anchor: { line: 0, col: 9 }, head: { line: 0, col: 9 } },
+      ],
+      primary: 0,
+    };
+    b = deleteWord(b, -1, 0);
+    expect(contentOf(b)).toBe("llo world"); // the range went; the caret did not eat "o"
+    expect(b.sels).toHaveLength(2);
+  });
+});
+
+describe("select inside quotes (innermost pair, escape-aware)", () => {
+  it("double / single / backtick pairs yield their content (quote chars excluded)", () => {
+    expect(quoteContentRange('say "hello there"', 12)).toEqual({ from: 5, to: 16 });
+    expect(quoteContentRange("let x = 'a b'", 9)).toEqual({ from: 9, to: 12 });
+    expect(quoteContentRange("let `a b` = 1", 6)).toEqual({ from: 5, to: 8 });
+  });
+  it("escaped quotes never split a pair; an escaped backslash still lets the closer close", () => {
+    expect(quoteContentRange("'it\\'s fine'", 6)).toEqual({ from: 1, to: 11 }); // the \\' is content, not the closer
+    expect(quoteContentRange('"a\\\\"', 3)).toEqual({ from: 1, to: 4 }); // line "a\\" -- closer after \\
+  });
+  it("unpaired is honest: no span for an open quote, a caret on a quote char, or outside every pair", () => {
+    expect(quoteContentRange('a "b|c', 4)).toBeUndefined(); // never closed
+    expect(quoteContentRange('"ab"', 0)).toBeUndefined(); // ON the opening quote
+    expect(quoteContentRange('"a" "b"', 2)).toBeUndefined(); // between two pairs
+    expect(quoteContentRange("f(x) plain", 9)).toBeUndefined(); // no quotes at all
+  });
+  it("mixed quotes: the SMALLEST containing pair wins (the inner double, not the outer single)", () => {
+    expect(quoteContentRange(`f('a "b" d')`, 6)).toEqual({ from: 6, to: 7 }); // inside the "..." only
+    expect(quoteContentRange(`f('a "b" d')`, 3)).toEqual({ from: 3, to: 10 }); // inside the '...' only
+  });
+  it("selectInsideQuotes paints a range with NO undo step and NO dirty; no-op keeps identity", () => {
+    let b = caretAt(bufferFromContent('say "hello there" ok'), 0, 12);
+    b = selectInsideQuotes(b);
+    expect(b.sels[b.primary]).toEqual({
+      anchor: { line: 0, col: 5 },
+      head: { line: 0, col: 16 },
+    });
+    expect(b.undo).toHaveLength(0);
+    expect(b.dirty).toBe(false);
+    const out = caretAt(bufferFromContent("no quotes here"), 0, 4);
+    expect(selectInsideQuotes(out)).toBe(out);
+  });
+});
+
+describe("line-comment toggle (Ctrl/Cmd+/)", () => {
+  const at = (content: string, line: number, col: number) => caretAt(bufferFromContent(content), line, col);
+
+  it("round-trip per lang family: //, #, --, % (token lands AFTER the indent, with one space)", () => {
+    const block = (content: string): TextBuffer => {
+      const b = bufferFromContent(content);
+      return { ...b, sels: [{ anchor: { line: 0, col: 0 }, head: { line: 1, col: 2 } }], primary: 0 };
+    };
+    for (const [lang, token] of [
+      ["typescript", "//"],
+      ["python", "#"],
+      ["lua", "--"],
+      ["erlang", "%"],
+    ] as const) {
+      let b = toggleLineComment(block("  code\nmore\n"), lang, 1);
+      expect(b.lines).toEqual([`  ${token} code`, `${token} more`]);
+      expect(b.undo).toHaveLength(1); // ONE step for the whole block
+      b = undo(b);
+      expect(contentOf(b)).toBe("  code\nmore\n");
+      expect(b.dirty).toBe(false); // undone-to-baseline is clean (derived)
+      const u = toggleLineComment(block(`  ${token} code\n${token} more\n`), lang, 2);
+      expect(u.lines).toEqual(["  code", "more"]); // uncomment eats the token + ONE space
+    }
+  });
+  it("carets shift by what their line gained or lost (anchor and head), clamped at 0", () => {
+    let b = at("  foo\n", 0, 2);
+    b = toggleLineComment(b, "go", 1); // +3 on the line
+    expect(b.sels[b.primary]!.head).toEqual({ line: 0, col: 5 });
+    b = toggleLineComment(b, "go", 2); // uncomment: back
+    expect(b.sels[b.primary]!.head).toEqual({ line: 0, col: 2 });
+    expect(contentOf(b)).toBe("  foo\n");
+    expect(b.dirty).toBe(false);
+  });
+  it("the PRIMARY selection's line block toggles; a caret inside a line targets just that line", () => {
+    let b = bufferFromContent("a\nb\nc\n");
+    b = { ...b, sels: [{ anchor: { line: 0, col: 1 }, head: { line: 1, col: 1 } }], primary: 0 };
+    b = toggleLineComment(b, "rust", 1);
+    expect(b.lines).toEqual(["// a", "// b", "c"]); // line 2 untouched
+  });
+  it("blank lines are never marked, an all-blank block is a dead key; whitespace-only content counts as blank", () => {
+    let b = bufferFromContent("x\n\ny\n");
+    b = { ...b, sels: [{ anchor: { line: 0, col: 0 }, head: { line: 2, col: 1 } }], primary: 0 };
+    b = toggleLineComment(b, "yaml", 1);
+    expect(b.lines).toEqual(["# x", "", "# y"]);
+    const blank = at("\n   \n", 1, 1);
+    expect(toggleLineComment(blank, "yaml", 2)).toBe(blank);
+  });
+  it("no line comment = honest no-op: json, block-only langs, unknown names, plain, no lang", () => {
+    for (const lang of ["json", "css", "html", "xml", "markdown", "diff", "plain", "klingon", undefined]) {
+      const b = at("x\n", 0, 0);
+      expect(toggleLineComment(b, lang, 1)).toBe(b);
+    }
+  });
+});
+
+describe("duplicate line (Ctrl+Shift+D)", () => {
+  it("dupes the caret's line below, caret lands on the copy, ONE undo step, clean back to baseline", () => {
+    let b = caretAt(bufferFromContent("one\ntwo\n"), 0, 2);
+    b = duplicateLine(b, 1);
+    expect(b.lines).toEqual(["one", "one", "two"]);
+    expect(b.sels[b.primary]!.head).toEqual({ line: 1, col: 2 }); // ON the copy
+    expect(b.undo).toHaveLength(1);
+    const back = undo(b);
+    expect(contentOf(back)).toBe("one\ntwo\n");
+    expect(back.dirty).toBe(false);
+    expect(contentOf(redo(back))).toBe("one\none\ntwo\n");
+  });
+  it("a selection collapses to the caret; the endsNL fact survives; duplicating the last line is fine", () => {
+    let b = bufferFromContent("solo"); // no trailing newline
+    b = { ...b, sels: [{ anchor: { line: 0, col: 0 }, head: { line: 0, col: 4 } }], primary: 0 };
+    b = duplicateLine(b, 1);
+    expect(contentOf(b)).toBe("solo\nsolo"); // still no trailing NL (it is a fact, not a line)
+    expect(b.sels[b.primary]).toEqual({ anchor: { line: 1, col: 4 }, head: { line: 1, col: 4 } });
+  });
+});
+
+describe("Shift+Home / Shift+End (the already-shipped selection path, pinned)", () => {
+  it("extend selects to the smart-Home stops and the line end; anchors ride", () => {
+    let b = caretAt(bufferFromContent("    x"), 0, 5);
+    b = smartHome(b, true); // press 1: back to first non-whitespace
+    expect(b.sels[b.primary]!.anchor).toEqual({ line: 0, col: 5 });
+    expect(b.sels[b.primary]!.head).toEqual({ line: 0, col: 4 });
+    b = smartHome(b, true); // press 2: column 0 (full-line select)
+    expect(b.sels[b.primary]!.head).toEqual({ line: 0, col: 0 });
+    b = smartEnd(b, true); // Shift+End: out to the line end again
+    expect(b.sels[b.primary]!.head).toEqual({ line: 0, col: 5 });
+    expect(b.undo).toHaveLength(0); // selection moves never enter the history
+    // A line with no indent: smart Home IS column 0 (the trivial case the
+    // spec asks about -- no separate first-press rule was needed).
+    const flat = smartHome(caretAt(bufferFromContent("x\n"), 0, 1), true);
+    expect(flat.sels[flat.primary]!.head).toEqual({ line: 0, col: 0 });
+  });
+});
+
+describe("HOT EXIT: bufferFromStash (preserved text over the disk baseline)", () => {
+  it("differs from disk -> the stash reads dirty; re-serializing equal reads clean", () => {
+    const b = bufferFromStash("kept\n", "disk\n");
+    expect(contentOf(b)).toBe("kept\n"); // the buffer's bytes are the PRESERVED text
+    expect(b.baseline).toBe("disk\n"); // ...but dirty derives against DISK
+    expect(b.dirty).toBe(true);
+    const same = bufferFromStash("x\n", "x\n");
+    expect(same.dirty).toBe(false); // a stash that equals disk brings nothing back
+    // endsNL is a real byte fact in the comparison, not decoration.
+    const nl = bufferFromStash("x", "x\n");
+    expect(nl.dirty).toBe(true);
+    expect(contentOf(nl)).toBe("x");
+    // The undo ladder of a RESTORED buffer reverts edits back onto the
+    // preserved text and stays dirty against disk -- undo never "cleans" a
+    // restore, and clean can only be earned by the bytes matching (above).
+    let c = bufferFromStash("kept\n", "disk\n");
+    c = typeChar(c, "!", 10);
+    expect(contentOf(c)).toBe("!kept\n");
+    c = undo(c);
+    expect(contentOf(c)).toBe("kept\n"); // ONE step back onto the preserved text
+    expect(c.dirty).toBe(true); // still unsaved: the disk baseline never moved
   });
 });

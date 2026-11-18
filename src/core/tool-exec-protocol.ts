@@ -178,6 +178,22 @@ export interface ReapFrame {
   class?: ExecClass;
 }
 /**
+ * Session end: drop every entry of ONE session AND answer `released` once
+ * the process of the last dropped entry is dead (supervisor-side that
+ * confirmation is what licenses scratch-dir reclaim; a draining runner may
+ * still have the dir bound until then). `seq` is the supervisor's per-frame
+ * generation tag, echoed by `released`: the ack for seq N means every entry
+ * dropped by THIS frame or any earlier release frame of the session is
+ * process-dead (FIFO drain), and reclaim lands only on the CURRENT arm's
+ * seq. Entries spawned after this frame are not watched: a resumed session
+ * has already disarmed its pending release.
+ */
+export interface ReleaseFrame {
+  op: "release";
+  session: string;
+  seq: number;
+}
+/**
  * Supervisor -> broker child (first frame of every broker spawn) -> every
  * freshly spawned runner: the complete pool-tool descriptor set. The child
  * replays it first at each runner spawn, so no invoke can outrun the tool
@@ -187,7 +203,13 @@ export interface RegisterFrame {
   op: "register";
   tools: WireToolDescriptor[];
 }
-export type OutboundFrame = InvokeFrame | CancelFrame | WarmFrame | ReapFrame | RegisterFrame;
+export type OutboundFrame =
+  | InvokeFrame
+  | CancelFrame
+  | WarmFrame
+  | ReapFrame
+  | ReleaseFrame
+  | RegisterFrame;
 
 // Runner -> broker -> supervisor.
 export interface OkFrame {
@@ -203,12 +225,21 @@ export interface FailFrame {
 export interface ReadyFrame {
   op: "ready";
 }
+/**
+ * The child's confirmation for one `release` frame: every entry dropped by
+ * that seq or any earlier release frame of the session is process-dead.
+ */
+export interface ReleasedFrame {
+  op: "released";
+  session: string;
+  seq: number;
+}
 export interface LogFrame {
   op: "log";
   level: "debug" | "info" | "warn" | "error";
   msg: string;
 }
-export type InboundFrame = OkFrame | FailFrame | ReadyFrame | LogFrame;
+export type InboundFrame = OkFrame | FailFrame | ReadyFrame | ReleasedFrame | LogFrame;
 
 /**
  * The supervisor-side view of the plane. The executor forks to this seam;
@@ -235,6 +266,13 @@ export interface ToolExecLink {
   warm?(session: string, cls: ExecClass, workspace?: WireWorkspace): void;
   /** Drop pool entries (idle teardown, session delete). */
   reap?(session?: string, cls?: ExecClass): void;
+  /**
+   * Session end: drop the session's pool entries and confirm (`released`)
+   * when the last dropped entry's process is dead, which is what licenses
+   * supervisor-side scratch reclaim. Optional: fake links and older hosts
+   * omit it (the SESSION_END wiring falls back to `reap`).
+   */
+  release?(session: string): void;
   close(): Promise<void>;
 }
 

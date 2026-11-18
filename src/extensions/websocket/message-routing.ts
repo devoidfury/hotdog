@@ -28,7 +28,6 @@ import { handleExecFence } from "./handlers-exec-fence.ts";
 import {
   handleTaskInterrupt,
   handleTaskFollowup,
-  handleTaskActivityRequest,
   handleQuestionAnswer,
 } from "./handlers-tasks.ts";
 import { handleCommand, handleComplete } from "./handlers-commands.ts";
@@ -39,6 +38,7 @@ import {
   handleViewLog,
   handleDeleteLog,
   handleSearchLogs,
+  handleLoadOlder,
 } from "./handlers-logs.ts";
 import { handleConfigSnapshot, handleConfigKeySet, handleConfigListEdit } from "./handlers-config.ts";
 import {
@@ -67,7 +67,6 @@ const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.EXEC_FENCE]: handleExecFence,
   [C2S.TASK_INTERRUPT]: handleTaskInterrupt,
   [C2S.TASK_FOLLOWUP]: handleTaskFollowup,
-  [C2S.TASK_ACTIVITY_REQUEST]: handleTaskActivityRequest,
   [C2S.QUESTION_ANSWER]: handleQuestionAnswer,
   [C2S.COMMAND]: handleCommand,
   [C2S.COMPLETE]: handleComplete,
@@ -77,6 +76,7 @@ const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.VIEW_LOG]: handleViewLog,
   [C2S.DELETE_LOG]: handleDeleteLog,
   [C2S.SEARCH_LOGS]: handleSearchLogs,
+  [C2S.LOAD_OLDER]: handleLoadOlder,
   [C2S.CONFIG_SNAPSHOT]: handleConfigSnapshot,
   [C2S.SET_CONFIG_KEY]: handleConfigKeySet,
   [C2S.EDIT_CONFIG_LIST]: handleConfigListEdit,

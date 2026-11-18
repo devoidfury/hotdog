@@ -1732,8 +1732,8 @@ When DuckDuckGo serves a CAPTCHA challenge (rate limiting), the tile solve page 
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `sessionTimeoutMin` | `number` | `30` | Idle session cleanup timeout (minutes). |
-| `questionTimeoutSecs` | `number` | `300` | Default question timeout (seconds). |
-| `questionStrategy` | `string` | `"wait"` | What happens when a question is unanswered. `wait` = hold until a client answers (no timeout); `default` = after `questionTimeoutSecs`, resolve with each question's default; `cancel` = after `questionTimeoutSecs`, interrupt the session. Both can be overridden per session at `createSession`. |
+| `questionTimeoutSecs` | `number` | `300` | Default question timeout (seconds). Applies to interactive sessions only -- task-worker questions never arm a timer (see `questionStrategy`). |
+| `questionStrategy` | `string` | `"wait"` | What happens when a question is unanswered. `wait` = hold until a client answers (no timeout); `default` = after `questionTimeoutSecs`, resolve with each question's default; `cancel` = after `questionTimeoutSecs`, interrupt the session. Both can be overridden per session at `createSession`. Task workers (subagents) are exempt: their questions always run `wait` -- no worker-facing timer -- and an inherited `default`/`cancel` is coerced to `wait` with a warn line. A cancelled manager releases its workers' held questions immediately as unanswered ("answerer gone, proceed"); the answer path is the delegating manager's `task_followup`. |
 
 ```json
 { "websocket": { "sessionTimeoutMin": 60 } }

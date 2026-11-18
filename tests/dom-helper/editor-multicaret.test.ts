@@ -17,6 +17,8 @@ import {
   collapseSels,
   collapseSelections,
   contentOf,
+  deleteWord,
+  duplicateLine,
   insertText,
   matchBracket,
   moveHorizontal,
@@ -417,5 +419,82 @@ describe("caret-onto-caret dedupe + per-caret overtype parity", () => {
     // The over caret's pre-state walk follows the (higher) selection edit:
     // (0,4) -> (0,3) once "de" became ")" (shiftPastEdit through it).
     expect(b.sels.map((r) => [r.head.line, r.head.col])).toEqual([[0, 1], [0, 3]]);
+  });
+});
+
+// ── TASK K per-caret ops: word delete and duplicate line. The pure
+//    geometry lives in editor-buffer.test.ts; this suite pins the per-caret
+//    machine (descending apply, one step, caret restoration).
+
+describe("multi-caret word delete (alt+Backspace/Delete)", () => {
+  const atWordEnds = (): TextBuffer => {
+    let b = at(bufferFromContent("aaa bbb\nccc ddd\neee fff\n"), 0, 7);
+    b = altClickCaret(b, { line: 1, col: 7 });
+    b = altClickCaret(b, { line: 2, col: 7 });
+    return b;
+  };
+
+  it("one press deletes one word per caret as ONE step; undo restores text AND the caret list", () => {
+    const before = atWordEnds();
+    const b = deleteWord(before, -1, 1000);
+    expect(contentOf(b)).toBe("aaa \nccc \neee \n");
+    expect(b.undo).toHaveLength(1); // all THREE deletes, one step
+    const back = undo(b);
+    expect(contentOf(back)).toBe("aaa bbb\nccc ddd\neee fff\n");
+    expect(back.dirty).toBe(false); // undone-to-baseline is clean (derived)
+    expect(back.sels).toEqual(before.sels); // the CARETS (not staged ranges) come back
+    expect(back.primary).toBe(before.primary);
+    expect(contentOf(redo(back))).toBe("aaa \nccc \neee \n");
+    expect(redo(back).dirty).toBe(true); // redo re-dirties
+  });
+
+  it("a caret pinned at a buffer edge is dead but SURVIVES the other carets' delete", () => {
+    let b = at(bufferFromContent("aaa bbb\nccc ddd"), 0, 0); // dead for backward
+    b = altClickCaret(b, { line: 1, col: 7 });
+    const out = deleteWord(b, -1, 1000);
+    expect(contentOf(out)).toBe("aaa bbb\nccc ");
+    expect(out.sels).toHaveLength(2);
+    expect(out.sels[0]!.head).toEqual({ line: 0, col: 0 }); // untouched, still there
+    expect(out.sels[1]!.head).toEqual({ line: 1, col: 4 });
+  });
+
+  it("forward delete at three EOLs eats the three line breaks, one step, undo whole", () => {
+    let b = at(bufferFromContent("aa\nbb\ncc"), 0, 2);
+    b = altClickCaret(b, { line: 1, col: 2 });
+    b = altClickCaret(b, { line: 2, col: 2 }); // doc end: dead, survives
+    const out = deleteWord(b, 1, 1000);
+    expect(contentOf(out)).toBe("aabbcc");
+    expect(contentOf(undo(out))).toBe("aa\nbb\ncc");
+  });
+});
+
+describe("multi-caret duplicate line (Ctrl+Shift+D)", () => {
+  it("each caret's line duplicates below it; every caret rides ITS copy; one undo reverts all", () => {
+    let b = at(bufferFromContent("a\nb\nc\n"), 0, 1);
+    b = altClickCaret(b, { line: 2, col: 1 });
+    b = duplicateLine(b, 1000);
+    expect(b.lines).toEqual(["a", "a", "b", "c", "c"]); // line 1 does NOT dupe (no caret there)
+    expect(b.sels.map((r) => [r.head.line, r.head.col])).toEqual([[1, 1], [4, 1]]);
+    expect(b.primary).toBe(1); // the index rides: primary is the caret the user last placed (the line-2 one)
+    expect(b.undo).toHaveLength(1);
+    const back = undo(b);
+    expect(contentOf(back)).toBe("a\nb\nc\n");
+    expect(back.dirty).toBe(false);
+    expect(back.sels.length).toBe(2); // the caret LIST reverts too
+  });
+
+  it("two carets on ONE line dupe it ONCE (deduped insert points), both carets land on the copy", () => {
+    let b = at(bufferFromContent("x y\nz\n"), 0, 1);
+    b = altClickCaret(b, { line: 0, col: 3 });
+    b = duplicateLine(b, 1000);
+    expect(b.lines).toEqual(["x y", "x y", "z"]);
+    expect(b.sels.map((r) => [r.head.line, r.head.col])).toEqual([[1, 1], [1, 3]]);
+  });
+
+  it("typing on the copies lands there (the caret is on the copy, not the original)", () => {
+    let b = at(bufferFromContent("keep\n"), 0, 4);
+    b = duplicateLine(b, 1000);
+    b = typeChar(b, "!", 2000);
+    expect(contentOf(b)).toBe("keep\nkeep!\n");
   });
 });

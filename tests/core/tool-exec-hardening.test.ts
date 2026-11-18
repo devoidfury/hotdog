@@ -13,11 +13,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fs from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { ToolExecBroker } from "@core/tool-exec-broker.ts";
 import type { WireFence, WireToolCtx, WireToolResult } from "@core/tool-exec-protocol.ts";
 import { tmpDir, cleanupDir, processAlive, waitForExit } from "../helpers.ts";
 import { RUNNER_ENTRY as layoutRunnerEntry } from "@core/tool-exec-layout.ts";
 import { poolWireDescriptors } from "../fixtures/wire-descriptors.ts";
+import { execFenceBackend } from "@utils/exec-plan.ts";
 
 const TOOL_CONFIG = {
   bashTool: { bashTimeoutMs: 20000, maxToolOutputLines: 100, maxTimeoutMs: 20000 },
@@ -782,4 +784,134 @@ describe("sliding broker-death window", () => {
       await broker.close();
     }
   }, 30000);
+});
+
+// ── Scratch reclaim on the REAL plane (session end, 2026-11 ENOSPC hunt) ──────
+//
+// Default (probe) posture: on a host WITH a jail backend every planned
+// session owns a real mkdtemp'd `hotdog-exec-*` scratch dir. release()
+// reaps the session's entries AND reclaims that dir only on the child's
+// `released` confirmation. A backend-less host mints nothing, so the
+// dir-level assertions degrade to the documented vacuous note while the
+// release-then-resume wiring assertions still bind.
+
+describe("scratch reclaim via release (real spawn, default fence)", () => {
+  const scratchOf = (session: string): string[] =>
+    fs
+      .readdirSync(tmpdir())
+      .filter((d) => d.startsWith(`hotdog-exec-${session}-`))
+      .map((d) => join(tmpdir(), d));
+
+  it("release reclaims the session's scratch dir; an unrelated session's survives; a resumed session gets a fresh one", async () => {
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors() });
+    const sA = `harden-rel-a-${process.pid}`;
+    const sB = `harden-rel-b-${process.pid}`;
+    try {
+      await broker.invoke({ session: sA, tool: "bash", args: { command: "true" }, ctx: ctx(sA) });
+      await broker.invoke({ session: sB, tool: "bash", args: { command: "true" }, ctx: ctx(sB) });
+      const fenced = execFenceBackend() !== null;
+      const dirsA = scratchOf(sA);
+      const dirsB = scratchOf(sB);
+      expect(dirsA.length).toBe(fenced ? 1 : 0);
+      expect(dirsB.length).toBe(fenced ? 1 : 0);
+      if (!fenced) {
+        process.stderr.write(
+          "[tool-exec-hardening] no jail backend on this host: scratch dirs do not exist here; release/resume wiring below still binds\n",
+        );
+      } else {
+        expect(fs.existsSync(dirsA[0]!)).toBe(true);
+      }
+
+      broker.release(sA);
+      await settle(() => scratchOf(sA).length === 0, "the released ack to reclaim the scratch dir");
+      if (fenced) expect(fs.existsSync(dirsA[0]!)).toBe(false); // real dir, real rm
+      // The sibling's live entry and dir are untouched by an UNRELATED release.
+      expect(dirsB.length === 0 || fs.existsSync(dirsB[0]!)).toBe(true);
+
+      // Resumed session: transparently mints a fresh dir (the fence id moves,
+      // so the mismatch-replace rule respawns cleanly -- here the pool is
+      // already empty, the next invoke spawns under the new plan). The call
+      // completing is what pins it: this host's jail may not resolve `bash`
+      // (a pre-existing plan/environment fact, irrelevant to the plumbing).
+      const resumed = await broker.invoke({
+        session: sA,
+        tool: "bash",
+        args: { command: "echo resumed" },
+        ctx: ctx(sA),
+      });
+      expect(resumed.kind).toBe("tool-result");
+      const freshA = scratchOf(sA);
+      expect(freshA.length).toBe(fenced ? 1 : 0);
+      if (fenced) {
+        expect(freshA[0]).not.toBe(dirsA[0]);
+        expect(fs.existsSync(freshA[0]!)).toBe(true);
+      }
+
+      // And the reclaimed-dir path works for a still-warm session too.
+      broker.release(sB);
+      await settle(() => scratchOf(sB).length === 0, "the warm sibling's reclaim");
+    } finally {
+      await broker.close(); // death purge sweeps the resumed session's fresh dir
+    }
+  }, 30_000);
+
+  it("a release against a plane that never started spawns nothing", () => {
+    // Same no-spawn-on-teardown rule as the reap pin: a teardown hook must
+    // never conjure the plane just to reclaim what cannot exist.
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(), fence: "off" });
+    broker.release("ghost-session");
+    expect(broker.pid).toBeNull();
+  });
+
+  it("release generations round-trip: arms and acks match by seq (re-fired SESSION_END)", async () => {
+    // Recording seam planner: pins that every release() arms a NEW seq and
+    // that the child's acks echo generations (the supervisor-side stale-ack
+    // gate itself is pinned at the planner in tool-exec-plane.test.ts).
+    const arms: Array<[string, number]> = [];
+    const finishes: Array<[string, number]> = [];
+    const seam = Object.assign(
+      (_session: string, _cls: "rw" | "net", _roots: string[]): null => null,
+      {
+        dropSession: () => {},
+        armRelease: (s: string, n: number) => {
+          arms.push([s, n]);
+        },
+        finishRelease: (s: string, n: number) => {
+          finishes.push([s, n]);
+        },
+      },
+    );
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(), fencePlan: seam });
+    try {
+      await broker.invoke({
+        session: "harden-gen",
+        tool: "bash",
+        args: { command: "echo ok" },
+        ctx: ctx("harden-gen"),
+      });
+      broker.release("harden-gen");
+      broker.release("harden-gen"); // the re-fire
+      await settle(
+        () => finishes.filter((f) => f[0] === "harden-gen").length >= 2,
+        "both generation acks (the entry's drain included)",
+      );
+      expect(arms.filter((a) => a[0] === "harden-gen").map((a) => a[1])).toEqual([1, 2]);
+      const acked = finishes.filter((f) => f[0] === "harden-gen").map((f) => f[1]);
+      expect(acked).toContain(2); // the current generation's ack closes the flow
+      // No ack may predate the entry's death: settle above proves the FIRST
+      // two frames only completed once the pool entry drained.
+    } finally {
+      await broker.close();
+    }
+  }, 30_000);
+
+  it("close purges every scratch dir (the death-shape sweep)", async () => {
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors() });
+    const s = `harden-rel-close-${process.pid}`;
+    await broker.invoke({ session: s, tool: "bash", args: { command: "true" }, ctx: ctx(s) });
+    const fenced = execFenceBackend() !== null;
+    expect(scratchOf(s).length).toBe(fenced ? 1 : 0);
+    await broker.close();
+    expect(scratchOf(s).length).toBe(0); // no session end needed: close is the purge
+  }, 30_000);
 });

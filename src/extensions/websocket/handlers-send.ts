@@ -16,6 +16,17 @@ export function handleSend(ctx: RouteContext): void {
   const files = msg.files;
   if (!sid) return;
 
+  // B3 refusal table (design (d), R4's attribute-not-fork): a worker row is
+  // not a turn-taking session. Today this silently vanished (the private
+  // SessionManager has no entry, so enqueue hit nothing); now it answers.
+  if (registry.getRow(sid)?.kind === "worker") {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.ERROR,
+      message: "Subagents are steered with a follow-up, not a turn.",
+    });
+    return;
+  }
+
   // A new prompt supersedes any resumed question still on hold.
   dismissResumedQuestions(bridge, registry, sid);
 
@@ -63,10 +74,34 @@ export function handleSend(ctx: RouteContext): void {
 }
 
 export function handleCancel(ctx: RouteContext): void {
-  const { msg, registry, bridge } = ctx;
+  const { ws, msg, registry, bridge } = ctx;
   if (!msg.sessionId) return;
+  const managerSid = msg.sessionId as string;
+  // B3 refusal table: cancel on a worker sid is refused. This closes the
+  // gap the B2 ledger carried: the plain bridge.cancel below resolved a
+  // held worker question UNMARKED (defaults-as-answer, a D10 breach). The
+  // refusal leaves the pending HELD for the manager; the kill control is
+  // task-side (interrupt_task), and the manager's own cancel route above
+  // stays exactly as B2 shipped it.
+  if (registry.getRow(managerSid)?.kind === "worker") {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.ERROR,
+      message: "Subagent runs are stopped with the task control (interrupt_task), not cancel.",
+    });
+    return;
+  }
   // interrupt() keeps the bus alive for follow-ups; cancel() would abort it.
-  registry.getSessionManager().interrupt(msg.sessionId as string);
+  registry.getSessionManager().interrupt(managerSid);
   // Unblock a pending question-tool call so it can't hang.
-  bridge.cancel(msg.sessionId as string);
+  bridge.cancel(managerSid);
+  // D1's bound on the park (manager-gone closure): this manager's run is
+  // over, so any of its workers held on a question will never get an
+  // answer -- release those held questions IMMEDIATELY, unanswered ("answerer
+  // gone, proceed"). Event-driven, no timer involved; the worker tasks
+  // themselves are NOT interrupted (a kill is interrupt_task/manager/user
+  // territory). The manager's own pending above is untouched by this.
+  registry.getTaskManager()?.releaseQuestionsForManager(
+    managerSid,
+    "the delegating manager's run was cancelled",
+  );
 }

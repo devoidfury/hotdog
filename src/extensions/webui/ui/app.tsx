@@ -39,7 +39,7 @@ import { loadAttachments, saveAttachments, type PendingAttachment } from "./atta
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import { Combobox, ComboboxPopup, comboboxAtom } from "./combobox.tsx";
 import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire, FileOpResultWire } from "./chat.ts";
-import type { ConfigKeyEditWire, EditConfigListResultWire, TaskInfoWire } from "@extensions/websocket/protocol.ts";
+import type { ConfigKeyEditWire, EditConfigListResultWire, TaskInfoWire, TaskControlWire } from "@extensions/websocket/protocol.ts";
 import { chipLabel, openTargetFor } from "./subagents.tsx";
 import {
   persistWorkbenchTabs,
@@ -82,6 +82,7 @@ import { FileEditor, loadShowWs, saveShowWs } from "./editor.tsx";
 import {
   applySaveResult,
   bufferFromContent,
+  bufferFromStash,
   confirmDiscard,
   contentChars,
   contentOf,
@@ -89,6 +90,7 @@ import {
   EDIT_PAGE_LINES,
   type EditorSession,
 } from "./editor-buffer.ts";
+import { createEditorStash, STASH_DEBOUNCE_MS } from "./editor-stash.ts";
 import {
   SettingsViewer,
   initialSettingsPanelState,
@@ -249,7 +251,14 @@ function onSearchKeydown(e: KeyboardEvent): void {
 }
 
 function onActivateHit(hit: SearchHitWire): void {
-  // live → attach to the running session; cold → read-only log view.
+  // live → attach to the running session; cold → read-only log view. Both
+  // land in the lazy-history window (the trailing K messages; older pages
+  // through loadOlder). HITS DO NOT POSITION: today's click already just
+  // OPENS the log (no scroll-to-match existed before windowing, and none
+  // does now), so a jumped-to match can never land in a window that does
+  // not contain it -- and scrolling up pages the same loadOlder seam until
+  // any hit's context is on screen (reachability pinned server-side in
+  // tests/extensions/websocket-history-window.test.ts).
   if (hit.live) {
     chat?.switchSession(hit.logId);
   } else {
@@ -622,13 +631,33 @@ function syncTaskTick(): void {
   }
 }
 
-/** The main pane shows something other than the live manager transcript
- *  (a browsed cold log OR an open subagent transcript): file drops and the
- *  fence toggle stay inert in both -- they act on the ATTACHED session, not
- *  on the pane's subject. The composer differs by mode (see App's
- *  composerLocked): a cold log locks it, a subagent view steers the task. */
+/** The ATTACHED session is a worker row (sessionCreated kind, B3): the pane
+ *  is a subagent session view (B4 -- the relay pane is gone; the session
+ *  surface IS the pane). Steering rides taskFollowup (the worker's own send
+ *  is refused server-side); attachments, slash commands, fork/rename/pin and
+ *  profile switches are refused too, so the chrome must not offer them. */
+function inSubagentView(): boolean {
+  return (chat?.sessionKindAtom() ?? null) === "subagent";
+}
+
+/** The ticker row of the worker session on screen (the steer/Stop target
+ *  and the header label). Evicted rows have nothing honest to steer -- the
+ *  caller says so instead of dropping the text into silence. */
+function viewedWorkerTask(): TaskInfoWire | null {
+  const sid = chat?.sessionIdAtom() ?? null;
+  if (sid === null) return null;
+  return (
+    chat?.tasksAtom().find((t) => t.durable !== true && t.agentSessionId === sid) ?? null
+  );
+}
+
+/** The main pane shows something other than the interactive transcript
+ *  (a browsed cold log or a worker-session view): file drops and the fence
+ *  toggle stay inert in both -- the actions they trigger are refused for the
+ *  pane's subject. The composer differs by mode (see App's composerLocked):
+ *  a cold log locks it, a subagent view steers the task. */
 function inBrowseView(): boolean {
-  return activeLogIdAtom() !== null || (chat?.viewedTaskIdAtom() ?? null) !== null;
+  return activeLogIdAtom() !== null || inSubagentView();
 }
 
 // Tab-completion popup for the composer (server-driven, see C2S.COMPLETE).
@@ -671,6 +700,8 @@ function domRef<T>(set: (el: T | null) => void): Ref {
 
 let chatInputEl: HTMLTextAreaElement | null = null;
 let messageListEl: HTMLElement | null = null;
+// Composer wrapper: the mount host for the imperative jump-to-bottom button.
+let inputAreaEl: HTMLElement | null = null;
 let contextMenuEl: HTMLDivElement | null = null;
 let fileInputEl: HTMLInputElement | null = null;
 
@@ -710,6 +741,17 @@ function guardUnsavedEditorsOnLeave(e: Event): void {
   (e as unknown as { returnValue?: unknown }).returnValue = "";
 }
 window.addEventListener("beforeunload", guardUnsavedEditorsOnLeave);
+
+// HOT EXIT: this veto is a COURTESY now -- the sessionStorage stash
+// (editor-stash.ts) is the actual guarantee; the veto just guards the
+// pre-stash window (keystrokes younger than the debounce) and stays honest.
+// Flush the pending stash writes on the house leave event (a flush needs no
+// cancellation, so DRAFT_LEAVE_EVENT is the right seam here) so even that
+// window lands before the page dies.
+function flushStashOnLeave(): void {
+  editorStash.flush();
+}
+window.addEventListener(DRAFT_LEAVE_EVENT, flushStashOnLeave);
 
 // Reload caret restore: a mid-typing refresh must not lose the caret, nor
 // the composer's focus. The selection always lands with
@@ -795,6 +837,9 @@ const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
 });
 const messageListRef = domRef<HTMLElement>((el) => {
   messageListEl = el;
+});
+const inputAreaRef = domRef<HTMLElement>((el) => {
+  inputAreaEl = el;
 });
 const contextMenuRef = domRef<HTMLDivElement>((el) => {
   contextMenuEl = el;
@@ -900,15 +945,14 @@ function onCloseLogView(): void {
   }
 }
 
-/** Leave the subagent transcript: the pane goes back to the manager exactly
- *  like closing a log view (re-switch replays the live transcript, and the
- *  sessionCreated attach lifts chat's transcript suppression). */
+/** Leave the worker-session view: back to the delegating manager (the
+ *  standard attach switch replays its transcript). Engine-spawned workers
+ *  have no manager session (null parent) -- the honest fallback re-switches
+ *  in place: a refresh of a view with nowhere to go back to. */
 function onCloseSubagentView(): void {
-  chat?.closeSubagentView();
   const currentSessionId = chat?.sessionIdAtom();
-  if (currentSessionId && chat) {
-    chat.switchSession(currentSessionId);
-  }
+  if (!currentSessionId) return;
+  chat?.switchSession(chat.sessionParentAtom() ?? currentSessionId);
 }
 
 // ── Context menus ───────────────────────────────────────────────────────────
@@ -1231,26 +1275,25 @@ function onLogMenu(e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElem
 }
 
 /** Row-press routing shared by the sidebar row and the context menu's Open
- *  (openTargetFor decides the landing): live/settled-live tasks open the task
- *  transcript; a DURABLE restart-survivor row opens the worker's OWN durable
- *  log through the existing cold log-view machinery (viewLog -> LOG_VIEWED);
- *  a pre-join record has nothing honest to open (the caller hides the item). */
+ *  (openTargetFor decides the landing, B4): a LIVE worker row opens its
+ *  SESSION through the standard attach (switchSession -- the pane is the
+ *  session view, there is no second transcript surface); a SETTLED or
+ *  DURABLE row opens the worker's own durable log through the existing cold
+ *  log-view machinery (viewLog -> LOG_VIEWED); a row with no worker session
+ *  on record has nothing honest to open (the caller hides the item). */
 function openTaskRow(t: TaskInfoWire): void {
   const target = openTargetFor(t);
   if (target === null) return;
   if ("logId" in target) {
-    // Chat drops the task browse pointer when the log lands (logViewed
-    // case); the app-side activeLogId rides onLogViewed, like any other
+    // The app-side activeLogId rides onLogViewed, like any other
     // cold-row click.
     chat?.viewLog(target.logId);
     return;
   }
-  // Browse modes are exclusive (chat-side); clear the app-side log mirror
-  // in the SAME click so the header never carries both labels (and the log
-  // row drops its highlight). The chat already dropped its viewedLogId;
-  // this keeps the mirrors honest.
+  // Browsing a cold log ends in the SAME click so the header never carries
+  // both labels (and the log row drops its highlight).
   if (activeLogIdAtom() !== null) clearLogView();
-  chat?.viewSubagent(t.taskId);
+  chat?.switchSession(target.sessionId);
 }
 
 /**
@@ -1727,6 +1770,30 @@ const fileViewsAtom = reactiveState<FileViewsState>(emptyFileViews());
 // them, and those gates confirm.
 const editorSessionsAtom = reactiveState<Record<string, EditorSession>>({});
 const whitespaceOnAtom = reactiveState<boolean>(loadShowWs());
+// HOT EXIT: sticky once the sessionStorage write ever fails (quota/blocked).
+// The editor foot bar shows "stash off" -- an honest indicator, no console.
+const stashQuotaAtom = reactiveState<boolean>(false);
+
+// Storage resolves PER CALL, never cached (the workbench-tab doctrine): the
+// dom-helper stubs install/tear down window.sessionStorage between tests.
+function stashStorage() {
+  return typeof window !== "undefined" && "sessionStorage" in window
+    ? (window as unknown as { sessionStorage: Storage }).sessionStorage
+    : null;
+}
+
+// The one stash store for this browser tab. Dirty buffers mirror through it
+// on a trailing debounce (typing never touches storage per keystroke); a
+// failed write marks the quota indicator ONCE and never throws at the
+// editing/save path.
+const editorStash = createEditorStash({
+  storage: stashStorage,
+  debounceMs: STASH_DEBOUNCE_MS,
+  onQuota: () => {
+    stashQuotaAtom(true);
+    showOpNotice("Storage full: unsaved edits can no longer be stashed for reload.");
+  },
+});
 
 // Read facts the buffer needs that FileViewEntry deliberately does NOT
 // carry (the viewer's state shape stays untouched): the mtime the read
@@ -1740,6 +1807,13 @@ function setSession(path: string, next: EditorSession): void {
   // The tab dot mirrors buffer.dirty -- one writer, and the store's no-op
   // guard keeps unchanged flags from notifying.
   workbenchStore.setDirty(path, next.buffer.dirty);
+  // HOT EXIT: the same single writer drives the stash. Dirty buffers mirror
+  // through the debounced writer (coalesced, off the keystroke path); a
+  // buffer going clean clears its record NOW, so a stale stash can never
+  // outlive the save/undo that made it false. saveFile success lands here
+  // (the session flips clean), which is why there is no separate clear.
+  if (next.buffer.dirty) editorStash.schedule(path, contentOf(next.buffer), next.baseMtimeMs);
+  else editorStash.clear(path);
 }
 
 function dropSession(path: string): void {
@@ -1749,6 +1823,10 @@ function dropSession(path: string): void {
   delete rest[path];
   editorSessionsAtom(rest);
   workbenchStore.setDirty(path, false);
+  // HOT EXIT: the buffer's life ends with its tab -- the stash record dies
+  // with it (a closed tab's "restore" would resurrect work the user already
+  // confirmed discarded).
+  editorStash.clear(path);
   // The buffer dies, so its (now stale) viewer cache dies with it: a dirty
   // discard must not let a reopen show the pre-edit bytes as if nothing
   // happened. A CLEAN drop keeps cache AND meta (reopen-must-not-wipe reads
@@ -1936,8 +2014,57 @@ function maintainEditor(path: string, entry: FileViewEntry | undefined): void {
   }
   if (editorSessionsAtom()[path]) return;
   const meta = fileReadMeta.get(path);
-  const buffer = bufferFromContent(entry.lines.join("\n") + (meta?.endsNL ? "\n" : ""));
-  setSession(path, { path, buffer, baseMtimeMs: meta?.mtimeMs ?? 0, saving: false });
+  const diskContent = entry.lines.join("\n") + (meta?.endsNL ? "\n" : "");
+  // HOT EXIT restore: a stashed record for this path is overlaid HONESTLY,
+  // never merged --
+  //  * disk mtime == the stashed base: the file is exactly the bytes the
+  //    preserved text was written against, so the stash opens as the buffer
+  //    over the disk baseline (dirty derived from the content rule) with a
+  //    "restored unsaved edits" note on the tab;
+  //  * disk mtime != base (the agent moved the file underneath): load the
+  //    DISK text clean, keep the stash, and offer saveFile's conflict pair --
+  //    OK opens the preserved text dirty ON THE STASH'S OLD BASE (so its
+  //    first save hits the normal save-conflict gate), Cancel discards the
+  //    preserved edits. Same window.confirm idiom as the refusal above; no
+  //    new dialog machinery.
+  const stashed = editorStash.entryFor(path);
+  if (stashed !== null) {
+    if (meta !== undefined && stashed.baseMtimeMs === meta.mtimeMs) {
+      const buffer = bufferFromStash(stashed.text, diskContent);
+      setSession(path, { path, buffer, baseMtimeMs: meta.mtimeMs, saving: false });
+      // A clean overlay (stash re-serialized equal to disk) shows no note --
+      // nothing unsaved was brought back -- and setSession's clean branch
+      // drops the now-useless record.
+      if (buffer.dirty) showOpNotice(`${baseName(path)}: restored unsaved edits`);
+      return;
+    }
+    // The conflict pair, BEFORE the load resolves: the stash record survives
+    // the modal (a kill during the dialog re-offers it next load), Cancel's
+    // clean setSession clears it, and OK's dirty buffer re-arms it with the
+    // OLD base through the debounced mirror -- so its first save hits the
+    // normal save-conflict gate against the agent's new mtime.
+    const openPreserved = confirm(
+      `${baseName(path)} has unsaved edits stashed from the previous session, but the file changed on disk since they were written. Open the preserved text anyway? Cancel DISCARDS the preserved edits and keeps the disk version.`,
+    );
+    setSession(
+      path,
+      openPreserved
+        ? {
+            path,
+            buffer: bufferFromStash(stashed.text, diskContent),
+            baseMtimeMs: stashed.baseMtimeMs,
+            saving: false,
+          }
+        : { path, buffer: bufferFromContent(diskContent), baseMtimeMs: meta?.mtimeMs ?? 0, saving: false },
+    );
+    return;
+  }
+  setSession(path, {
+    path,
+    buffer: bufferFromContent(diskContent),
+    baseMtimeMs: meta?.mtimeMs ?? 0,
+    saving: false,
+  });
 }
 
 /** Ctrl/Cmd+S (the editor claims the chord and calls this) and nothing
@@ -2255,6 +2382,8 @@ function onFileOpReply(requestId: number | undefined, result: FileOpResultWire):
         fileReadMeta.delete(record.from);
         fileReadMeta.set(record.to, meta);
       }
+      // The stash follows the file like the session and the meta do.
+      editorStash.move(record.from, record.to);
       return;
     }
     case "delete": {
@@ -2312,6 +2441,15 @@ function startChat(): void {
     token,
     host: window.location.host,
     getMessageListContainer: () => messageListEl,
+    getJumpHost: () => inputAreaEl,
+    onTaskControl: (r: TaskControlWire) => {
+      // Requester-only refusal (steer/Stop). It must not pass silently: an
+      // honest system line lands in the transcript that issued the action
+      // (B4: the worker-session view -- the only surface that steers).
+      if (r.ok) return;
+      const word = r.action === "interrupt" ? "Stop" : "Steering";
+      chat?.messageListAtom()?.addSystemMessage(`${word} refused: ${r.error ?? "no reason given"}`);
+    },
     onSessionCreated: ({ sessionId, replayDelta }) => {
       // A delta attach replays only the tail past the cursor, so the existing
       // transcript (its prefix) must survive the switch.
@@ -2401,10 +2539,11 @@ function startChat(): void {
   });
 
   // Re-render on any chat atom change; also refresh the sidebar when the
-  // model changes, and pull profiles once connected. Streaming subagent
-  // output must NEVER land in this list: activity frames go straight from
-  // chat.ts into the MessageListManager's imperative DOM path, so a task
-  // streaming hundreds of deltas per second repaints nothing here -- the
+  // model changes, and pull profiles once connected. Streaming output must
+  // NEVER land in this list: transcript frames go straight from chat.ts into
+  // the MessageListManager's imperative DOM path (the viewed worker's own
+  // tail included, since B4's collapse), so a session streaming hundreds of
+  // deltas per second repaints nothing here -- the
   // sidebar rows refresh on tasksAtom (per taskUpdate) and the 1 s tick.
   stopChatEffects = effect(render, [
     chat.connectedAtom,
@@ -2415,7 +2554,7 @@ function startChat(): void {
     chat.profilesAtom,
     chat.currentProfileAtom,
     chat.tasksAtom,
-    chat.viewedTaskIdAtom,
+    chat.sessionKindAtom,
     chat.sttEnabledAtom,
     chat.toolExecAtom,
     chat.hideThinkingAtom,
@@ -2480,14 +2619,14 @@ function onChatSubmit(e: Event): void {
   const attachments = attachmentsAtom();
   if (!text && attachments.length === 0) return;
 
-  // Subagent view steers the VIEWED task (owner ruling 2026-11-13): the
-  // follow-up route is text-only on the wire (taskFollowup carries no
-  // files), and a slash command would act on the attached manager, which
-  // is not what the pane is showing. With staged attachments the box and
-  // the draft stay intact -- the bytes are the user's until a route can
-  // carry them.
-  const viewedTaskId = chat?.viewedTaskIdAtom() ?? null;
-  if (viewedTaskId !== null) {
+  // A worker-session view steers its TASK through the follow-up route
+  // (owner ruling 2026-11-13, re-pointed by B4's collapse): the route is
+  // text-only on the wire (taskFollowup carries no files), and the worker
+  // row's own send/command surface is refused server-side. With staged
+  // attachments the box and the draft stay intact -- the bytes are the
+  // user's until a route can carry them. No local echo: the drained steer
+  // arrives once through the worker's own stream.
+  if (inSubagentView()) {
     if (attachments.length > 0) {
       showCopyToast("Attachments can't ride subagent steering -- send text only");
       return;
@@ -2498,7 +2637,12 @@ function onChatSubmit(e: Event): void {
     cancelDraftSave();
     clearDraft();
     dismissCompletion();
-    chat?.taskFollowup(viewedTaskId, text);
+    const steerTask = viewedWorkerTask();
+    if (steerTask === null) {
+      showCopyToast("No live task on this manager's feed for this worker session -- nothing to steer");
+      return;
+    }
+    chat?.taskFollowup(steerTask.taskId, text);
     return;
   }
 
@@ -3033,44 +3177,39 @@ function App() {
   const screen = screenAtom();
   const connected = chat?.connectedAtom() ?? false;
   const activeLogId = activeLogIdAtom();
-  // Subagent transcript on screen (the chat-side browse pointer; the sidebar
-  // row highlight, the header label and the composer's busy posture all read
-  // it).
-  const viewedTaskId = chat?.viewedTaskIdAtom() ?? null;
+  // Worker-session view (the attach's kind; the header label, the chrome
+  // hide-outs and the composer's steering posture all read it) and the
+  // ticker row that names it (the steer/Stop target; evicted rows label
+  // from the bare session id).
+  const subagentView = (chat?.sessionKindAtom() ?? null) === "subagent";
   // The combobox controls' current values (server truth: sessionCreated /
   // profileSwitched / sessionState frames write these atoms, and the trigger
   // display follows every patch -- the native selects' imperative value pin
   // (syncSelects) was exactly this job and is gone).
   const currentProfile = chat?.currentProfileAtom() ?? "";
   const currentModel = chat?.currentModelAtom() ?? "";
-  // The composer's working posture follows the PANE's subject (owner ruling
-  // 2026-11-13: the send/stop controls you see belong to the session on
-  // screen). While a subagent transcript is open that is the task's own live
-  // turn -- TaskInfoWire.inRun, server truth arriving on every taskUpdate,
-  // so the button flips with the task's turn boundaries exactly like the
-  // manager's working flag does for its session, and can never claim a turn
-  // the server never attested (deliberately not optimistic: taskInterrupt can
-  // be refused, and a refused Stop must not leave a lying button). A queued
-  // or parked task has no turn in flight, so it shows Send, like an idle
-  // session. The hidden manager's working flag never drives this pane.
-  const working =
-    viewedTaskId === null
-      ? (chat?.workingAtom() ?? false)
-      : (chat?.tasksAtom().find((t) => t.taskId === viewedTaskId)?.inRun ?? false);
-  // A cold log is a read-only record: it locks the composer. A subagent
-  // transcript is a LIVE view (owner ruling 2026-11-13): the composer stays
-  // operable and STEERS the viewed task; the only thing the mode locks is
-  // the profile/model switching dropdowns (selects-locked). fence/drops
-  // stay inert in both browse modes alike.
+  // The composer's working posture is the ATTACHED session's (owner ruling
+  // 2026-11-13, now literally true since the pane IS the session): the
+  // worker-row attach answers `working` with the task's inRun (B3's live
+  // check), so the button starts honest and can never claim a turn the
+  // server never attested (deliberately not optimistic: taskInterrupt can be
+  // refused, and a refused Stop must not leave a lying button).
+  const working = chat?.workingAtom() ?? false;
+  // A cold log is a read-only record: it locks the composer. A worker-session
+  // view is a LIVE view (owner ruling 2026-11-13): the composer stays
+  // operable and STEERS the task. fence/drops stay inert in both browse
+  // modes alike (both target the attached session, not the pane's subject
+  // or the refused surface).
   const composerLocked = activeLogId !== null;
   // Either browse mode keeps the fence strip and file drops inert: both act
   // on the ATTACHED session, which is not what the pane is showing.
-  const browseView = activeLogId !== null || viewedTaskId !== null;
+  const browseView = activeLogId !== null || subagentView;
   const sessionId = chat?.sessionIdAtom() ?? null;
-  // The header identity follows the pane's subject: the viewed task's id
-  // while its transcript is on screen, the attached session's otherwise
-  // (the copy button always copies the full id of what it names).
-  const badgeId = viewedTaskId ?? sessionId;
+  // The header identity is the ATTACHED session's id (the pane's subject is
+  // the session since B4 -- a worker view names the worker's OWN session id,
+  // which is what viewLog/search key on; the copy button always copies the
+  // full id of what it names).
+  const badgeId = sessionId;
   // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none -- probe failed)" / "inline (unfenced)",
   // plus anything carrying [degraded: ...].
   const toolExec = chat?.toolExecAtom() ?? "";
@@ -3094,10 +3233,6 @@ function App() {
   const completionMenu = completionAtom();
   const attachments = attachmentsAtom();
   const allTasks = chat ? chat.tasksAtom() : [];
-  // Scope the server-global feed to the open session; null-parent tasks
-  // (workflow-engine spawns) belong to no session and never show. The
-  // sidebar re-scopes per card; this copy labels the viewed subagent.
-  const tasks = allTasks.filter((t) => sessionId !== null && t.sessionId === sessionId);
   const sttPhase = sttPhaseAtom();
   const settings = settingsAtom();
   // Workbench file-tab bodies read their state here (atoms flip on WS
@@ -3106,6 +3241,7 @@ function App() {
   const fileViews = fileViewsAtom();
   const editorSessions = editorSessionsAtom();
   const showWs = whitespaceOnAtom();
+  const stashQuota = stashQuotaAtom();
   // Dock-pin gate (see workbenchSizeAtom): the preference is the want, the
   // pane width is the can. Both flags ride the panel; the button appears
   // exactly when the gate allows it and the aria carries the EFFECTIVE
@@ -3251,7 +3387,6 @@ function App() {
           onTaskMenu={onSubagentMenu}
           onToggleSubagents={onToggleSubagents}
           tasks={allTasks}
-          viewedTaskId={viewedTaskId}
           subagentsCollapsed={subagentsCollapsedAtom()}
           now={nowAtom()}
           onSessionMenu={onSessionMenu}
@@ -3330,33 +3465,22 @@ function App() {
               >
                 <IconWorkbench flip />
               </button>
-              {/* The pane's subject identity (owner ruling 2026-11-13): a
-                  subagent view names itself -- "Subagent:" + the viewed task's
-                  id badge, copy landing the FULL task id -- and reverts to the
-                  attached "Session:" the moment the mode ends. The dim is log
-                  view only: there the badge shows the attached id while the
-                  pane is a cold record, so it must read as not-the-subject;
-                  in subagent view the badge IS the subject, so it never dims. */}
+              {/* The pane's subject identity (owner ruling 2026-11-13, B4-
+                  honest): a worker-session view prefixes "Subagent:" and the
+                  badge is the WORKER's own session id (the key its durable
+                  log rides); an interactive attach says "Session:". The dim
+                  is log view only: there the badge shows the attached id
+                  while the pane is a cold record, so it must read as
+                  not-the-subject; in a subagent view the badge IS the
+                  subject, so it never dims. */}
               <span id="session-label" style={activeLogId !== null ? { opacity: "0.5" } : undefined}>
-                {viewedTaskId !== null ? "Subagent:" : "Session:"}{" "}
+                {subagentView ? "Subagent:" : "Session:"}{" "}
                 <button
                   type="button"
                   id="current-session-id"
                   className={copyFlashAtom() ? "copied" : undefined}
-                  title={
-                    badgeId
-                      ? viewedTaskId !== null
-                        ? "Copy full subagent id"
-                        : "Copy full session id"
-                      : undefined
-                  }
-                  aria-label={
-                    badgeId
-                      ? viewedTaskId !== null
-                        ? "Copy full subagent id"
-                        : "Copy full session id"
-                      : undefined
-                  }
+                  title={badgeId ? "Copy full session id" : undefined}
+                  aria-label={badgeId ? "Copy full session id" : undefined}
                   onClick={
                     badgeId
                       ? (e: MouseEvent) => {
@@ -3388,16 +3512,17 @@ function App() {
                 </span>
               ) : null}
               {/* The subagent mirror of the log-view label: what is on screen
-                  (step label idiom; full task id on the native title) and how
-                  to leave. An evicted task falls back to labeling from its
-                  bare id. */}
-              {viewedTaskId !== null ? (
+                  (step label idiom; the worker session id on the native
+                  title) and how to leave (back to the delegating manager).
+                  An evicted ticker row falls back to labeling from the bare
+                  session id. */}
+              {subagentView ? (
                 <span id="subagent-view-label">
                   Viewing subagent:{" "}
-                  <span id="current-subagent-label" title={viewedTaskId}>
+                  <span id="current-subagent-label" title={sessionId ?? ""}>
                     {chipLabel(
-                      tasks.find((t) => t.taskId === viewedTaskId) ?? {
-                        taskId: viewedTaskId,
+                      viewedWorkerTask() ?? {
+                        taskId: sessionId ?? "",
                         description: "",
                       },
                     )}
@@ -3466,17 +3591,15 @@ function App() {
           {/* Imperatively managed by MessageListManager via ref (streaming markdown). */}
           <div id="message-list" ref={messageListRef}></div>
 
-          {/* Subagent view is NOT read-only (composer steers the task);
-              only a browsed cold log locks the input area. selects-locked:
-              the profile/model switching dropdowns are the one exception
-              to "works like a live session" while a subagent is viewed. */}
+          {/* A worker-session view is NOT read-only (composer steers the
+              task); only a browsed cold log locks the input area. The
+              refused affordances (profile/model switching, attachments)
+              are HIDDEN outright in a worker view (N2) -- the chrome must
+              not offer what the server refuses. */}
           <div
             id="input-area"
-            className={
-              [composerLocked ? "read-only" : "", viewedTaskId !== null ? "selects-locked" : ""]
-                .filter(Boolean)
-                .join(" ") || undefined
-            }
+            ref={inputAreaRef}
+            className={composerLocked ? "read-only" : undefined}
           >
             <form
               id="chat-form"
@@ -3523,7 +3646,7 @@ function App() {
               </div>
               <textarea
                 id="chat-input"
-                placeholder={viewedTaskId !== null ? "Steer the subagent..." : "Type a message..."}
+                placeholder={subagentView ? "Steer the subagent..." : "Type a message..."}
                 autocomplete="off"
                 rows="1"
                 disabled={composerLocked}
@@ -3558,27 +3681,24 @@ function App() {
                   ref={fileInputRef}
                   onChange={onFilesPicked}
                 />
-                <button
-                  type="button"
-                  id="attach-btn"
-                  title={
-                    viewedTaskId !== null && !composerLocked
-                      ? "Attachments can't ride subagent steering (text only)"
-                      : "Attach files to the next message"
-                  }
-                  aria-label={
-                    viewedTaskId !== null && !composerLocked
-                      ? "Attachments can't ride subagent steering (text only)"
-                      : "Attach files to the next message"
-                  }
-                  disabled={composerLocked || viewedTaskId !== null}
-                  onClick={() => fileInputEl?.click()}
-                >
-                  {/* currentColor idiom from icons.tsx; 1.8 stroke for the weight. */}
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" tabindex="-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                </button>
+                {/* Attachments are refused for a worker row server-side, so
+                    the affordance is absent in a worker view (N2): hidden,
+                    never disabled-and-tempting. */}
+                {subagentView ? null : (
+                  <button
+                    type="button"
+                    id="attach-btn"
+                    title="Attach files to the next message"
+                    aria-label="Attach files to the next message"
+                    disabled={composerLocked}
+                    onClick={() => fileInputEl?.click()}
+                  >
+                    {/* currentColor idiom from icons.tsx; 1.8 stroke for the weight. */}
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" tabindex="-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                  </button>
+                )}
                 {chat?.sttEnabledAtom() ? (
                   <button
                     type="button"
@@ -3607,40 +3727,39 @@ function App() {
                     {sttPhase === "recording" ? "● Recording" : sttPhase === "transcribing" ? "..." : null}
                   </button>
                 ) : null}
-                <label id="profile-selector">
-                  {/* Label text is screen-reader-only (house .visually-hidden
-                      clip: keeps the accessible name, drops the visible
-                      "Profile:" the owner hid 2026-11-14). */}
-                  <span className="visually-hidden">Profile</span>
-                  {/* Profile/model switching belongs to the ATTACHED manager,
-                      never to the viewed subagent (owner ruling 2026-11-13:
-                      the one exception). Searchable comboboxes replaced the
-                      native selects (long lists filter by typing); the
-                      disabled button drops out of the tab order exactly like
-                      the disabled select did, and the .selects-locked CSS
-                      carries the same dim the read-only composer pills use.
-                      The ids ride the trigger button: same chips, CSS and
-                      test pins re-pointed to the button semantics. */}
-                  <Combobox
-                    id="profile-select"
-                    label="Profile"
-                    value={currentProfile}
-                    options={chat ? Object.keys(chat.profilesAtom()) : []}
-                    disabled={viewedTaskId !== null}
-                    onSelect={onProfileChange}
-                  />
-                </label>
-                <label id="model-selector">
-                  <span className="visually-hidden">Model</span>
-                  <Combobox
-                    id="model-select"
-                    label="Model"
-                    value={currentModel}
-                    options={chat?.modelsAtom() ?? []}
-                    disabled={viewedTaskId !== null}
-                    onSelect={onModelChange}
-                  />
-                </label>
+                {/* Profile/model switching is refused for a worker row
+                    server-side (R4), so the affordances are absent in a
+                    worker view (N2). Searchable comboboxes replaced the
+                    native selects (long lists filter by typing); the ids
+                    ride the trigger button: same chips, CSS and test pins
+                    on the button semantics. */}
+                {subagentView ? null : (
+                  <label id="profile-selector">
+                    {/* Label text is screen-reader-only (house .visually-hidden
+                        clip: keeps the accessible name, drops the visible
+                        "Profile:" the owner hid 2026-11-14). */}
+                    <span className="visually-hidden">Profile</span>
+                    <Combobox
+                      id="profile-select"
+                      label="Profile"
+                      value={currentProfile}
+                      options={chat ? Object.keys(chat.profilesAtom()) : []}
+                      onSelect={onProfileChange}
+                    />
+                  </label>
+                )}
+                {subagentView ? null : (
+                  <label id="model-selector">
+                    <span className="visually-hidden">Model</span>
+                    <Combobox
+                      id="model-select"
+                      label="Model"
+                      value={currentModel}
+                      options={chat?.modelsAtom() ?? []}
+                      onSelect={onModelChange}
+                    />
+                  </label>
+                )}
                 {/* No steer control: every send steers (see the send site;
                     in a subagent view steering rides taskFollowup). */}
                 {/* Connection truth, moved out of the header: it renders
@@ -3668,15 +3787,22 @@ function App() {
                     type="button"
                     id="cancel-btn"
                     title={
-                      viewedTaskId !== null
+                      subagentView
                         ? "Stop this subagent: it aborts the task agent's turn, and a task turn has no turn-only interrupt on the wire -- the task ends as cancelled (the sidebar row confirms it)"
                         : undefined
                     }
                     onClick={() => {
-                      if (viewedTaskId !== null) {
-                        // No liveStopped marker here: that arms the manager's
-                        // aria-live off-edge, which this click never moves.
-                        chat?.interruptTask(viewedTaskId);
+                      if (subagentView) {
+                        // Stop addresses the TASK (interrupt_task is the
+                        // worker's control; a session cancel on a worker row
+                        // is refused server-side). An evicted ticker row
+                        // leaves no id: ride the cancel and let the honest
+                        // refusal say so. No liveStopped marker here: that
+                        // arms the manager's aria-live off-edge, which this
+                        // click never moves.
+                        const stopTask = viewedWorkerTask();
+                        if (stopTask !== null) chat?.interruptTask(stopTask.taskId);
+                        else chat?.cancel();
                         return;
                       }
                       // Same user-initiated-end marker as the row/menu Stop
@@ -3763,6 +3889,7 @@ function App() {
                     onSave={requestSave}
                     onReload={onFileReload}
                     onToggleWs={onToggleWhitespace}
+                    stashOff={stashQuota}
                   />
                 );
               }
@@ -3958,6 +4085,7 @@ async function init(): Promise<void> {
     fileViewsAtom,
     editorSessionsAtom,
     whitespaceOnAtom,
+    stashQuotaAtom,
     themeIdAtom,
   ]);
 

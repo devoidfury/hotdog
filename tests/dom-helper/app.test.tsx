@@ -37,6 +37,7 @@ import {
   WORKBENCH_TABS_KEY,
   workbenchStore,
 } from "@extensions/webui/ui/workbench.tsx";
+import { STASH_KEY_PREFIX, STASH_TAB_ID_KEY } from "@extensions/webui/ui/editor-stash.ts";
 
 const SID = "s-ui-0001";
 const L1 = "l-ui-0001";
@@ -1890,13 +1891,30 @@ describe("subagents sidebar and main-view transcript", () => {
     activeMs: 1000,
     inRun: true,
     turnStartedAt: Date.now() - 1000,
+    // B4: the worker session a row opens (openTargetFor reads it; without
+    // it the row is informational-only).
+    agentSessionId: "wsess-1",
     ...over,
   });
+
+  /** Live row press: sends the plain switchSession for the worker's own
+   *  session (B4 -- the pane becomes the worker's session view), and the
+   *  fake server answers with the standard attach burst (sessionCreated
+   *  rides kind/parentSessionId additively, B3). */
+  function workerAttach(workerSid = "wsess-1"): void {
+    ws.fireMessage({ type: "sessionCreated", sessionId: workerSid, kind: "subagent", parentSessionId: SID });
+    // The worker attach answers `working` with the task's inRun (B3 source);
+    // tests whose turn is open flip it true on top of this burst.
+    ws.fireMessage({ type: "sessionState", sessionId: workerSid, key: "working", value: false });
+    ws.fireMessage({ type: "sessionState", sessionId: workerSid, key: "cursor", value: 2 });
+  }
 
   async function openSubagent(): Promise<void> {
     ws.fireMessage({ type: "taskList", tasks: [task()] });
     await tick();
     els(".subagent-row")[0]!.click();
+    await tick();
+    workerAttach();
     await tick();
   }
 
@@ -1934,62 +1952,65 @@ describe("subagents sidebar and main-view transcript", () => {
 
   it("clicking a row opens the transcript in the main view (history seeded)", async () => {
     await openSubagent();
-    expect(sent<{ taskId: string }>("taskActivityRequest")[0]?.taskId).toBe("task-1");
+    // B4: a live row opens the worker session through the STANDARD attach
+    // -- the transcript seeds from the session's own replay, no relay frames.
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe("wsess-1");
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "delegate prompt" });
+    ws.fireMessage({ type: "assistantMessage", sessionId: "wsess-1", content: "thinking out loud" });
     ws.fireMessage({
-      type: "taskActivityHistory",
-      taskId: "task-1",
-      activity: [
-        { kind: "text", content: "thinking out loud" },
-        { kind: "tool_call", name: "bash", args: "{\"cmd\":\"ls\"}" },
-        { kind: "tool_result", name: "bash", output: "file.txt", error: undefined },
-      ],
+      type: "toolCall", sessionId: "wsess-1", name: "bash", args: "{\"cmd\":\"ls\"}", toolCallId: "t1",
     });
+    ws.fireMessage({ type: "toolResult", sessionId: "wsess-1", name: "bash", output: "file.txt", toolCallId: "t1" });
     await tick();
     expect(el("#message-list").textContent).toContain("thinking out loud");
     expect(el("#message-list").textContent).toContain("bash");
     // Header affordance (the log-view label idiom): what is on screen + exit.
     expect(el("#subagent-view-label").textContent).toContain("do the thing");
-    expect(el("#current-subagent-label").getAttribute("title")).toBe("task-1");
+    // B4: the label's title is the WORKER session id (the key its durable
+    // log rides), not the task id.
+    expect(el("#current-subagent-label").getAttribute("title")).toBe("wsess-1");
     // Doctrine (owner ruling 2026-11-13): viewing a subagent works like any
     // other live view -- the composer stays enabled (it steers the task).
     // The ONLY thing that locks in this mode is the profile/model switching.
     expect(el("#chat-input").hasAttribute("disabled")).toBe(false);
-    expect(el("#input-area").getAttribute("class")).not.toContain("read-only");
-    expect(el("#profile-select").hasAttribute("disabled")).toBe(true);
-    expect(el("#model-select").hasAttribute("disabled")).toBe(true);
-    // The viewed row carries the active mark.
+    expect((el("#input-area").getAttribute("class") ?? "")).not.toContain("read-only");
+    // B4 (N2): profile/model switching is refused for a worker row, so the
+    // affordances are ABSENT here -- hidden, never disabled-and-tempting.
+    // Attachments ride the same fence (taskFollowup is text-only on the wire).
+    expect(document.querySelector("#profile-select")).toBeNull();
+    expect(document.querySelector("#model-select")).toBeNull();
+    expect(document.querySelector("#attach-btn")).toBeNull();
+    // The viewed row carries the active mark (its worker session IS the pane).
     expect(els(".subagent-row")[0]!.getAttribute("class")).toContain("active");
   });
 
-  it("live task output streams into the MAIN transcript; manager events stay out", async () => {
-    ws.fireMessage({
-      type: "taskActivity",
-      taskId: "task-1",
-      activity: { kind: "text", content: "chunk one" },
-    });
+  it("live worker output streams into the MAIN transcript; manager events stay out", async () => {
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: "chunk one" });
     await tick();
     expect(el("#message-list").textContent).toContain("chunk one");
 
-    // The manager keeps streaming underneath the viewed transcript: dropped
-    // (LOG_VIEW_SINK), and it never dirties the attach cursor (chat-side
-    // doctrine, pinned in webui-chat.test.ts).
+    // The manager keeps streaming underneath the viewed transcript: the pane
+    // is the worker's session view now, so manager-session events are
+    // dropped (and never dirty the manager's attach cursor).
     ws.fireMessage({ type: "assistantMessage", sessionId: SID, content: "MANAGER LEAK" });
     await tick();
     expect(el("#message-list").textContent).not.toContain("MANAGER LEAK");
 
-    // Another task delta rides the same streaming row.
-    ws.fireMessage({
-      type: "taskActivity",
-      taskId: "task-1",
-      activity: { kind: "text", content: " chunk two" },
-    });
+    // Another delta rides the same streaming row.
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: " chunk two" });
     await tick();
     expect(el("#message-list").textContent).toContain("chunk one chunk two");
 
-    // Turn boundary (inRun false) commits the row: no streaming class left.
-    ws.fireMessage({ type: "taskUpdate", task: task({ inRun: false }) });
+    // The attested assistant message commits the row: no streaming class left.
+    ws.fireMessage({ type: "assistantMessage", sessionId: "wsess-1", content: "chunk one chunk two" });
     await tick();
     expect(el("#message-list").querySelectorAll(".message.assistant.streaming")).toHaveLength(0);
+
+    // The turn boundary in the ticker (inRun false) is chrome only: it never
+    // repaints the transcript a second time.
+    ws.fireMessage({ type: "taskUpdate", task: task({ inRun: false }) });
+    await tick();
+    expect(el("#message-list").textContent).toContain("chunk one chunk two");
   });
 
   it("clicking the manager row switches back to the live transcript", async () => {
@@ -2019,8 +2040,9 @@ describe("subagents sidebar and main-view transcript", () => {
     // The badge is the pane's subject id: while the task transcript is on
     // screen the identity speaks for the task, not for the hidden manager.
     expect(el("#session-label").textContent).toContain("Subagent:");
-    expect(el("#current-session-id").textContent).toBe("task-1".slice(0, 8));
-    expect(el("#current-session-id").getAttribute("title")).toBe("Copy full subagent id");
+    // B4: the badge is the worker's OWN session id (its durable-log key).
+    expect(el("#current-session-id").textContent).toBe("wsess-1".slice(0, 8));
+    expect(el("#current-session-id").getAttribute("title")).toBe("Copy full session id");
     // Not dimmed: the badge is what the pane is showing (log view keeps the
     // dim, where the badge is NOT the record on screen).
     expect(el("#session-label").getAttribute("style")).toBeNull();
@@ -2034,8 +2056,8 @@ describe("subagents sidebar and main-view transcript", () => {
       clearSent();
       el("#current-session-id").click();
       await tick();
-      // The copy button copies the FULL task id (session badge idiom kept).
-      expect(copied).toEqual(["task-1"]);
+      // The copy button copies the FULL worker session id (badge idiom kept).
+      expect(copied).toEqual(["wsess-1"]);
       expect(ws.sent).toHaveLength(0); // copy stays inert on the wire
     } finally {
       if (prevNav) Object.defineProperty(globalThis, "navigator", prevNav);
@@ -2052,24 +2074,20 @@ describe("subagents sidebar and main-view transcript", () => {
     expect(el("#model-select").hasAttribute("disabled")).toBe(false);
   });
 
-  it("the selects lock refuses the comboboxes open and selection (a lock landing mid-open closes the popup)", async () => {
-    // The selects-locked posture (owner ruling 2026-11-13) now rides combobox
-    // trigger buttons. A popup open when the lock lands closes with it -- the
-    // pane that may not switch never keeps a live switcher -- and the wire
-    // stays clean throughout.
+  it("the selects vanish entering the worker view (a popup open when the mode lands goes with them)", async () => {
+    // B4 (N2): the switchers are refused for a worker row, so they are
+    // absent in the view -- a popup open when the mode lands unmounts with
+    // its trigger, and the wire stays clean throughout.
     clearSent();
     el("#profile-select").click();
     await tick();
     expect(comboOpen()).not.toBeNull();
-    await openSubagent(); // the row click locks the controls
+    await openSubagent(); // the row click enters the worker view
     expect(comboOpen()).toBeNull();
-    const trigger = el("#profile-select");
-    expect(trigger.hasAttribute("disabled")).toBe(true);
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    // Refused open: mouse and keyboard. (The harness no-ops click() on a
-    // disabled control like a real browser; the handler re-checks anyway.)
-    trigger.click();
-    key(trigger, "ArrowDown");
+    expect(document.querySelector("#profile-select")).toBeNull();
+    expect(document.querySelector("#model-select")).toBeNull();
+    // Keyboard lands nowhere: nothing to expand, nothing to send.
+    key(document.body, "ArrowDown");
     await tick();
     expect(comboOpen()).toBeNull();
     expect(sent("switchProfile")).toHaveLength(0);
@@ -2077,6 +2095,7 @@ describe("subagents sidebar and main-view transcript", () => {
     el("#close-subagent-view-btn").click();
     await attach();
     expect(el("#profile-select").hasAttribute("disabled")).toBe(false);
+    expect(el("#model-select").hasAttribute("disabled")).toBe(false);
   });
 
   it("the composer steers the viewed subagent (taskFollowup frame addressed to the task)", async () => {
@@ -2094,8 +2113,13 @@ describe("subagents sidebar and main-view transcript", () => {
     // Nothing rides the manager's send frame; the working flip is the
     // manager's own state and steering never forges it.
     expect(sent("send")).toHaveLength(0);
-    // The steering row shows up in the viewed transcript right away.
-    expect(el("#message-list").querySelector(".message.user")).toBeTruthy();
+    // B4: no optimistic echo. The steer reaches the worker's log and the
+    // drained USER_MESSAGE rides the session's live tail -- that event is
+    // the row's sole bearer, so it can never double up.
+    expect(el("#message-list").querySelector(".message.user")).toBeNull();
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "use the -la flag" });
+    await tick();
+    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
     expect(el("#message-list").textContent).toContain("use the -la flag");
     // A refusal (the requester-only taskControl reply) lands as a notice.
     ws.fireMessage({
@@ -2110,8 +2134,9 @@ describe("subagents sidebar and main-view transcript", () => {
   });
 
   it("the steering row survives the pane switch: reopening repaints it (real layout)", async () => {
-    // A task id of its own: the client transcript buffer outlives the pane,
-    // and this pin is about what a REOPEN paints.
+    // A task id of its own: reopening is a fresh attach, and the transcript
+    // is painted from the worker session's OWN replay -- no second render
+    // path, no DOM survivor.
     ws.fireMessage({ type: "taskList", tasks: [task({ taskId: "task-echo", inRun: true })] });
     await tick();
     if (document.querySelector("#close-subagent-view-btn")) {
@@ -2120,25 +2145,30 @@ describe("subagents sidebar and main-view transcript", () => {
     }
     els(".subagent-row")[0]!.click();
     await tick();
+    workerAttach();
+    await tick();
     els(".attachment-remove").forEach((b) => b.click());
     setComposer("check the fixtures first");
     await submitComposer();
-    expect(el("#message-list").querySelector(".message.user")).toBeTruthy();
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "check the fixtures first" });
+    await tick();
+    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
 
     // Leave for the manager (the re-attach clears the pane and replays the
     // manager's transcript)...
     el("#close-subagent-view-btn").click();
     await attach();
-    // ...and back. The steering row is still part of the transcript, rendered
-    // by the same MessageListManager path -- no second render path, and no
-    // row that only survived in the DOM until something cleared it. The two
-    // user-grammar rows are the seeded prompt (first, 2026-11-15 ruling) and
-    // the steer; the reopen seeds neither a second prompt nor a second echo.
+    // ...and back: the full attach paints the worker log's rows -- the
+    // delegated prompt and the drained steer -- exactly once each.
     els(".subagent-row")[0]!.click();
+    await tick();
+    workerAttach();
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "task task-echo" });
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "check the fixtures first" });
     await tick();
     const rows = el("#message-list").querySelectorAll(".message.user");
     expect(rows).toHaveLength(2);
-    expect(rows[0]!.textContent).toContain("do the thing");
+    expect(rows[0]!.textContent).toContain("task task-echo");
     expect(rows[1]!.textContent).toContain("check the fixtures first");
     expect(els(".subagent-row")[0]!.getAttribute("data-task-id")).toBe("task-echo");
   });
@@ -2153,6 +2183,11 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
     els(".subagent-row")[0]!.click(); // the one and only row: task-1
     await tick();
+    workerAttach();
+    // The worker attach answers `working` with the task's inRun (B3 source);
+    // here the turn is open, so the burst carries the true.
+    ws.fireMessage({ type: "sessionState", sessionId: "wsess-1", key: "working", value: true });
+    await tick();
     const stop = el("#composer-actions #cancel-btn");
     expect(stop.textContent).toContain("Stop");
     expect(stop.querySelector(".spinner")).toBeTruthy();
@@ -2164,8 +2199,9 @@ describe("subagents sidebar and main-view transcript", () => {
     ]);
     // ...and the manager's cancel frame is never sent.
     expect(sent("cancel")).toHaveLength(0);
-    // The task's own turn boundary retires the button (server truth; the
-    // click never flips a working flag optimistically).
+    // The worker session's own turn boundary retires the button (server
+    // truth; the click never flips a working flag optimistically).
+    ws.fireMessage({ type: "sessionState", sessionId: "wsess-1", key: "working", value: false });
     ws.fireMessage({ type: "taskUpdate", task: task({ inRun: false, status: "cancelled" }) });
     await tick();
     expect(document.querySelector("#cancel-btn")).toBeNull();
@@ -2183,6 +2219,9 @@ describe("subagents sidebar and main-view transcript", () => {
     ws.fireMessage({ type: "taskList", tasks: [task({ inRun: true })] });
     await tick();
     els(".subagent-row")[0]!.click(); // the one and only row: task-1
+    await tick();
+    workerAttach();
+    ws.fireMessage({ type: "sessionState", sessionId: "wsess-1", key: "working", value: true });
     await tick();
     el("#composer-actions #cancel-btn").click();
     ws.fireMessage({
@@ -2206,10 +2245,16 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
     els(".subagent-row")[0]!.click(); // the one and only row: task-1
     await tick();
+    // Parked task: the attach burst carries working=false (inRun source),
+    // so there is nothing to stop.
+    workerAttach();
+    await tick();
     expect(document.querySelector("#cancel-btn")).toBeNull();
     expect(el("#chat-input").hasAttribute("disabled")).toBe(false);
-    // The task opens a turn: the Stop returns on the TASK's word alone.
+    // The task opens a turn: the worker session's own working flip returns
+    // the Stop (the server derives it from the task's inRun).
     ws.fireMessage({ type: "taskUpdate", task: task({ inRun: true }) });
+    ws.fireMessage({ type: "sessionState", sessionId: "wsess-1", key: "working", value: true });
     await tick();
     expect(el("#composer-actions #cancel-btn").textContent).toContain("Stop");
     // Leave the view: the manager's own working flag drives the composer again.
@@ -2231,7 +2276,7 @@ describe("subagents sidebar and main-view transcript", () => {
       el("#close-subagent-view-btn").click();
       await attach();
     }
-    ws.fireMessage({ type: "taskList", tasks: [task(), task({ taskId: "task-2" })] });
+    ws.fireMessage({ type: "taskList", tasks: [task(), task({ taskId: "task-2", agentSessionId: "wsess-2" })] });
     await tick();
     const menuItems = () => els(".context-menu-item").map((b) => b.textContent);
     const rows = els(".subagent-row");
@@ -2240,7 +2285,7 @@ describe("subagents sidebar and main-view transcript", () => {
     // Right-click: the task-honest action set (live task -> Cancel rides).
     rows[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
+    expect(menuItems()).toEqual(["Open", "Copy task id", "Export", "Cancel"]);
     key(el(".context-menu"), "Escape");
     await tick();
     expect(document.querySelector(".context-menu")).toBeNull();
@@ -2252,7 +2297,7 @@ describe("subagents sidebar and main-view transcript", () => {
     expect(kebab.getAttribute("aria-label")).toBe("Subagent actions");
     kebab.click();
     await tick();
-    expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
+    expect(menuItems()).toEqual(["Open", "Copy task id", "Export", "Cancel"]);
     expect(document.querySelector("#subagent-view-label")).toBeNull();
     key(el(".context-menu"), "Escape");
     await tick();
@@ -2260,14 +2305,17 @@ describe("subagents sidebar and main-view transcript", () => {
     // Keyboard twin on the row itself.
     key(rows[1]!, "ContextMenu");
     await tick();
-    expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
-    // "Open" is the row-click action, aimed at the menu's task.
+    expect(menuItems()).toEqual(["Open", "Copy task id", "Export", "Cancel"]);
+    // "Open" is the row-click action, aimed at the menu's task: B4 opens the
+    // worker's OWN session (task-2 rides its own worker row).
     clearSent();
     menuItems(); // no-op read keeps the ordering explicit
     els(".context-menu-item").find((b) => b.textContent === "Open")!.click();
     await tick();
-    expect(el("#current-subagent-label").getAttribute("title")).toBe("task-2");
-    expect(sent<{ taskId: string }>("taskActivityRequest")[0]?.taskId).toBe("task-2");
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe("wsess-2");
+    workerAttach("wsess-2");
+    await tick();
+    expect(el("#current-subagent-label").getAttribute("title")).toBe("wsess-2");
 
     // Cancel is confirm-gated and refuses stay silent on the wire.
     rows[0]!.dispatchEvent(new Event("contextmenu"));
@@ -2308,7 +2356,7 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
     els(".subagent-row")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    expect(menuItems()).toEqual(["Open", "Copy task id"]);
+    expect(menuItems()).toEqual(["Open", "Copy task id", "Export"]);
     key(el(".context-menu"), "Escape");
     await tick();
     ws.fireMessage({ type: "taskList", tasks: [] });
@@ -2354,6 +2402,8 @@ describe("subagents sidebar and main-view transcript", () => {
           inRun: false,
           startedAt: null,
           runDir: "/rootA/runs/run-b",
+          // Queued engine task with the agent not built yet: no worker row.
+          agentSessionId: undefined,
         }),
         task({ taskId: "task-plain" }),
       ],
@@ -2415,15 +2465,15 @@ describe("subagents sidebar and main-view transcript", () => {
       expect(menuItems()).toEqual(["Open", "Copy task id", "Copy log file path", "Export"]);
       await dismiss();
 
-      // Queued engine task (agent never built -> no log): Reveal rides, the
-      // log items do NOT (absent, never dead), Cancel does.
+      // Queued engine task (agent never built -> no worker row at all): the
+      // log items AND B4's Open are absent (never dead), Reveal and Cancel ride.
       await openMenu("run-b:juge#1");
-      expect(menuItems()).toEqual(["Open", "Copy task id", "Reveal run directory", "Cancel"]);
+      expect(menuItems()).toEqual(["Copy task id", "Reveal run directory", "Cancel"]);
       await dismiss();
 
       // Plain LIVE delegate task: nothing new (exactly the pre-existing menu).
       await openMenu("task-plain");
-      expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
+      expect(menuItems()).toEqual(["Open", "Copy task id", "Export", "Cancel"]);
       await dismiss();
     } finally {
       ws.fireMessage({ type: "taskList", tasks: [] });
@@ -2546,20 +2596,15 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
   });
 
-  it("the reasoning toggle sweeps the viewed subagent's transcript (doctrine: only the dropdowns lock)", async () => {
-    // The owner doctrine (2026-11-13) locks ONLY the profile/model switching
-    // dropdowns while a subagent is viewed; everything else in the header keeps
-    // working, reasoning visibility included. This is the attempt-1 open
-    // question pinned: the toggle is a per-browser VIEW setting that must stay
-    // operable while a task transcript is on screen and sweep its reasoning
-    // block (which renders into the one MessageListManager, exactly like a live
-    // session view), and never touch the wire.
+  it("the reasoning toggle sweeps the viewed subagent's transcript (doctrine: only the switchers disappear)", async () => {
+    // The owner doctrine (2026-11-13) removes ONLY the profile/model
+    // switchers while a worker session is viewed; everything else in the
+    // header keeps working, reasoning visibility included. The toggle is a
+    // per-browser VIEW setting and must sweep the transcript (which renders
+    // into the one MessageListManager, exactly like any session view), and
+    // never touch the wire.
     await openSubagent();
-    ws.fireMessage({
-      type: "taskActivity",
-      taskId: "task-1",
-      activity: { kind: "reasoning", content: "planning the next move" },
-    });
+    ws.fireMessage({ type: "thinking", sessionId: "wsess-1", content: "planning the next move" });
     await tick();
     const flags = () => els(".thinking-block").map((b) => b.classList.contains("hidden"));
     const chip = el("#thinking-toggle");
@@ -2584,8 +2629,9 @@ describe("subagents sidebar and main-view transcript", () => {
   });
 
   it("opening a subagent from log view clears the stale log label (browse mirrors stay honest)", async () => {
-    // Sidebar-batch finding 1 is FIXED in the tree and now pinned. viewSubagent
-    // already drops the chat-side viewedLogId; app.tsx's onOpenTask clears the
+    // Sidebar-batch finding 1 is FIXED in the tree and now pinned. Opening a
+    // live row (switchSession -> SESSION_VIEWED) drops the chat-side
+    // viewedLogId; app.tsx's onOpenTask clears the
     // app-side activeLogId mirror in the SAME click, so the header never carries
     // both #log-view-label and #subagent-view-label and the cold log row drops
     // its highlight (browse modes are exclusive -- owner doctrine).
@@ -2596,157 +2642,147 @@ describe("subagents sidebar and main-view transcript", () => {
     expect(el("#log-view-label")).toBeTruthy();
     expect(activeRows(".log-item")).toHaveLength(1); // the cold log row is highlighted
 
-    // The task feed keeps flowing in log view; opening a row hands the header
-    // over to the task cleanly -- no double label, no stale log highlight. A
-    // fresh id keeps the module-level activity buffer cold so the open drives a
-    // history request (prior cases in this describe already warmed "task-1").
+    // The task feed keeps flowing in log view; opening a live row hands the
+    // header over to the worker session cleanly -- no double label, no stale
+    // log highlight (openTaskRow clears the log mirror in the SAME click).
     ws.fireMessage({ type: "taskList", tasks: [task({ taskId: "task-hand" })] });
     await tick();
     clearSent();
     els(".subagent-row")[0]!.click();
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe("wsess-1");
+    workerAttach();
     await tick();
-    expect(document.querySelector("#log-view-label")).toBeNull(); // mirror cleared in-click
-    expect(el("#subagent-view-label")).toBeTruthy();              // only the task label now
-    expect(activeRows(".log-item")).toHaveLength(0);              // log row highlight gone
-    expect(sent<{ taskId: string }>("taskActivityRequest")[0]?.taskId).toBe("task-hand");
+    expect(document.querySelector("#log-view-label")).toBeNull(); // mirror cleared by the open
+    expect(el("#subagent-view-label")).toBeTruthy(); // only the subagent label now
+    expect(activeRows(".log-item")).toHaveLength(0); // log row highlight gone
 
     // Exit the browse mode for the suites that follow.
     el("#close-subagent-view-btn").click();
     await attach();
   });
 
-  // ── Settled/live cache authority (owner ruling 2026-11-15) ────────────────
-  // The symptom: an idle/finished subagent showed only its last message. The
-  // buffer a live view accumulates is the RELAY TAIL (server ring 300 items /
-  // client 200 blocks); the settled task's authority is the worker's durable
-  // log, which the server already answers with (handleTaskActivityRequest) --
-  // what was broken was the CLIENT refusing to ask again (hasFedActivity true
-  // forever) and refusing to reseed (seedTaskActivity's live-tail skip). These
-  // pins own the client half: a settled row never paints from a warm cache, a
-  // settled reply replaces wholesale, and the UNSETTLED doctrine stays
-  // byte-identical (a warm live buffer still wins and still asks for nothing).
+  // ── Settled/live transcript authority (B4: the session surface IS the pane) ──
+  // The relay's activity buffer is gone: a LIVE worker pane holds exactly the
+  // session events it received, and a SETTLED row's authority is the worker's
+  // durable log through the standard viewLog machinery. The client half pinned
+  // here: the settle flip is chrome-only (zero traffic, zero repaint), a
+  // settled reopen asks the log ONCE and the fold replaces wholesale.
 
-  it("a live-tail buffer + the settle flip re-reads ONCE and replaces wholesale (steering row not doubled)", async () => {
+  it("the settle flip is chrome-only; a settled reopen asks the durable log once and replaces wholesale", async () => {
     const T = "task-flip";
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [task({ taskId: T })] });
     await tick();
-    // The live feed warms the buffer (what a watched worker leaves behind).
-    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "the ring tail " } });
+    els(".subagent-row")[0]!.click();
     await tick();
-    clearSent();
-    els(".subagent-row")[0]!.click(); // the one row, running
+    workerAttach();
+    ws.fireMessage({ type: "assistantMessage", sessionId: "wsess-1", content: "the streamed tail" });
     await tick();
-    // UNSETTLED + warm buffer: the live doctrine, byte-identical -- no request.
-    expect(sent("taskActivityRequest")).toHaveLength(0);
-    expect(el("#message-list").textContent).toContain("the ring tail");
-
     els(".attachment-remove").forEach((b) => b.click());
     setComposer("use the -la flag");
-    await submitComposer(); // the client's optimistic steering echo
+    await submitComposer();
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "use the -la flag" });
+    await tick();
 
     clearSent();
     ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
     await tick();
-    // The flip is the invalidation edge: exactly ONE request for the settled
-    // transcript (and the pane is NOT emptied on the flip -- it keeps its
-    // bytes until the authoritative ones land).
-    expect(sent<{ taskId: string }>("taskActivityRequest").map((m) => m.taskId)).toEqual([T]);
-    expect(el("#message-list").textContent).toContain("the ring tail");
-
-    // The durable fold: the head the ring had already dropped, the human lane,
-    // and the final answer.
-    ws.fireMessage({
-      type: "taskActivityHistory",
-      taskId: T,
-      activity: [
-        { kind: "reasoning", content: "the very first thought of the run" },
-        { kind: "text", content: "opening the workspace" },
-        { kind: "user", content: "use the -la flag" },
-        { kind: "text", content: "FINAL ANSWER" },
-      ],
-    });
-    await tick();
-    const pane = el("#message-list");
-    expect(pane.textContent).toContain("the very first thought of the run");
-    expect(pane.textContent).toContain("FINAL ANSWER");
-    // REPLACED, not appended: the stale tail is gone...
-    expect(pane.textContent).not.toContain("the ring tail");
-    // ...and the steering row exists exactly once (the log's user lane IS the
-    // echo's carrier; re-appending the local echo would double it).
-    expect(pane.querySelectorAll(".message.user")).toHaveLength(1);
-
-    // Double flip (a second terminal frame for the same id) requests nothing
-    // more: the ledger already counts the row settled, so the reply is
-    // idempotent-by-request too, and the replace rule keeps the buffer honest.
-    clearSent();
+    // Chrome-only: no log/history traffic on the flip; the pane keeps its bytes.
+    expect(sent("viewLog")).toHaveLength(0);
+    expect(sent("switchSession")).toHaveLength(0);
+    expect(el("#message-list").textContent).toContain("the streamed tail");
+    // A double flip requests nothing more (nothing ever requested).
     ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
     await tick();
-    expect(sent("taskActivityRequest")).toHaveLength(0);
+    expect(sent("viewLog")).toHaveLength(0);
 
-    el("#close-subagent-view-btn").click();
-    await attach();
-    ws.fireMessage({ type: "taskList", tasks: [] });
-    await tick();
-  });
-
-  it("reopening a SETTLED row refetches with a warm cache; a live reopen still asks for nothing", async () => {
-    const S = "task-settle-reopen";
-    const L = "task-live-reopen";
-    await attach();
-    // Both buffers warm (the client watched both speak).
-    ws.fireMessage({ type: "taskActivity", taskId: S, activity: { kind: "text", content: "settled tail" } });
-    ws.fireMessage({ type: "taskActivity", taskId: L, activity: { kind: "text", content: "live tail" } });
-    ws.fireMessage({
-      type: "taskList",
-      tasks: [
-        task({ taskId: L }),
-        task({ taskId: S, status: "completed", inRun: false, endedAt: Date.now() }),
-      ],
-    });
-    await tick();
-    clearSent();
-
-    // The settled row (live-first sort: L is row 0, S row 1): warm cache, and
-    // the cache does NOT win.
-    els(".subagent-row")[1]!.click();
-    await tick();
-    expect(sent<{ taskId: string }>("taskActivityRequest").map((m) => m.taskId)).toEqual([S]);
-    // The stale cache paints while the authoritative reply is in flight...
-    expect(el("#message-list").textContent).toContain("settled tail");
-    ws.fireMessage({
-      type: "taskActivityHistory",
-      taskId: S,
-      activity: [{ kind: "text", content: "THE WHOLE CONVERSATION" }],
-    });
-    await tick();
-    expect(el("#message-list").textContent).toContain("THE WHOLE CONVERSATION");
-    expect(el("#message-list").textContent).not.toContain("settled tail");
-
-    // Reopen after navigating away: still refetches (the fresh reply is
-    // identical bytes, so the replace is idempotent -- no doubled rows).
-    els(".session-item")[0]!.click();
-    await attach();
-    clearSent();
-    els(".subagent-row")[1]!.click();
-    await tick();
-    expect(sent<{ taskId: string }>("taskActivityRequest").map((m) => m.taskId)).toEqual([S]);
-    ws.fireMessage({
-      type: "taskActivityHistory",
-      taskId: S,
-      activity: [{ kind: "text", content: "THE WHOLE CONVERSATION" }],
-    });
-    await tick();
-    expect(el("#message-list").textContent).toContain("THE WHOLE CONVERSATION");
-
-    // The live row: the byte-identical doctrine -- warm buffer wins, nothing
-    // on the wire (the same reopen that used to skip still skips).
+    // Settled NOW: leaving and re-clicking routes to the durable log (once),
+    // and the fold REPLACES the pane wholesale -- the steer row exists exactly
+    // once, because the log's user lane is its only carrier.
     els(".session-item")[0]!.click();
     await attach();
     clearSent();
     els(".subagent-row")[0]!.click();
     await tick();
-    expect(sent("taskActivityRequest")).toHaveLength(0);
+    expect(sent<{ logId: string }>("viewLog").map((m) => m.logId)).toEqual(["wsess-1"]);
+    expect(sent("switchSession")).toHaveLength(0);
+    ws.fireMessage({
+      type: "logViewed",
+      logId: "wsess-1",
+      entries: [
+        { source: "prompt", content: "the delegated prompt" },
+        { source: "llm", content: "the whole conversation" },
+        { source: "prompt", content: "use the -la flag" },
+        { source: "llm", content: "FINAL ANSWER" },
+      ],
+    });
+    await tick();
+    const pane = el("#message-list");
+    expect(pane.textContent).toContain("FINAL ANSWER");
+    expect(pane.textContent).not.toContain("the streamed tail");
+    expect(pane.querySelectorAll(".message.user")).toHaveLength(2); // prompt + steer, once each
+
+    el("#close-log-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("reopening a SETTLED row goes through the durable log; a live reopen is a plain attach", async () => {
+    const S = "task-settle-reopen";
+    const L = "task-live-reopen";
+    await attach();
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [
+        task({ taskId: L, agentSessionId: "wsess-live" }),
+        task({ taskId: S, agentSessionId: "wsess-settled", status: "completed", inRun: false, endedAt: Date.now() }),
+      ],
+    });
+    await tick();
+    clearSent();
+
+    // The settled row (live-first sort: L is row 0, S row 1): the durable
+    // log route, whatever this client watched before.
+    els(".subagent-row")[1]!.click();
+    await tick();
+    expect(sent<{ logId: string }>("viewLog").map((m) => m.logId)).toEqual(["wsess-settled"]);
+    ws.fireMessage({
+      type: "logViewed",
+      logId: "wsess-settled",
+      entries: [{ source: "llm", content: "THE WHOLE CONVERSATION" }],
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain("THE WHOLE CONVERSATION");
+
+    // Reopen after navigating away: refetches again (the log is the authority,
+    // not any client-side cache; identical bytes make the replace idempotent).
+    els(".session-item")[0]!.click();
+    await attach();
+    clearSent();
+    els(".subagent-row")[1]!.click();
+    await tick();
+    expect(sent("viewLog")).toHaveLength(1);
+    ws.fireMessage({
+      type: "logViewed",
+      logId: "wsess-settled",
+      entries: [{ source: "llm", content: "THE WHOLE CONVERSATION" }],
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain("THE WHOLE CONVERSATION");
+
+    // The live row: the STANDARD attach (the server replays on its own);
+    // no log request, and the streamed bytes land in the pane.
+    els(".session-item")[0]!.click();
+    await attach();
+    clearSent();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    expect(sent("viewLog")).toHaveLength(0);
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe("wsess-live");
+    workerAttach("wsess-live");
+    ws.fireMessage({ type: "assistantMessage", sessionId: "wsess-live", content: "live tail" });
+    await tick();
     expect(el("#message-list").textContent).toContain("live tail");
 
     el("#close-subagent-view-btn").click();
@@ -2755,13 +2791,12 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
   });
 
-  it("an empty settled reply never paints over the bytes this client holds", async () => {
-    // The server's degradation rule (missing/garbage/fold-to-nothing log keeps
-    // the buffer's honest bytes) can also land as [] when the buffer is empty
-    // server-side; either way the client must not blank a pane that has bytes.
+  it("an empty settled log paints the pane honestly (no cache authority to hide behind)", async () => {
+    // The relay's warm-buffer degradation rule retired with the relay: for a
+    // settled worker the durable log IS the whole truth, so an empty record
+    // paints empty instead of keeping bytes no log can vouch for.
     const T = "task-settle-empty";
     await attach();
-    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "the only bytes we have" } });
     ws.fireMessage({
       type: "taskList",
       tasks: [task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() })],
@@ -2770,24 +2805,23 @@ describe("subagents sidebar and main-view transcript", () => {
     clearSent();
     els(".subagent-row")[0]!.click();
     await tick();
-    expect(sent<{ taskId: string }>("taskActivityRequest")).toHaveLength(1);
-    ws.fireMessage({ type: "taskActivityHistory", taskId: T, activity: [] });
+    expect(sent("viewLog")).toHaveLength(1);
+    ws.fireMessage({ type: "logViewed", logId: "wsess-1", entries: [] });
     await tick();
-    expect(el("#message-list").textContent).toContain("the only bytes we have");
-    el("#close-subagent-view-btn").click();
+    expect(el("#message-list").textContent).toBe("");
+    el("#close-log-view-btn").click();
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [] });
     await tick();
   });
 
-  it("the settled replace is UNCAPPED: 205 folded items keep their head (the live cap would re-cut it)", async () => {
-    // MAX_ACTIVITY_BLOCKS=200 bounds an unbounded LIVE stream. Applying it to
-    // the durable fold would re-cut the head of the very transcript this
-    // request fetches (the real run-2155 worker folds 402 items), so the
-    // replace path writes the whole buffer.
+  it("the settled fold renders UNCAPPED: 205 log entries keep their head", async () => {
+    // The relay's live cap (MAX_ACTIVITY_BLOCKS) retired with the relay; the
+    // durable fold writes the WHOLE log through the standard render pipeline,
+    // so the head of a long transcript survives (the real run-2155 worker
+    // folds 402 records).
     const T = "task-settle-uncapped";
     await attach();
-    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "stale tail" } });
     ws.fireMessage({
       type: "taskList",
       tasks: [task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() })],
@@ -2797,56 +2831,70 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
     const head = "THE HEAD OF A VERY LONG TRANSCRIPT";
     ws.fireMessage({
-      type: "taskActivityHistory",
-      taskId: T,
-      activity: [
-        { kind: "text", content: head },
-        ...Array.from({ length: 204 }, (_, i) => ({ kind: "tool_call", name: `t${i}`, args: "" })),
+      type: "logViewed",
+      logId: "wsess-1",
+      entries: [
+        { source: "llm", content: head },
+        ...Array.from({ length: 204 }, (_, i) => ({
+          source: "llm",
+          content: "",
+          tool_calls: [{ id: `t${i}`, name: `t${i}`, args: {} }],
+        })),
       ],
     });
     await tick();
     const pane = el("#message-list");
     expect(pane.textContent).toContain(head);
-    expect(pane.textContent).not.toContain("stale tail");
-    el("#close-subagent-view-btn").click();
+    el("#close-log-view-btn").click();
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [] });
     await tick();
   });
 
   it("a live usage attestation finalizes the viewed subagent's rows with the footer", async () => {
-    // The relay forwards TOKEN_USAGE as the additive `usage` item; the pane
-    // folds it exactly like the session lane: held for the next commit, no
-    // lane of its own, gauge + call time on the footer it feeds.
+    // B4: the worker pane IS the session view, so the session lane's usage
+    // footer machinery applies verbatim: held for the next commit, no lane of
+    // its own, gauge + call time on the footer it feeds.
     const T = "task-live-footer";
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [task({ taskId: T })] });
     await tick();
     els(".subagent-row")[0]!.click();
     await tick();
-    const feed = (activity: Record<string, unknown>) =>
-      ws.fireMessage({ type: "taskActivity", taskId: T, activity });
+    workerAttach();
+    const usage = () =>
+      ws.fireMessage({
+        type: "tokenUsage",
+        sessionId: "wsess-1",
+        ctxUsed: 62000,
+        ctxTotal: 262000,
+        promptTokens: 50000,
+        completionTokens: 12000,
+        cachedTokens: 0,
+        durationMs: 13000,
+      });
 
-    feed({ kind: "text", content: "thinking out loud" });
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: "thinking out loud" });
     await tick();
-    feed({ kind: "usage", ctx: { used: 62000, total: 262000 }, callMs: 13000 });
+    usage();
     await tick();
-    // Held, not a lane: no footer yet, no bubble for the attestation.
+    // Held, not a lane: no footer yet, no gauge text on its own.
     expect(el("#message-list").querySelectorAll(".message-assistant-footer")).toHaveLength(0);
     expect(el("#message-list").textContent).not.toContain("62k");
 
     // The tool-call boundary commits the row with the held numbers.
-    feed({ kind: "tool_call", name: "bash", args: "" });
+    ws.fireMessage({ type: "toolCall", sessionId: "wsess-1", name: "bash", args: "", toolCallId: "t1" });
     await tick();
     const footer = el("#message-list").querySelector(".message-assistant-footer");
     expect(footer).toBeTruthy();
     expect(footer!.querySelector(".footer-ctx")!.textContent).toBe("62k/262k");
     expect(footer!.querySelector(".footer-call")!.textContent).toBe("13s");
 
-    // The final text row: the turn flip stamps it and the buffer's last LIVE
-    // usage attestation rides the footer (the task pane's turn hold).
-    feed({ kind: "text", content: "final words" });
+    // The final text row: the turn boundary (the worker session's
+    // working=false edge) stamps it with the turn's last attested numbers.
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: "final words" });
     await tick();
+    ws.fireMessage({ type: "sessionState", sessionId: "wsess-1", key: "working", value: false });
     ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
     await tick();
     const footers = el("#message-list").querySelectorAll(".message-assistant-footer");
@@ -2860,12 +2908,14 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
   });
 
-  it("a settled replay finalizes with the LOG-stamped footer: 9:55 PM 62k/262k 13s Worked for 7m 37s", async () => {
-    // The fold's usage item carries the session-view numbers (same
-    // primitives); the settled replace commits the row at the item with the
-    // log's clock -- the owner's example footer, byte for byte.
+  it("a settled fold finalizes with the LOG-stamped footer: 9:55 PM 62k/262k 13s Worked for 7m 37s", async () => {
+    // The settled pane is the worker log's cold render: the token_usage
+    // record at the message's position feeds the gauge, the log's own clock
+    // stamps the time -- the owner's example footer, byte for byte.
     const T = "task-settled-footer";
-    const ts = new Date(2026, 10, 15, 21, 55, 0, 0).getTime(); // local 9:55 PM
+    const t0 = new Date(2026, 10, 15, 21, 47, 23, 0).getTime(); // turn open
+    const t1 = new Date(2026, 10, 15, 21, 55, 0, 0).getTime(); //  local 9:55 PM
+    const iso = (ms: number): string => new Date(ms).toISOString();
     await attach();
     ws.fireMessage({
       type: "taskList",
@@ -2875,17 +2925,24 @@ describe("subagents sidebar and main-view transcript", () => {
     els(".subagent-row")[0]!.click();
     await tick();
     ws.fireMessage({
-      type: "taskActivityHistory",
-      taskId: T,
-      activity: [
-        { kind: "text", content: "FINAL ANSWER" },
+      type: "logViewed",
+      logId: "wsess-1",
+      entries: [
+        { source: "prompt", content: "audit the fixtures", ts: iso(t0) },
+        { source: "turn_started", content: "", ts: iso(t0) },
+        { source: "llm", content: "FINAL ANSWER", ts: iso(t1) },
         {
-          kind: "usage",
-          ts,
-          ctx: { used: 62000, total: 262000 },
-          callMs: 13000,
-          durationMs: 457000,
+          source: "token_usage",
+          content: "",
+          ts: iso(t1),
+          totalTokens: 62000,
+          contextWindow: 262000,
+          promptTokens: 50000,
+          completionTokens: 12000,
+          cachedTokens: 0,
+          durationMs: 13000,
         },
+        { source: "turn_end", content: "", ts: iso(t1) },
       ],
     });
     await tick();
@@ -2896,91 +2953,91 @@ describe("subagents sidebar and main-view transcript", () => {
     expect(footers[0]!.querySelector(".footer-call")!.textContent).toBe("13s");
     expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 7m 37s");
 
-    el("#close-subagent-view-btn").click();
+    el("#close-log-view-btn").click();
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [] });
     await tick();
   });
 
-  it("the delegated prompt opens the transcript exactly once: seed, settle-flip replace, re-view", async () => {
+
+  it("the delegated prompt lands exactly once across live replay, settle, and re-view", async () => {
     const T = "task-prompt-once";
-    const fold = [
-      { kind: "user", content: "audit the fixtures (the full log prompt)" },
-      { kind: "text", content: "the whole conversation" },
-    ];
     await attach();
     ws.fireMessage({
       type: "taskList",
-      tasks: [task({ taskId: T, description: "audit the fixtures", status: "queued", inRun: false })],
+      tasks: [task({ taskId: T, description: "audit the fixtures" })],
     });
     await tick();
     els(".subagent-row")[0]!.click();
     await tick();
-    // Queued task: the prompt ALONE (the live relay has carried nothing).
+    // The attach replay carries the delegated prompt -- ONCE.
+    workerAttach();
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "audit the fixtures (the full log prompt)" });
+    await tick();
     let rows = el("#message-list").querySelectorAll(".message.user");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain("audit the fixtures");
+    expect(rows[0]!.textContent).toContain("the full log prompt");
     expect(el("#message-list").querySelectorAll(".message.assistant")).toHaveLength(0);
 
     // Live bytes ride behind the prompt...
-    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "ring tail" } });
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: "ring tail" });
     await tick();
     expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
 
-    // The settle flip: the fold arrives LEADING with the log's own prompt
-    // row, and the wholesale replace retires the client seed -- one row, the
-    // log's version, never both.
-    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
+    // The settle flip is chrome-only: no repaint, no re-seed.
+    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, description: "audit the fixtures", status: "completed", inRun: false, endedAt: Date.now() }) });
     await tick();
-    ws.fireMessage({ type: "taskActivityHistory", taskId: T, activity: fold });
-    await tick();
-    rows = el("#message-list").querySelectorAll(".message.user");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain("the full log prompt");
-    expect(el("#message-list").textContent).not.toContain("ring tail");
+    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
 
-    // Re-view: the settled row refetches (warm cache never wins) and the
-    // placeholder paint + reply both carry the fold's single prompt row; no
-    // client seed stacks on top of it.
+    // Re-view as a settled row: the fold leads with the log's own prompt row,
+    // and the wholesale replace keeps ONE prompt row -- the log's version.
     els(".session-item")[0]!.click();
     await attach();
     els(".subagent-row")[0]!.click();
     await tick();
-    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
-    ws.fireMessage({ type: "taskActivityHistory", taskId: T, activity: fold });
+    ws.fireMessage({
+      type: "logViewed",
+      logId: "wsess-1",
+      entries: [
+        { source: "prompt", content: "audit the fixtures (the full log prompt)" },
+        { source: "llm", content: "the whole conversation" },
+      ],
+    });
     await tick();
-    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
+    rows = el("#message-list").querySelectorAll(".message.user");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("the full log prompt");
     expect(el("#message-list").textContent).toContain("the whole conversation");
 
-    el("#close-subagent-view-btn").click();
+    el("#close-log-view-btn").click();
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [] });
     await tick();
   });
 
-  it("the streamReset sentinel still retracts alongside the new kinds (prompt and tool blocks survive the trim)", async () => {
+  it("the streamReset sentinel retracts the dead attempt (prompt and tool blocks survive the trim)", async () => {
     const T = "task-reset-kinds";
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [task({ taskId: T })] });
     await tick();
     els(".subagent-row")[0]!.click();
     await tick();
-    const feed = (activity: Record<string, unknown>) =>
-      ws.fireMessage({ type: "taskActivity", taskId: T, activity });
-
-    feed({ kind: "text", content: "kept prose" });
-    feed({ kind: "tool_call", name: "bash", args: "" });
-    feed({ kind: "usage", ctx: { used: 1000 }, callMs: 400 });
-    feed({ kind: "text", content: "dead attempt prose" });
+    workerAttach();
+    ws.fireMessage({ type: "userMessage", sessionId: "wsess-1", content: "the delegated prompt" });
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: "kept prose" });
+    ws.fireMessage({ type: "toolCall", sessionId: "wsess-1", name: "bash", args: "", toolCallId: "t1" });
+    ws.fireMessage({ type: "toolResult", sessionId: "wsess-1", name: "bash", output: "ok", toolCallId: "t1" });
     await tick();
-    feed({ kind: "reset" });
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: "dead attempt prose" });
     await tick();
-    // The dead attempt's streamed row is gone from the pane; the tool block
-    // and the seeded prompt stand.
+    ws.fireMessage({ type: "streamReset", sessionId: "wsess-1" });
+    await tick();
+    // The dead attempt's streamed row is gone from the pane; the committed
+    // prose, the tool block, and the replayed prompt stand.
     expect(el("#message-list").textContent).not.toContain("dead attempt");
     expect(el("#message-list").textContent).toContain("kept prose");
-    expect(el("#message-list").textContent).toContain("do the thing");
-    feed({ kind: "text", content: "retry text" });
+    expect(el("#message-list").textContent).toContain("the delegated prompt");
+    ws.fireMessage({ type: "streamingChunk", sessionId: "wsess-1", content: "retry text" });
     await tick();
     expect(el("#message-list").textContent).toContain("retry text");
 
@@ -3030,7 +3087,7 @@ describe("subagents sidebar and main-view transcript", () => {
     coldRows[0]!.click();
     await tick();
     expect(sent<{ logId: string }>("viewLog")[0]?.logId).toBe("worker-log-1");
-    expect(sent("taskActivityRequest")).toHaveLength(0);
+    expect(sent("switchSession")).toHaveLength(0);
     ws.fireMessage({ type: "logsListed", logs: [logRow] });
     await tick();
   });
@@ -7643,6 +7700,503 @@ describe("workbench editor (real app wiring)", () => {
     expect(el(".editor-goto-btn").textContent).toBe("50:1");
     // The viewport itself carries the jump: row 50 bottom-aligned (50*20+20-400).
     expect(viewport.scrollTop).toBe(600);
+  });
+
+  // ── find & replace (widget wiring; the finder itself: editor-find.test.ts)
+  // House-idiom pins: Ctrl+F opens (the strip's fields take focus, the
+  // buffer keeps ZERO keystrokes), the current match rides the buffer's own
+  // selection layer, replaces are ONE undo step with the dirty flag
+  // re-derived, and the strip state is per PATH (per editor session).
+
+  const FIND_PATH = "/rootA/wfind.txt";
+  const FIND2_PATH = "/rootA/wfind2.txt";
+  const FIND3_PATH = "/rootA/wfind3.txt";
+  const FIND4_PATH = "/rootA/wfind4.txt";
+  const FIND5_PATH = "/rootA/wfind5.txt";
+  const FIND6_PATH = "/rootA/wfind6.txt";
+  const FIND7_PATH = "/rootA/wfind7.txt";
+
+  /** Write into a strip field and fire the input event (the box owns its
+   *  caret; the DOM drives the mirror). */
+  async function findType(sel: string, text: string): Promise<void> {
+    const box = el(sel) as unknown as HTMLElement & { value: string };
+    box.value = text;
+    box.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+  }
+  const fieldKey = (sel: string, k: string, mods: Record<string, unknown> = {}): void => {
+    el(sel).dispatchEvent({ type: "keydown", key: k, ...mods } as unknown as Event);
+  };
+  const findCount = (): string => el(".editor-find-count").textContent ?? "";
+  const allText = (): string =>
+    els(".editor-code")
+      .map((c) => (c.textContent ?? "").replace(/\u00a0/g, ""))
+      .join("\n");
+
+  it("ctrl+F opens the strip focused; typing selects matches, counts, and Enter/Shift+Enter walk with wrap", async () => {
+    await openFile(FIND_PATH);
+    await loadComplete(FIND_PATH, "one two one\nthree one\n");
+    expect(key("f", { ctrlKey: true })).toBe(false); // preventDefault: native find refused
+    await tick();
+    expect(el(".editor-find")).toBeTruthy();
+    // FOCUS: the query field owns the keyboard, NOT the capture textarea.
+    expect(document.activeElement).toBe(el(".editor-find-query") as unknown as Element);
+    await findType(".editor-find-query", "one");
+    expect(findCount()).toBe("1 of 3");
+    // The current match is a buffer SELECTION: the theme's own sel layer.
+    expect(els(".editor-sel").length).toBe(1);
+    fieldKey(".editor-find-query", "Enter");
+    await tick();
+    expect(findCount()).toBe("2 of 3");
+    el(".editor-find-next").click();
+    await tick();
+    expect(findCount()).toBe("3 of 3");
+    el(".editor-find-next").click(); // WRAP
+    await tick();
+    expect(findCount()).toBe("1 of 3");
+    fieldKey(".editor-find-query", "Enter", { shiftKey: true }); // wrap backwards
+    await tick();
+    expect(findCount()).toBe("3 of 3");
+    // Keystrokes inside the strip NEVER reach the buffer (the editor's
+    // keydown rides the separate capture textarea -- focus guard by
+    // construction -- and the claimed chords stopPropagation on top).
+    for (const k of ["x", "Backspace", "Delete", "Tab", "ArrowDown"]) fieldKey(".editor-find-query", k);
+    fieldKey(".editor-find-query", "a", { ctrlKey: true });
+    await tick();
+    expect(allText()).toBe("one two one\nthree one");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("replace field + replace-all: ONE undo lands back on the original and dirty flips clean", async () => {
+    await openFile(FIND2_PATH);
+    await loadComplete(FIND2_PATH, "one two one\nthree one\n");
+    key("f", { ctrlKey: true });
+    await tick();
+    await findType(".editor-find-query", "one");
+    await findType(".editor-find-replace", "1");
+    // Replace-ALL: ONE transaction over every occurrence (the performTx
+    // multi-edit seam -- every staged range reverts as one undo step).
+    el(".editor-replace-all").click();
+    await tick();
+    expect(allText()).toBe("1 two 1\nthree 1");
+    expect(el(".workbench-dirty")).toBeTruthy();
+    expect(el(".file-view-status").textContent).toContain("edited");
+    key("z", { ctrlKey: true }); // ONE undo
+    await tick();
+    expect(allText()).toBe("one two one\nthree one");
+    expect(document.querySelector(".workbench-dirty")).toBeNull(); // baseline again -> clean
+    expect(el(".file-view-status").textContent).toContain("saved");
+    // Replace-ONE swaps ONLY the current match and ADVANCES to the next;
+    // it is its own undo step.
+    el(".editor-replace-one").click();
+    await tick();
+    expect(allText()).toBe("1 two one\nthree one");
+    expect(findCount()).toBe("1 of 2");
+    key("z", { ctrlKey: true });
+    await tick();
+    expect(allText()).toBe("one two one\nthree one");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("select-all occurrences -> every caret types (the existing multi-caret machine)", async () => {
+    await openFile(FIND3_PATH);
+    await loadComplete(FIND3_PATH, "x ax bx");
+    key("f", { ctrlKey: true });
+    await tick();
+    await findType(".editor-find-query", "x");
+    expect(findCount()).toBe("1 of 3");
+    el(".editor-find-select-all").click();
+    await tick();
+    // The strip yields: closed, focus back on the editor, THREE ranges.
+    expect(document.querySelector(".editor-find")).toBeNull();
+    expect(document.activeElement).toBe(el(".editor-input") as unknown as Element);
+    key("Q"); // the buffer's own multi-edit typing path
+    await tick();
+    expect(allText()).toBe("Q aQ bQ");
+    expect(el(".workbench-dirty")).toBeTruthy();
+  });
+
+  it("alt+Enter in the field selects all occurrences too; Escape keeps the match and hands focus back", async () => {
+    await openFile(FIND4_PATH);
+    await loadComplete(FIND4_PATH, "x ax bx");
+    key("f", { ctrlKey: true });
+    await tick();
+    await findType(".editor-find-query", "x");
+    fieldKey(".editor-find-query", "Enter", { altKey: true }); // alt+Enter: audited free as a chord
+    await tick();
+    expect(document.querySelector(".editor-find")).toBeNull();
+    key("Z");
+    await tick();
+    expect(allText()).toBe("Z aZ bZ");
+    // Escape path (widget open, field focused): close, FOCUS returns to the
+    // editor, the current match STAYS selected -- the next keystroke eats it.
+    key("f", { ctrlKey: true });
+    await tick();
+    await findType(".editor-find-query", "aZ"); // one match at (0,2)
+    expect(findCount()).toBe("1 of 1");
+    fieldKey(".editor-find-query", "Escape");
+    await tick();
+    expect(document.querySelector(".editor-find")).toBeNull();
+    expect(document.activeElement).toBe(el(".editor-input") as unknown as Element);
+    key("!");
+    await tick();
+    expect(allText()).toBe("Z ! bZ"); // the selection ate the keystroke: it survived the close
+  });
+
+  it("a bad regex is an honest line in the strip, never a crash; toggles re-scope", async () => {
+    await openFile(FIND5_PATH);
+    await loadComplete(FIND5_PATH, "cat Cats");
+    key("f", { ctrlKey: true });
+    await tick();
+    await findType(".editor-find-query", "cat");
+    expect(findCount()).toBe("1 of 2"); // case-insensitive by default
+    el(".editor-find-case").click(); // Match case
+    await tick();
+    expect(findCount()).toBe("1 of 1");
+    expect(el(".editor-find-case").getAttribute("aria-pressed")).toBe("true");
+    el(".editor-find-regex").click(); // regex mode
+    await findType(".editor-find-query", "(");
+    expect(el(".editor-find-error").textContent).toContain("Invalid regular expression");
+    expect(document.querySelector(".editor-find-count")).toBeNull();
+    expect(allText()).toBe("cat Cats"); // the finder cannot touch the buffer
+    // Escape from the textarea ALSO closes the strip (widget open, editor
+    // focused) WITHOUT collapsing the match selection.
+    fieldKey(".editor-find-query", "Escape");
+    await tick();
+    key("f", { ctrlKey: true });
+    await tick();
+    await findType(".editor-find-query", "Cats");
+    key("Escape"); // the TEXTAREA gets it: close the strip, keep the match
+    await tick();
+    expect(document.querySelector(".editor-find")).toBeNull();
+    key("_");
+    await tick();
+    expect(allText()).toBe("cat _");
+  });
+
+  it("strip state is PER SESSION: another tab has no strip, coming back restores it", async () => {
+    await openFile(FIND7_PATH);
+    await loadComplete(FIND7_PATH, "per session\n");
+    key("f", { ctrlKey: true });
+    await tick();
+    await findType(".editor-find-query", "session");
+    expect(findCount()).toBe("1 of 1");
+    // A SECOND tab (its own session + view): NO strip, nothing global.
+    await openFile(FIND6_PATH);
+    await loadComplete(FIND6_PATH, "sibling file\n");
+    expect(document.querySelector(".editor-find")).toBeNull();
+    // Back to the FIRST tab: the strip is open again, query intact, count
+    // re-derived against ITS buffer.
+    els("#workbench-tabs [role=tab]")[0]!.click();
+    await tick();
+    expect(el(".editor-find")).toBeTruthy();
+    expect((el(".editor-find-query") as unknown as { value: string }).value).toBe("session");
+    expect(findCount()).toBe("1 of 1");
+    expect(allText()).toBe("per session");
+  });
+
+  // ── TASK K keyboard layer (bindings live in editor.tsx; the pure geometry
+  // is pinned in editor-buffer.test.ts / editor-multicaret.test.ts). The
+  // chords: Alt+Arrow(L/R) word move, Alt+Shift+same extends, Alt+Backspace
+  // and Alt+Delete word delete, Ctrl+Shift+D duplicate line, Ctrl+/ comment
+  // toggle, Alt+Shift+Enter select-inside-quotes -- the audited table lives
+  // in keys-notes.md. Shift+Home/End ride the ALREADY-SHIPPED smart path.
+
+  const KEYS1_PATH = "/rootA/wkeys1.txt";
+  const KEYS2_PATH = "/rootA/wkeys2.txt";
+  const KEYS3_PATH = "/rootA/wkeys.ts"; // the COMMENT toggle needs a real lang
+  const KEYS4_PATH = "/rootA/wkeys.json"; // ... and an honest no-op twin
+  const KEYS5_PATH = "/rootA/wkeys5.txt";
+  const KEYS6_PATH = "/rootA/wkeys6.txt";
+  const caretPos = (): string => el(".editor-goto-btn").textContent ?? "";
+
+  it("alt+arrows walk words, alt+Shift extends, alt+Backspace deletes the word -- undo to the baseline reads CLEAN", async () => {
+    await openFile(KEYS1_PATH);
+    await loadComplete(KEYS1_PATH, "alpha beta gamma\n");
+    expect(caretPos()).toBe("1:1");
+    expect(key("ArrowRight", { altKey: true })).toBe(false); // consumed
+    await tick();
+    expect(caretPos()).toBe("1:6"); // end of "alpha"
+    key("ArrowRight", { altKey: true });
+    await tick();
+    expect(caretPos()).toBe("1:11"); // the gap is CROSSED (VS Code does not stop in it)
+    key("ArrowRight", { altKey: true, shiftKey: true });
+    await tick();
+    expect(caretPos()).toBe("1:17"); // extends to EOL over "gamma"
+    expect(els(".editor-sel").length).toBe(1); // the theme's own selection layer
+    expect(document.querySelector(".workbench-dirty")).toBeNull(); // caret moves never dirty
+    key("Backspace", { altKey: true }); // the selection goes first (plain-delete doctrine)
+    await tick();
+    expect(allText()).toBe("alpha beta"); // "gamma" ate (the rendered gap space is inert)
+    expect(caretPos()).toBe("1:11"); // the caret lands where the selection began
+    key("z", { ctrlKey: true }); // ONE undo lands back on the baseline bytes
+    await tick();
+    expect(allText()).toBe("alpha beta gamma");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    expect(el(".file-view-status").textContent).toContain("saved");
+    // alt+Delete forward from the doc start eats the word, its own step.
+    key("Home");
+    await tick();
+    key("Delete", { altKey: true });
+    await tick();
+    expect(allText()).toBe(" beta gamma");
+    key("z", { ctrlKey: true });
+    await tick();
+    expect(allText()).toBe("alpha beta gamma");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("Shift+Home / Shift+End select to the line start/end (smart-Home stops ride; already shipped, now pinned)", async () => {
+    await openFile(KEYS2_PATH);
+    await loadComplete(KEYS2_PATH, "    x = 1\n");
+    key("End");
+    await tick();
+    expect(caretPos()).toBe("1:10");
+    key("Home", { shiftKey: true });
+    await tick();
+    expect(caretPos()).toBe("1:5"); // press 1: first non-whitespace
+    expect(els(".editor-sel").length).toBe(1);
+    key("Home", { shiftKey: true });
+    await tick();
+    expect(caretPos()).toBe("1:1"); // press 2: column 0 (full-line select)
+    key("End", { shiftKey: true });
+    await tick();
+    expect(caretPos()).toBe("1:10"); // Shift+End: out to the line end
+    expect(document.querySelector(".workbench-dirty")).toBeNull(); // selections never dirty
+  });
+
+  it("Ctrl+/ toggles the file lang's line comment (ONE undo, clean); json is an honest no-op", async () => {
+    await openFile(KEYS3_PATH); // .ts -> typescript: the "//" family
+    await loadComplete(KEYS3_PATH, "foo()\nbar()\n");
+    key("ArrowDown"); // caret lands on line 2 -> that line is the block
+    await tick();
+    expect(key("/", { ctrlKey: true })).toBe(false); // consumed even where the browser has a default
+    await tick();
+    expect(allText()).toBe("foo()\n// bar()"); // the token rides AFTER the indent, one space
+    expect(el(".workbench-dirty")).toBeTruthy();
+    key("z", { ctrlKey: true }); // ONE step reverts the whole toggle
+    await tick();
+    expect(allText()).toBe("foo()\nbar()");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    expect(el(".file-view-status").textContent).toContain("saved");
+    // json has NO line comment: the honest no-op (no invented block comment).
+    await openFile(KEYS4_PATH);
+    await loadComplete(KEYS4_PATH, '{"a": 1}\n');
+    key("/", { ctrlKey: true });
+    await tick();
+    expect(allText()).toBe('{"a": 1}');
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("Ctrl+Shift+D duplicates the caret's line onto the copy; Alt+Shift+Down still ADDS carets (audited coexistence)", async () => {
+    await openFile(KEYS5_PATH);
+    await loadComplete(KEYS5_PATH, "one\ntwo\n");
+    key("ArrowDown");
+    await tick();
+    key("d", { ctrlKey: true, shiftKey: true });
+    await tick();
+    expect(allText()).toBe("one\ntwo\ntwo");
+    expect(caretPos()).toBe("3:1"); // the caret rides the COPY
+    expect(el(".workbench-dirty")).toBeTruthy();
+    key("z", { ctrlKey: true }); // ONE undo reverts the copy
+    await tick();
+    expect(allText()).toBe("one\ntwo");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    // The chord that already lived here keeps its meaning: add-caret-below.
+    key("ArrowUp", { altKey: true, shiftKey: true });
+    await tick();
+    key("!");
+    await tick();
+    expect(allText()).toBe("!one\n!two");
+  });
+
+  it("alt+Shift+Enter selects inside the quotes (escape-aware); typing replaces; unpaired is a no-op", async () => {
+    await openFile(KEYS6_PATH);
+    await loadComplete(KEYS6_PATH, 'say "hello \\"big\\" there"\nnot paired here\n');
+    el(".editor-goto-btn").click();
+    await tick();
+    await gotoType("1:12"); // mid-string, past the first escaped quote
+    key("Enter", { altKey: true, shiftKey: true });
+    await tick();
+    expect(els(".editor-sel").length).toBe(1); // the CONTENT of the pair (quotes excluded)
+    key("Q"); // the selection eats the keystroke: the pair content is replaced
+    await tick();
+    expect(allText()).toBe('say "Q"\nnot paired here');
+    // Line 2 holds no closed pair: an honest no-op -- the next keystroke
+    // INSERTS (a live selection would have replaced instead).
+    key("ArrowDown");
+    await tick();
+    key("Enter", { altKey: true, shiftKey: true });
+    await tick();
+    key("!");
+    await tick();
+    expect(allText()).toBe('say "Q"\nnot pa!ired here');
+  });
+
+  // ── HOT EXIT (real app wiring; the store units: editor-stash.test.ts) ────
+  // The stash store is app.tsx's module singleton, and its tab-instance id
+  // was minted against the persistence section's long-gone Map -- so the
+  // FIRST dirty cycle here discovers the live record key by landing a real
+  // write, and every scenario below derives from what the store itself
+  // wrote (never a guessed key).
+
+  const STASH_PATH = "/rootA/wstash.txt";
+  const STASH2_PATH = "/rootA/wstash2.txt";
+  const STASH3_PATH = "/rootA/wstash3.txt";
+  const STASH4_PATH = "/rootA/wstash4.txt";
+  const STASH5_PATH = "/rootA/wstash5.txt";
+  const stashSession = new Map<string, string>();
+  let stashKey = ""; // "hotdog.editorStash.<tab id>" after the first write lands
+  beforeAll(() => {
+    (window as unknown as Record<string, unknown>).sessionStorage = {
+      getItem: (k: string) => stashSession.get(k) ?? null,
+      setItem: (k: string, v: string) => void stashSession.set(k, String(v)),
+      removeItem: (k: string) => void stashSession.delete(k),
+    };
+  });
+  afterAll(() => {
+    delete (window as unknown as Record<string, unknown>).sessionStorage;
+  });
+  type StashEntries = Record<string, { text: string; baseMtimeMs: number; stashedAt: number }>;
+  const stashRecord = (): StashEntries =>
+    JSON.parse(stashKey === "" ? "{}" : stashSession.get(stashKey) ?? "{}") as StashEntries;
+  /** Simulate what the PREVIOUS page's leave-flush left behind. */
+  const plantStash = (rec: StashEntries): void => {
+    stashSession.set(stashKey, JSON.stringify(rec));
+  };
+  /** One dirty cycle through the leave flush (pinning the debounce: nothing
+   *  lands while the window is young) to discover the store's live key. */
+  async function discoverStashKey(): Promise<void> {
+    if (stashKey !== "") return;
+    await openFile(STASH_PATH);
+    await loadComplete(STASH_PATH, "disk one\n");
+    key("x");
+    await tick();
+    // Nothing reaches storage mid-debounce, and the leave flush lands ONE
+    // write of the final text through the joinContent serialization.
+    expect([...stashSession.keys()].filter((k) => k.startsWith(STASH_KEY_PREFIX))).toEqual([]);
+    expect(fireEditorLeave()).toBe(true); // dirty: the courtesy veto still fires
+    const keys = [...stashSession.keys()].filter((k) => k.startsWith(STASH_KEY_PREFIX) && k !== STASH_TAB_ID_KEY);
+    expect(keys).toHaveLength(1);
+    stashKey = keys[0]!;
+    expect(stashRecord()[STASH_PATH]?.text).toBe("xdisk one\n");
+  }
+
+  it("hot exit: save success clears the record; re-dirtying re-stashes on the NEW base; closing kills it", async () => {
+    await discoverStashKey();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number; path: string; content: string; baseMtimeMs: number }>("saveFile").pop()!;
+    expect(save.content).toBe("xdisk one\n");
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: STASH_PATH, mtimeMs: 2000 });
+    await tick();
+    // The clean session took the record with it (no stale stash survives a
+    // save -- the next reload opens plain disk text).
+    expect(stashRecord()[STASH_PATH]).toBeUndefined();
+    // Dirty again: the leave-flush re-stashes against the save's new base
+    // (the caret sits after "x", so "!" lands mid-word -- the exact bytes
+    // are the point, not the shape).
+    key("!");
+    await tick();
+    expect(fireEditorLeave()).toBe(true);
+    const re = stashRecord()[STASH_PATH];
+    expect(re?.text).toBe("x!disk one\n");
+    expect(re?.baseMtimeMs).toBe(2000);
+    expect(typeof re?.stashedAt).toBe("number");
+    // Closing the tab (discard confirmed, as a user would) drops the record:
+    // a closed buffer's "restore" must not resurrect work already discarded.
+    els(".workbench-tab-close")[0]!.click();
+    await tick();
+    expect(stashRecord()[STASH_PATH]).toBeUndefined();
+  });
+
+  /** The dirty dot of ONE tab (the strip keeps dots for every open tab). */
+  const tabDirty = (label: string): Element | null =>
+    els("#workbench-tabs [role=tab]")
+      .find((t) => (t.textContent ?? "").includes(label))
+      ?.querySelector(".workbench-dirty") ?? null;
+
+  it("hot exit: a same-mtime record restores dirty with an honest note; another tab's record is invisible", async () => {
+    await discoverStashKey();
+    plantStash({ [STASH2_PATH]: { text: "preserved work\n", baseMtimeMs: 1000, stashedAt: 111 } });
+    // The same path under ANOTHER browser tab's key must stay invisible.
+    stashSession.set(
+      STASH_KEY_PREFIX + "other-tab",
+      JSON.stringify({ [STASH3_PATH]: { text: "not yours\n", baseMtimeMs: 1000, stashedAt: 111 } }),
+    );
+    await openFile(STASH2_PATH);
+    await loadComplete(STASH2_PATH, "disk bytes\n", 1000);
+    // The DISK read happened (the pipeline ran), the stash overlaid it:
+    // preserved bytes, dirty derived against the disk baseline, note shown.
+    expect(allText()).toBe("preserved work");
+    expect(tabDirty("wstash2.txt")).toBeTruthy();
+    expect(el(".file-view-status").textContent).toContain("edited");
+    expect(el("#copy-toast").textContent).toContain("restored unsaved edits");
+    // Same path, another tab's stash: the plain clean disk read.
+    await openFile(STASH3_PATH);
+    await loadComplete(STASH3_PATH, "clean disk\n", 1000);
+    expect(allText()).toBe("clean disk");
+    expect(tabDirty("wstash3.txt")).toBeNull();
+    expect(el(".file-view-status").textContent).toContain("saved");
+    // Restored buffers keep their stash honest: the leave-flush re-lands the
+    // same text on the same base (a reload cycle stays stable).
+    expect(fireEditorLeave()).toBe(true);
+    const re = stashRecord()[STASH2_PATH];
+    expect(re?.text).toBe("preserved work\n");
+    expect(re?.baseMtimeMs).toBe(1000);
+  });
+
+  it("hot exit: mtime drift offers the pair -- Cancel keeps disk clean, OK opens preserved on the OLD base", async () => {
+    await discoverStashKey();
+    // Cancel's door: disk stays clean and the offer is CONSUMED (a stale
+    // re-offer on every reload is the bug this pin kills).
+    plantStash({ [STASH4_PATH]: { text: "preserved work\n", baseMtimeMs: 999, stashedAt: 111 } });
+    confirmSeen.length = 0;
+    confirmAnswer = false;
+    await openFile(STASH4_PATH);
+    await loadComplete(STASH4_PATH, "agent bytes\n", 1000);
+    expect(allText()).toBe("agent bytes"); // never auto-overlaid
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    expect(el(".file-view-status").textContent).toContain("saved");
+    expect(confirmSeen.some((m) => m.includes("preserved") && m.includes("changed on disk"))).toBe(true);
+    expect(stashRecord()[STASH4_PATH]).toBeUndefined();
+    // OK's door: the preserved text opens dirty ON THE STASH'S OLD BASE, so
+    // its first save rides the normal conflict refusal (base != disk mtime).
+    plantStash({ [STASH5_PATH]: { text: "preserved work\n", baseMtimeMs: 999, stashedAt: 111 } });
+    confirmAnswer = true;
+    await openFile(STASH5_PATH);
+    await loadComplete(STASH5_PATH, "agent bytes\n", 1000);
+    expect(allText()).toBe("preserved work");
+    expect(document.querySelector(".workbench-dirty")).toBeTruthy();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number; baseMtimeMs: number }>("saveFile").pop()!;
+    expect(save.baseMtimeMs).toBe(999); // the refusal is the save gate's existing job
+  });
+
+  it("hot exit: a quota-full write marks the foot bar ONCE and blocks nothing", async () => {
+    await discoverStashKey();
+    await openFile("/rootA/wstashq.txt");
+    await loadComplete("/rootA/wstashq.txt", "keep typing\n");
+    const realSet = stashSession.set.bind(stashSession);
+    stashSession.set = (() => {
+      throw new Error("QuotaExceeded: the tab is full");
+    }) as typeof stashSession.set;
+    try {
+      key("q");
+      await tick();
+      fireEditorLeave(); // the flush hits the wall...
+      await tick();
+      expect(el("#copy-toast").textContent).toContain("Storage full");
+      expect(el(".file-view-status").textContent).toContain("stash off");
+      // ...and NOTHING else notices: editing continues.
+      key("!");
+      await tick();
+      expect(allText()).toBe("q!keep typing");
+      expect(el(".file-view-status").textContent).toContain("stash off");
+    } finally {
+      stashSession.set = realSet;
+    }
   });
 });
 

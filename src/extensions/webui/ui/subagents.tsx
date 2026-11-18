@@ -2,14 +2,15 @@
 // Subagents sidebar section: a collapsible "Subagents" list nested directly
 // under the manager session card that delegated the tasks (Recent Logs'
 // disclosure idiom: label + chevron, aria-expanded/aria-controls). One row
-// per task agent -- status glyph, step label, elapsed clock -- clicking a row
-// opens that task's transcript in the FULL main view (chat.viewSubagent feeds
-// the transcript from the same task feed; there is no second render path).
+// per task agent -- status glyph, step label, elapsed clock, question badge
+// carrier (B2 questionPending rides taskWire) -- clicking a row opens the
+// WORKER'S OWN session view (B4: live rows attach via switchSession,
+// settled/durable rows open the durable log via viewLog -- openTargetFor
+// decides; the transcript is the standard session surface, no second path).
 //
-// App re-renders never carry task streaming: activity frames go straight from
-// chat.ts into the MessageListManager (the main transcript's imperative DOM
-// path), so the App tree repaints only when tasksAtom flips (per taskUpdate)
-// or the once-per-second elapsed tick lands.
+// App re-renders never carry task streaming: the ticker updates the rows
+// when tasksAtom flips (per taskUpdate), and the transcript streams through
+// the session view's own imperative DOM path.
 
 import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
 import { IconChevron, IconKebab, SubagentStatusGlyph } from "./icons.tsx";
@@ -100,8 +101,9 @@ interface SectionProps {
   tasks: TaskInfoWire[];
   now: number;
   collapsed: boolean;
-  /** Task whose transcript is on screen in the main view (row highlight). */
-  viewedTaskId: string | null;
+  /** The session on screen in the main view: a row highlights when its
+   *  worker session IS the pane (B4 -- the transcript is a session view). */
+  viewedSessionId: string | null;
   onToggle: () => void;
   /** Row press. The row itself rides along (additive second arg) so the app
    *  can route it through openTargetFor without a lookup. */
@@ -113,20 +115,24 @@ interface SectionProps {
 }
 
 /**
- * Where a row press lands. Live and settled-live rows open the task
- * transcript (chat.viewSubagent). A DURABLE row (restart survivor rebuilt
- * from the sidecar) has no task behind it in this process -- it opens the
- * worker's OWN durable log through the existing cold-log machinery
- * (viewLog / LOG_VIEWED). Sidecar records written before the agent join
- * carry no worker key: nothing can honestly be opened, so the row stays
- * informational (the menu still copies the id) -- never a dead click
+ * Where a row press lands (B4's collapse onto the session view). A LIVE
+ * row (running/queued with a worker session built) opens that session
+ * through the STANDARD attach (switchSession -- the pane becomes the
+ * worker's session view, watcher-scoped, with windowed replay + live tail).
+ * A SETTLED row (terminal task) and a DURABLE restart-survivor row both
+ * open the worker's OWN durable log through the existing cold-log machinery
+ * (viewLog / LOG_VIEWED): a finished subagent is a finished session. A row
+ * whose worker key was never recorded (pre-join sidecar record, or a task
+ * that died before its agent was built) has nothing honest to open: it
+ * stays informational (the menu still copies the id) -- never a dead click
  * pretending otherwise.
  */
 export function openTargetFor(
   t: TaskInfoWire,
-): { taskId: string } | { logId: string } | null {
-  if (t.durable !== true) return { taskId: t.taskId };
-  return t.agentSessionId !== undefined ? { logId: t.agentSessionId } : null;
+): { sessionId: string } | { logId: string } | null {
+  if (t.agentSessionId === undefined) return null;
+  const live = t.durable !== true && (t.status === "running" || t.status === "queued");
+  return live ? { sessionId: t.agentSessionId } : { logId: t.agentSessionId };
 }
 
 /**
@@ -192,9 +198,13 @@ export function SubagentsSection(p: SectionProps) {
             <div
               key={t.taskId}
               data-task-id={t.taskId}
-              className={`subagent-row status-${t.status}${parked ? " waiting" : ""}${t.taskId === p.viewedTaskId ? " active" : ""}`}
+              className={`subagent-row status-${t.status}${parked ? " waiting" : ""}${t.agentSessionId !== undefined && t.agentSessionId === p.viewedSessionId ? " active" : ""}`}
               title={`${t.taskId}: ${t.description || "(no description)"} — ${parked ? "waiting" : t.status}${target === null ? " (transcript not on record)" : ""}`}
-              aria-current={t.taskId === p.viewedTaskId ? "true" : undefined}
+              aria-current={
+                t.agentSessionId !== undefined && t.agentSessionId === p.viewedSessionId
+                  ? "true"
+                  : undefined
+              }
               role="listitem"
               tabindex="0"
               ref={(el) => {

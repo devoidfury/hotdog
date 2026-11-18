@@ -20,6 +20,7 @@ import { S2C } from "./protocol.ts";
 import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { replayLogSlice, replayPendingQuestion } from "./replay.ts";
+import { HISTORY_WINDOW_MESSAGES, windowOlderThan } from "./history-window.ts";
 import { adoptSessionLog, createAndAttachSession, seedResumedQuestions } from "./resume.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -55,8 +56,18 @@ export async function attachLiveSession(
   cursor = 0,
   fullOverride?: LogEntry[],
 ): Promise<boolean> {
+  // B3 worker-row branch of the live check: the live-agent oracle refuses
+  // worker rows (B1), so the raw row answers for them -- a LIVE (non-
+  // terminal) worker row attaches. The replay half below is RIDDEN
+  // wholesale (full replay past the cursor with the RESET/shrink clamps,
+  // the window trio, replayPendingQuestion -- the bridge is per-sid
+  // already); only the agent-reading parts branch: the partial flush and
+  // the working source. terminal worker rows fall through (false) and take
+  // the cold-log paths upstream.
   const session = registry.get(sessionId);
-  if (!session) return false;
+  const workerRow = session ? null : registry.getRow(sessionId);
+  const isWorker = workerRow?.kind === "worker" && workerRow.workerTerminal !== true;
+  if (!session && !isWorker) return false;
   if (ws.activeSessionId && ws.activeChannel) {
     registry.removeChannel(ws.activeSessionId, ws.activeChannel);
   }
@@ -65,7 +76,11 @@ export async function attachLiveSession(
   ws.activeSessionId = sessionId;
   ws.activeChannel = channel;
 
-  const agent = session.agent as Agent;
+  // The agent behind the attach: interactive rows carry it on the oracle
+  // entry; worker rows read it through the row ACCESSOR, null-tolerant
+  // after release (the resolvers answer undefined, the partial flush is
+  // skipped honestly -- a released worker has no live stream to flush).
+  const agent = (session?.agent ?? workerRow?.getAgent?.() ?? null) as Agent | null;
 
   // Cold adoption passes the PRE-adoption full log (the log has since grown
   // by bookkeeping records); live attaches read the current one.
@@ -80,19 +95,30 @@ export async function attachLiveSession(
   // transcript: full replay, not a duplicate-laden delta.
   const replayDelta =
     c > 0 && c <= full.length && !full.slice(c).some((e) => e.source === LOG_SOURCE.RESET);
-  const start = replayDelta ? c : epochStart;
+  // Lazy history: ONLY the full replay windows -- the client shows the last
+  // K conversation messages and pages older history through C2S loadOlder
+  // (the epoch-relative oldestIndex + the epochToken guarding it ride
+  // sessionCreated additively; the token is the full-log epochStartIndex,
+  // stable across appends and CHANGED by a mid-socket RESET -- a mismatch
+  // refuses with code "epoch_moved" instead of paging the wrong epoch).
+  // A delta is the exact tail the client lacks: byte-identical to the
+  // pre-windowing wire, no window fields, no re-alignment.
+  const epoch = full.slice(epochStart);
+  const win = replayDelta ? null : windowOlderThan(epoch, epoch.length, HISTORY_WINDOW_MESSAGES);
+  const start = replayDelta ? c : epochStart + (win?.start ?? 0);
 
   SessionRegistry.sendSafe(ws, {
     ...sessionCreatedPayload(registry, sessionId),
     ...(replayDelta ? { replayDelta: true } : {}),
+    ...(win?.hasOlder ? { hasOlder: true, oldestIndex: win.start, epochToken: epochStart } : {}),
   });
 
   replayLogSlice(ws, sessionId, full, start, agent?.toolRegistry);
 
   // Flush in-flight chunks that haven't reached the log yet (their LLM
   // entry lands when the response completes).
-  const partialReasoning = agent.currentStreamingReasoning;
-  const partialContent = agent.currentStreamingContent;
+  const partialReasoning = agent?.currentStreamingReasoning;
+  const partialContent = agent?.currentStreamingContent;
   if (partialReasoning) {
     SessionRegistry.sendSafe(ws, {
       type: S2C.STREAMING_REASONING_CHUNK,
@@ -116,7 +142,13 @@ export async function attachLiveSession(
     key: "cursor",
     value: partialReasoning || partialContent ? 0 : full.length,
   });
-  const isRunning = registry.getSessionManager().isSessionRunning(sessionId);
+  // `working` (the SESSION_STATE frame): interactive rows keep the
+  // SessionManager bus fact byte-identically; a worker row has no bus, so
+  // the task's inRun is consulted through the ONE read-only lookup (null =
+  // no RUNNING task: not working).
+  const isRunning = workerRow
+    ? registry.getTaskManager()?.taskWorkingForAgentSession(sessionId) ?? false
+    : registry.getSessionManager().isSessionRunning(sessionId);
   SessionRegistry.sendSafe(ws, { type: S2C.SESSION_STATE, sessionId, key: "working", value: isRunning });
   replayPendingQuestion(bridge, sessionId, ws);
   // Awaited: the rebuilt-lineage read is I/O (once-cached), and the snapshot
@@ -151,9 +183,22 @@ export async function attachResumedSession(
     return fallBack(`Session ${JSON.stringify(String(sessionId).slice(0, 80))} is not a valid id.`);
   }
 
+  const row = registry.getRow(sessionId);
   if (registry.get(sessionId)) {
     // The live session can go cold between the get and the attach; fall
     // back instead of stranding the socket.
+    if (!(await attachLiveSession(ws, registry, bridge, sessionId, cursor))) {
+      return fallBack(`Session ${sessionId} could not be attached.`);
+    }
+    return;
+  }
+
+  // B3: a LIVE worker row is live for the reconnect too -- the live-agent
+  // oracle above refuses it (B1), so the raw row answers here and the
+  // attach rides the worker branch of attachLiveSession. A TERMINAL worker
+  // row (or none) falls through to the cold-log adoption below, unchanged:
+  // Continue on a released worker's log is the normal resume path.
+  if (row?.kind === "worker" && row.workerTerminal !== true) {
     if (!(await attachLiveSession(ws, registry, bridge, sessionId, cursor))) {
       return fallBack(`Session ${sessionId} could not be attached.`);
     }

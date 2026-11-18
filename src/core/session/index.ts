@@ -442,6 +442,13 @@ export class SessionManager {
       const idx = handlers.indexOf(handler);
       if (idx !== -1) {
         handlers.splice(idx, 1);
+        // The empty set reclaims its key: the map must not accumulate one
+        // dead entry per ever-subscribed id (worker usage mirrors subscribe
+        // and release per task). emitToChannels reads absent like empty, and
+        // a later subscribe recreates the set.
+        if (handlers.length === 0) {
+          this.#eventHandlers.delete(sessionId);
+        }
       }
     };
   }

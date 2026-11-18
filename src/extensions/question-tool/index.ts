@@ -11,6 +11,7 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { HOOKS } from "@core/hooks.ts";
+import { followupAnswered, unansweredReason } from "@core/context/input.ts";
 import {
   CoreContext,
   ExtensionInstance,
@@ -211,7 +212,27 @@ export class QuestionTool {
     }
 
     const answers = outcome;
-    const mode = inputInterface.isInteractive() ? "interactive" : "non-interactive";
+    // D10 honesty marker (Symbol-keyed, non-enumerable -- see
+    // @core/context/input): a mounted input resolved WITHOUT a real answer
+    // (a worker's manager-gone release, a terminal release of a held worker
+    // question). Interactive sessions never stamp it, so their
+    // default/cancel results keep the byte-identical ok-JSON shape below.
+    // Rendering the defaults as an answer is the lie this branch kills.
+    const notAnswered = unansweredReason(answers);
+    if (notAnswered !== null) {
+      return ToolResult.ok(
+        `the question was not answered: ${notAnswered}; proceed without an answer and state the missing assumption`,
+      ).withEntries({
+        mode: "unanswered",
+        questions_asked: String(questions.length),
+        questions_answered: "0",
+      });
+    }
+    const mode = followupAnswered(answers)
+      ? "followup-answer"
+      : inputInterface.isInteractive()
+        ? "interactive"
+        : "non-interactive";
 
     return ToolResult.ok(JSON.stringify(answers, null, 2)).withEntries({
       mode,

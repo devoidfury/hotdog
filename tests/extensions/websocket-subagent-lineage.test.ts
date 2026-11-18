@@ -231,7 +231,7 @@ describe("coldLogsPayload: cold-row lineage", () => {
       );
     mk("cold-mgr"); // delegated two tasks in a past lifetime
     mk("plain-cold"); // never delegated: no lineage
-    mk("worker-a"); // the worker's own log (it stays a plain row too)
+    mk("worker-a"); // the worker's own log (B5: hidden from the list by its ev:"agent" join)
     const at = (ms: number) => new Date(ms).toISOString();
     const lines = [
       { t: at(SPAWN), ev: "spawn", id: "run:one#1", desc: "task run:one#1", session: "cold-mgr", pid: 777, host: hostname() },
@@ -282,7 +282,12 @@ describe("coldLogsPayload: cold-row lineage", () => {
     // No lineage -> NO field at all: "no subagents" is byte-identical to the
     // old payload, and the client renders no section.
     expect("subagents" in rows.find((r) => r.id === "plain-cold")!).toBe(false);
-    expect("subagents" in rows.find((r) => r.id === "worker-a")!).toBe(false);
+    // B5 (assertion flipped from "worker-a is a plain row"): the sidecar's
+    // ev:"agent" line for run:one#1 attests worker-a as a WORKER log, so
+    // the row leaves the top-level list entirely (D7). It stays addressable
+    // by id (viewLog/search), and above it still rides the nested lineage
+    // row under cold-mgr (subs[0].agentSessionId === "worker-a").
+    expect(rows.find((r) => r.id === "worker-a")).toBeUndefined();
     // The deleted manager's rows have no cold row to ride on; the null-parent
     // spawn never appears on any row.
     expect(rows.find((r) => r.id === "deleted-mgr")).toBeUndefined();

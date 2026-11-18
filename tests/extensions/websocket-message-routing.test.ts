@@ -23,6 +23,9 @@ import { createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 function stubRegistry(overrides: Record<string, unknown> = {}): any {
   return {
     get: () => undefined,
+    // B3 addition for the kind-aware refusal predicates (a legacy stub predates
+    // the row book): no rows to find, so no refusal fires.
+    getRow: () => undefined,
     list: () => [],
     size: 0,
     create: async () => ({ sessionId: "new-1", agent: makeWsMockAgent() }),

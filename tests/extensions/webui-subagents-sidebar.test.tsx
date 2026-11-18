@@ -128,9 +128,20 @@ describe("SubagentStatusGlyph", () => {
 // ── Durable (restart-rebuilt) rows ──────────────────────────────────────────
 
 describe("openTargetFor", () => {
-  it("live and settled-live rows open the task transcript", () => {
-    expect(openTargetFor(taskInfoWire)).toEqual({ taskId: "t1" });
-    expect(openTargetFor({ ...taskInfoWire, status: "completed" })).toEqual({ taskId: "t1" });
+  it("B4: a live row opens the worker's OWN session; a settled row opens its durable log", () => {
+    expect(openTargetFor({ ...taskInfoWire, agentSessionId: "w1" })).toEqual({ sessionId: "w1" });
+    expect(
+      openTargetFor({ ...taskInfoWire, status: "queued", agentSessionId: "w1" }),
+    ).toEqual({ sessionId: "w1" });
+    expect(
+      openTargetFor({ ...taskInfoWire, status: "completed", inRun: false, agentSessionId: "w1" }),
+    ).toEqual({ logId: "w1" });
+  });
+
+  it("a row whose worker key was never recorded has NO target (no dead click)", () => {
+    // Queued before the agent was built, or a task that died pre-join.
+    expect(openTargetFor(taskInfoWire)).toBeNull();
+    expect(openTargetFor({ ...taskInfoWire, status: "completed" })).toBeNull();
   });
 
   it("a durable row with a recorded worker key opens the worker's durable log", () => {

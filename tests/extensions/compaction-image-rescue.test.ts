@@ -300,7 +300,7 @@ describe("overflow rescue heals image-dominated contexts", () => {
     const strippedTool = after.find((m) => m.role === "tool")!;
     expect(strippedTool.images ?? []).toHaveLength(0);
     expect(strippedTool.getTextContent()).toContain("Screenshot of view");
-    expect(strippedTool.getTextContent()).toContain("[image omitted by compaction]");
+    expect(strippedTool.getTextContent()).toContain("[image removed by compaction - do not describe or make claims about its contents from memory");
 
     // The retry sends the compacted context, and the notice fires.
     expect(params.messages.length).toBe(agent.buildMessages().length);

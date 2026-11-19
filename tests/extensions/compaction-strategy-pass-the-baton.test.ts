@@ -737,11 +737,13 @@ describe("Compaction Extension — pass-the-baton wiring", () => {
     expect(result).toEqual({ retry: true });
     const after = agent.log.getAll();
     // BATON cut (kept the OLDEST prefix byte-identical), not trim's
-    // front-cut: after[0..6] are the original objects.
+    // front-cut: after[0..4] are the original objects. (The rescue aims
+    // at the 0.85 hysteresis target, so the kept window is the largest
+    // prefix under 595, not under 700.)
     expect(after.filter(isBatonNotice)).toHaveLength(1);
     expect(after.length).toBeLessThan(11);
     expect(after[0]).toBe(original[0]);
-    expect(after[6]).toBe(original[6]);
+    expect(after[4]).toBe(original[4]);
   });
 
   it("provider:error rescue on a tool-only session falls through to trim (R1 null floor)", async () => {

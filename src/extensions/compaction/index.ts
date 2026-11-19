@@ -28,8 +28,49 @@ import { join } from "node:path";
  * full-size request already failed once, and the freshest screenshots are
  * the only pixels the model plausibly still needs (older captures keep
  * their on-disk path in the tool-result text and stay re-readable).
+ * Downgrades are monotonic: a message already carrying the placeholder is
+ * never rewritten again (see downgradeOlderImages), so cuts only advance
+ * forward and the prompt-cache prefix survives.
  */
 export const RESCUE_KEEP_RECENT_IMAGES = 2;
+
+/**
+ * The overflow-rescue AIM ladder (opencode's SHRINK_STEPS, survey run
+ * adhoc-20261118-image-compaction-survey). Attempt k of an overflow
+ * episode aims at REAIM_SHRINK_STEPS[k] of its base size: the FIRST
+ * rescue uses the billed budget (contextLimit - reserveTokens) as base --
+ * the hysteresis target, meaningfully BELOW the trigger, so a reduction
+ * that lands here cannot refire until real new weight crosses the trigger
+ * again -- and every re-aim uses the FIRST rejected request's size as
+ * base (the provider's acceptance ceiling is unknown; a shrinking
+ * fraction of the proven-rejected size is the only honest target). Every
+ * aim is additionally clamped strictly below the size that was just
+ * rejected: an identical retry can never heal an overflow (2026-11-18
+ * incident #2: identical re-issues 400-looped the session). Hard cap:
+ * the ladder length counted in RE-ISSUED sends -- one initial rescue +
+ * 3 re-aims -- then the episode stops honestly and the error surfaces.
+ * Mid-episode entries additionally require a context-class rejection
+ * signature (see isContextClassRejection); a transient body merely
+ * QUOTING an overflow phrase surfaces untouched and keeps the episode.
+ * Cleared when a request is accepted (provider:response).
+ */
+export const REAIM_SHRINK_STEPS: number[] = [0.85, 0.7, 0.5, 0.35];
+
+/**
+ * True when a provider rejection is a CONTEXT-CLASS refusal -- the
+ * backend itself rejecting the prompt (a 4xx status), or carrying the
+ * structured context_length_exceeded code -- as opposed to a transient
+ * 5xx whose body merely QUOTES an overflow phrase (the
+ * 2026-11-18 morning-incident shape: a gateway wrap quoting "maximum
+ * context length" at 52% of the window). isContextOverflowError matches
+ * both (it pattern-matches the embedded body); this separates them for
+ * the MID-EPISODE gate discriminator -- see the PROVIDER_ERROR hook.
+ */
+function isContextClassRejection(e: unknown): boolean {
+  if (!(e instanceof LlmError) || e.type !== "api") return false;
+  if (e.status !== undefined && e.status >= 400 && e.status < 500) return true;
+  return /context_length_exceeded/i.test(e.message);
+}
 
 interface CompactionSettings {
   enabled: boolean;
@@ -123,6 +164,27 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * sessionId are declined the tail-pop entirely (see _performCompaction).
    */
   const batonStash = new Map<string, { popped: Message[]; replayPending: boolean }>();
+
+  /**
+   * Overflow-episode state per agent (re-aim ladder + monotonicity law,
+   * see REAIM_SHRINK_STEPS). Keyed by the agent OBJECT in a WeakMap: the
+   * episode is an incident on one running agent, never a fact to outlive
+   * it, and there is no safe shared key for sessionId-less agents.
+   * Created only once an overflow rejection passes the plausibility gate
+   * (a quoting-body refusal must not arm the gate bypass), cleared when a
+   * request is accepted.
+   */
+  interface RescueEpisode {
+    /** Image-aware estimate of the request the FIRST rejection arrived at. */
+    firstRejected: number;
+    /** Rescue attempts consumed (rung index into REAIM_SHRINK_STEPS). */
+    attempts: number;
+    /** Estimate of the most recently rejected request (monotonicity law). */
+    lastRejected: number;
+    /** Weight of the last context we re-issued; guards the ladder reset. */
+    lastIssued: number;
+  }
+  const rescueEpisodes = new WeakMap<object, RescueEpisode>();
 
   // Helpers are nested in create() so they close over core and the registry;
   // every config value is read per run through getExtensionConfig (runSettings).
@@ -818,7 +880,11 @@ export function create(core: CoreContext): ExtensionInstance | null {
         //    uses; a genuine estimate-race overflow is conversation-sized
         //    and passes it.
         // A second overflow propagates -- the core provider:error seam
-        // retries once and the retry is not itself re-caught.
+        // retries once and the retry is not itself re-caught. The NEXT
+        // provider rejection (a later turn, or the next request after a
+        // surfaced error) re-enters this hook and continues the re-aim
+        // ladder for the same episode -- each entry still reduces
+        // strictly below the size just rejected, up to the ladder cap.
         // One live read for the whole rescue chain: baton/trim/drop attempt the
         // same settings the overflow saw, and the NEXT rescue reads fresh.
         // R2: the window is the effective model config when it resolves,
@@ -828,41 +894,115 @@ export function create(core: CoreContext): ExtensionInstance | null {
           batonPopNow: true,
         };
 
-        // Plausibility gate before touching anything: a real overflow is
-        // physically large, so at least one measurement of THIS transcript
-        // must sit at/over the billed budget. An error body that merely
-        // QUOTES an overflow phrase (gateway wraps, upstream echoes) would
-        // otherwise route a comfortably-fitting session into the chain --
-        // and drop's gate is a message COUNT, so a long-but-fitting session
-        // gets shredded (2026-11-18 victim: a transient 5xx quoting
-        // "maximum context length" at 52% of the window, provider-reported
-        // input 136,093/262,144, local chars/4 estimate also under budget).
-        // Window unresolvable -> no gate, exactly as before (the strategies'
-        // own requireContextLimit is the loud failure then).
+        // Plausibility gate before touching anything (FIRST rejection
+        // only): a real overflow is physically large, so at least one
+        // measurement of THIS transcript must sit at/over the billed
+        // budget. An error body that merely QUOTES an overflow phrase
+        // (gateway wraps, upstream echoes) would otherwise route a
+        // comfortably-fitting session into the chain -- and drop's gate is
+        // a message COUNT, so a long-but-fitting session gets shredded
+        // (2026-11-18 victim: a transient 5xx quoting "maximum context
+        // length" at 52% of the window, provider-reported input
+        // 136,093/262,144, local chars/4 estimate also under budget).
+        // The estimate is image-aware: providers that bill image tokens
+        // OUTSIDE their reported usage make `actualPromptTokens` a number
+        // that can never see the overflow (2026-11-18 victim: gauge
+        // 67k/262k, provider input 66,569, real request >262,144 with
+        // ~7.9 MB of base64 screenshots). A session whose image-inclusive
+        // estimate is over the budget therefore PASSES this gate even when
+        // the provider number sits comfortably under it. Window
+        // unresolvable -> no gate, exactly as before (the strategies' own
+        // requireContextLimit is the loud failure then).
+        //
+        // A MID-EPISODE entry (rejection 2..N on a live episode) faces a
+        // DISCRIMINATOR, not this gate: the provider has already rejected
+        // this context lineage once and our estimate is only a floor, so
+        // the first-entry both-sources-under test would refuse the very
+        // rejections the ladder exists for. But a blanket bypass is also
+        // wrong -- a transient 5xx merely QUOTING an overflow phrase can
+        // land mid-episode (gateway flapping between two genuine
+        // rejections, the morning-incident body) on a context that fits,
+        // and must not shred it. So mid-episode entries act only on a
+        // context-class signature (4xx status or context_length_exceeded
+        // code) OR a context our own image-aware measurement still puts
+        // over budget (the pre-batch standard: an over-budget session was
+        // always fair game for the chain). A quoting 5xx on a fitting
+        // context surfaces UNTOUCHED -- no chain, no mutation, no rung
+        // burned -- and the episode stays alive for the next genuine
+        // rejection.
         const beforeMessages = agent.context.getMessages();
         const usage = agent.context.getTokenUsage?.();
         const actualPromptTokens = usage ? (usage.promptTokens ?? 0) + (usage.cachedTokens ?? 0) : 0;
+        const estimated = estimateContextTokens(beforeMessages);
         let budget: number | null = null;
-        let estimated = 0;
+        let resolvedLimit: number | null = null;
         try {
-          budget = requireContextLimit(s.contextLimit) - (s.reserveTokens || 0);
-          // The estimate is image-aware: providers that bill image tokens
-          // OUTSIDE their reported usage make `actualPromptTokens` a number
-          // that can never see the overflow (2026-11-18 victim: gauge
-          // 67k/262k, provider input 66,569, real request >262,144 with
-          // ~7.9 MB of base64 screenshots). A session whose image-inclusive
-          // estimate is over the budget therefore PASSES this gate even when
-          // the provider number sits comfortably under it.
-          estimated = estimateContextTokens(beforeMessages);
-          if (estimated < budget && actualPromptTokens < budget) {
+          resolvedLimit = requireContextLimit(s.contextLimit);
+          budget = resolvedLimit - (s.reserveTokens || 0);
+        } catch {
+          // Unresolved window: fall through, same posture as the chain below.
+        }
+
+        let episode = rescueEpisodes.get(agent);
+        if (!episode) {
+          if (budget !== null && estimated < budget && actualPromptTokens < budget) {
             logger.warn(
               `[compaction] provider error quoted an overflow phrase, but session ${agent.sessionId} fits the budget on both sources (estimate ${estimated}, provider ${actualPromptTokens} < ${budget}); surfacing the error`,
             );
             return;
           }
-        } catch {
-          // Unresolved window: fall through, same posture as the chain below.
+          episode = {
+            firstRejected: estimated,
+            attempts: 0,
+            lastRejected: estimated,
+            lastIssued: Number.POSITIVE_INFINITY,
+          };
+          rescueEpisodes.set(agent, episode);
+        } else {
+          // Mid-episode discriminator (see the doctrine above): a spurious
+          // quoting 5xx on a context that fits returns the error untouched
+          // and leaves the episode state exactly as it was.
+          if (!isContextClassRejection(error) && budget !== null && estimated < budget) {
+            logger.warn(
+              `[compaction] provider error quoted an overflow phrase mid-episode, but session ${agent.sessionId} fits the budget (estimate ${estimated} < ${budget}) on a non-context-class rejection (status ${String((error as LlmError).status ?? "none")}); surfacing the error`,
+            );
+            return;
+          }
+          if (estimated > 0 && estimated < episode.lastIssued) {
+            // The context is SMALLER than what our last attempt re-issued:
+            // something outside this seam reduced it (a manual /compact, an
+            // external trim). This episode's rejection history no longer
+            // describes it -- restart the ladder against the new size.
+            episode.firstRejected = estimated;
+            episode.attempts = 0;
+            episode.lastIssued = Number.POSITIVE_INFINITY;
+          }
         }
+        episode.lastRejected = estimated;
+
+        if (episode.attempts >= REAIM_SHRINK_STEPS.length) {
+          logger.warn(
+            `[compaction] context overflow persists after ${REAIM_SHRINK_STEPS.length} reduction attempts (last rejected ~${episode.lastRejected}) for session ${agent.sessionId}; surfacing the error`,
+          );
+          agent.sink?.emit({
+            type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+            content:
+              "Context overflow: repeated reductions still exceeded the provider limit; surfacing the error.",
+          });
+          return;
+        }
+        // FRACTIONAL RE-AIM: attempt k aims at REAIM_SHRINK_STEPS[k] of its
+        // base -- the billed budget for the FIRST rescue (the hysteresis
+        // target below the trigger), the first rejected size for every
+        // re-aim -- clamped to the budget and STRICTLY below the size just
+        // rejected. No aim, and no re-issued request, can ever equal the
+        // size the provider just refused. Rungs are counted in RE-ISSUED
+        // sends (an entry that re-issues nothing burns nothing), so the cap
+        // is honestly "initial rescue + 3 re-aims" of actual traffic.
+        const step = episode.attempts;
+        const base = step === 0 ? (budget ?? episode.firstRejected) : episode.firstRejected;
+        let aim = Math.floor(REAIM_SHRINK_STEPS[step]! * base);
+        aim = Math.max(1, Math.min(aim, episode.lastRejected - 1, budget ?? aim));
 
         // IMAGE DOWNGRADE before anything else: images are compactible
         // weight, and on the rescue path the doctrine is aggressive -- strip
@@ -871,12 +1011,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // needed screenshot is still re-readable). Text-only reduction
         // "removing" image-dominated messages barely touches the bytes, and
         // the provider-side image accounting is unknowable from here, so
-        // when the image-inclusive estimate is over budget, stale pixels go
+        // when the image-inclusive estimate is over the aim, stale pixels go
         // first (2026-11-18 incident: the chain cut 40->6 messages every
         // turn while the 26 surviving payloads kept the request over the
         // limit; see tests/extensions/compaction-image-rescue.test.ts).
         let rescued = false;
-        if (budget !== null && estimated > budget) {
+        if (estimated > aim) {
           const { messages: downgraded, strippedImages } = downgradeOlderImages(
             beforeMessages,
             RESCUE_KEEP_RECENT_IMAGES,
@@ -886,16 +1026,25 @@ export function create(core: CoreContext): ExtensionInstance | null {
             logger.warn(
               `[compaction] overflow rescue: stripped ${strippedImages} stale image payloads (kept the newest ${RESCUE_KEEP_RECENT_IMAGES}) for session ${agent.sessionId}`,
             );
-            // The strip alone cleared the budget: every message survives
-            // with its text, no message-dropping chain needed.
-            rescued = estimateContextTokens(downgraded) <= budget;
+            // The strip alone cleared the aim: every message survives with
+            // its text, no message-dropping chain needed.
+            rescued = estimateContextTokens(downgraded) <= aim;
           }
         }
 
+        // The message chain runs against the AIM, not the raw budget: the
+        // same reserveTokens knob the strategies already bill against,
+        // viewed as (resolved window - aim). A runtime settings view only --
+        // never a config key; the live config block stays byte-untouched.
+        const chain: CompactionSettings =
+          resolvedLimit !== null
+            ? { ...s, reserveTokens: Math.max(0, resolvedLimit - aim) }
+            : s;
+
         if (!rescued) {
           const baton = strategyRegistry.get("pass-the-baton");
-          if (baton && baton.canCompact(agent.context.getMessages(), s)) {
-            rescued = await _performCompaction(agent, baton, s);
+          if (baton && baton.canCompact(agent.context.getMessages(), chain)) {
+            rescued = await _performCompaction(agent, baton, chain);
           }
         }
         if (!rescued) {
@@ -903,12 +1052,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
           // so a genuine overflow of few but huge messages is rescued even
           // below the message-count gate.
           const trim = strategyRegistry.get("trim");
-          if (trim) rescued = await _performCompaction(agent, trim, s);
+          if (trim) rescued = await _performCompaction(agent, trim, chain);
         }
         if (!rescued) {
           const drop = strategyRegistry.get("drop");
-          if (drop && drop.canCompact(agent.context.getMessages(), s)) {
-            rescued = await _performCompaction(agent, drop, s);
+          if (drop && drop.canCompact(agent.context.getMessages(), chain)) {
+            rescued = await _performCompaction(agent, drop, chain);
           }
         }
         if (!rescued) {
@@ -925,12 +1074,38 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // overflow -- the retry only follows a real reduction. A reduction
         // is measured in context weight, not only message count: an image
         // downgrade removes bytes while keeping every message (a plain
-        // length compare would call that "nothing reduced").
+        // length compare would call that "nothing reduced"). This is also
+        // the MONOTONICITY LAW of the re-aim ladder: an attempt that
+        // cannot land below the size just rejected reports honestly and
+        // stops -- an identical (or heavier) re-issue never happens.
         const afterMessages = agent.context.getMessages();
+        const weightAfter = estimateContextTokens(afterMessages);
         const reduced =
-          afterMessages.length < beforeMessages.length ||
-          (budget !== null && estimateContextTokens(afterMessages) < estimated);
+          weightAfter < estimated ||
+          (afterMessages.length < beforeMessages.length && weightAfter <= estimated);
         if (!reduced) {
+          if (afterMessages.length !== beforeMessages.length || weightAfter !== estimated) {
+            // A strategy REWROTE the context but the rewrite is not a
+            // smaller request (notice/guard overhead can outweigh a tiny
+            // pop). Re-issuing an equal-or-heavier request can never heal
+            // an overflow -- and silently KEEPING the phantom compaction
+            // would churn history (and park live turns in the baton stash)
+            // behind every spurious rejection. Undo it: the session keeps
+            // the exact bytes it had when the rejection arrived, and the
+            // "nothing eligible" notice stays truthful because nothing
+            // eligible survives either.
+            agent.replaceContext(beforeMessages);
+            await dropBaton(agent);
+            logger.warn(
+              `[compaction] context overflow but the attempted reduction did not shrink the request for session ${agent.sessionId} (${weightAfter} >= ${estimated} with the context rewritten); left the context unchanged and surfaced the error`,
+            );
+            agent.sink?.emit({
+              type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+              content:
+                "Context overflow: the attempted reduction did not shrink the request; the context was left unchanged and the error is surfaced.",
+            });
+            return;
+          }
           logger.warn(
             `[compaction] context overflow but compaction reduced nothing for session ${agent.sessionId}; surfacing the error`,
           );
@@ -940,6 +1115,10 @@ export function create(core: CoreContext): ExtensionInstance | null {
           });
           return;
         }
+        // The rung is spent by the SEND, not the hook entry: an entry that
+        // re-issues nothing (refusal above) never consumes ladder capacity.
+        episode.attempts += 1;
+        episode.lastIssued = weightAfter;
 
         // The retry must send the compacted context, not the messages captured
         // before the overflow (same params-mutation pattern as tool-call-repair).
@@ -949,6 +1128,17 @@ export function create(core: CoreContext): ExtensionInstance | null {
           content: "Context overflow: compacted the conversation and retrying the request once.",
         });
         return { retry: true };
+      },
+
+      /**
+       * A request the provider ACCEPTED ends the overflow episode: the
+       * re-aim ladder and its last-rejected memory describe one incident,
+       * not the next legitimate overflow -- and the plausibility gate must
+       * re-arm, so a later transient body merely quoting an overflow
+       * phrase faces the gate again.
+       */
+      [HOOKS.PROVIDER_RESPONSE]: ({ agent }) => {
+        if (agent) rescueEpisodes.delete(agent);
       },
 
       [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {

@@ -79,8 +79,25 @@ export function shouldCompact(
 
 // ── Image downgrade (overflow rescue) ───────────────────────────────────────
 
-/** Placeholder text left where a stripped image payload used to ride. */
-export const IMAGE_OMITTED_NOTICE = "[image omitted by compaction]";
+/**
+ * Placeholder text left where a stripped image payload used to ride.
+ * Anti-hallucination copy in the opencode idiom (survey run
+ * adhoc-20261118-image-compaction-survey): the pixels are gone, so a bare
+ * "[image omitted]" invites the model to describe them from whatever it
+ * remembers -- the line must say what happened, forbid memory claims, and
+ * point at the real recovery paths (re-attach the image, or re-read the
+ * on-disk path the tool text kept -- hedged "if the tool recorded one":
+ * inline pasted base64 never touches disk, and an unqualified pointer there
+ * would be confabulation-bait itself). One line: every stripped payload
+ * pays its cost in every later request.
+ */
+export const IMAGE_OMITTED_NOTICE =
+  "[image removed by compaction - do not describe or make claims about its contents from memory; if you need it, re-attach the image or re-read its saved on-disk path, if the tool recorded one]";
+
+/** True when this message already carries the placeholder (FROZEN below). */
+function hasImageNotice(msg: Message): boolean {
+  return contentToText(msg.content).includes(IMAGE_OMITTED_NOTICE);
+}
 
 /**
  * Replace the payloads of all but the NEWEST `keepRecentImages` images with
@@ -88,6 +105,14 @@ export const IMAGE_OMITTED_NOTICE = "[image omitted by compaction]";
  * screenshots are ephemeral -- tool results record the on-disk path, so the
  * model can still re-read one it genuinely needs -- while their base64 is
  * the weight the estimator can least calibrate against the provider.
+ *
+ * MONOTONIC / FROZEN: a message that already carries the placeholder is
+ * returned untouched -- downgrades advance only FORWARD through the
+ * transcript, and every message before the new cut line keeps its exact
+ * bytes so the provider's prompt-cache prefix survives the next rescue.
+ * The cost: a payload that survived an earlier partial downgrade on a
+ * notice-carrying message is never squeezed later (rare; cache stability
+ * wins).
  *
  * Returns the rewritten array and how many image payloads were dropped;
  * `strippedImages === 0` means the array came back untouched (nothing to
@@ -114,6 +139,7 @@ export function downgradeOlderImages(
   const out = messages.map((msg, i) => {
     const images = msg.images;
     if (!images || images.length === 0) return msg;
+    if (hasImageNotice(msg)) return msg; // frozen: byte-stable across rescues
     const from = keepFrom[i] ?? images.length;
     if (from === 0) return msg; // fully inside the recent-image budget
     strippedImages += from;

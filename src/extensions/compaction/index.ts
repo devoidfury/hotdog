@@ -4,7 +4,7 @@ import { DropStrategy } from "./strategies/drop.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
 import { PassTheBatonStrategy, hasBatonNotice, isBatonNoticeMessage, recentWindow, mergeStashWindows } from "./strategies/pass-the-baton.ts";
-import { shouldCompact, estimateContextTokens, estimatorFor, downgradeOlderImages, type WireRenderContext } from "./utils.ts";
+import { shouldCompact, estimateContextTokens, estimateMessageTokens, estimatorFor, downgradeOlderImages, type WireRenderContext } from "./utils.ts";
 import { BATON_NOTICE_PROMPT } from "./prompts.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
@@ -175,16 +175,131 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * request is accepted.
    */
   interface RescueEpisode {
-    /** Image-aware estimate of the request the FIRST rejection arrived at. */
+    /**
+     * max(watermark, image-aware estimate) of the request the FIRST rejection
+     * arrived at -- the re-aim base in watermarked space: the estimate-space
+     * ladder could aim "under budget" while still exceeding the real window.
+     */
     firstRejected: number;
     /** Rescue attempts consumed (rung index into REAIM_SHRINK_STEPS). */
     attempts: number;
-    /** Estimate of the most recently rejected request (monotonicity law). */
+    /** max(watermark, image-aware estimate) of the most recent rejection (monotonicity law). */
     lastRejected: number;
-    /** Weight of the last context we re-issued; guards the ladder reset. */
+    /** Weight of the last context we re-issued (max-based too); guards the ladder reset. */
     lastIssued: number;
   }
   const rescueEpisodes = new WeakMap<object, RescueEpisode>();
+
+  /**
+   * Context watermark: the provider's billed prompt size (promptTokens +
+   * cachedTokens) of an ACCEPTED request is ground truth for what the local
+   * chars/4 lens cannot see (system prompt, tool schemas, tokenizer density,
+   * provider-side image billing). Anchored on every accepted response
+   * (provider:response), it lives while the anchored context is still a
+   * byte-prefix of the live one, and
+   *
+   *   watermark = billedTotal + image-aware local estimate of appends
+   *
+   * is the honest floor for what the NEXT request costs (a 400 carries no
+   * bill, so an anchor always predates the bloat). Invalidity is VERIFIED
+   * lazily on every read (no hooks to forget): length, object-identity
+   * probes, and exact per-message anchored weights kill shrink/replace/
+   * non-prefix mutations; fork/restart is clean via the WeakMap. Ceiling:
+   * a weight-identical rewrite at an unprobed index survives -- the anchor
+   * vouches for SIZE, which such a rewrite preserves. Dead anchors fall
+   * back to the pure local estimate until the next accepted response
+   * re-anchors.
+   */
+  interface WatermarkAnchor {
+    /** The accepted response's billed prompt: net promptTokens + cachedTokens. */
+    billedTotal: number;
+    /** context.getMessages().length at the moment that request was sent. */
+    count: number;
+    /** Local image-aware weight of every anchored message, index-aligned. */
+    prefixWeights: number[];
+    /** Object-identity samples spread across the anchored prefix. */
+    probes: Array<{ index: number; ref: Message }>;
+  }
+  const watermarkAnchors = new WeakMap<object, WatermarkAnchor>();
+
+  /** Probe sampling density: ~every 1/N-th anchored message + the last. */
+  const WATERMARK_PROBE_STEP = 8;
+
+  /**
+   * Re-anchor on an accepted provider response. billedTotal is read from
+   * THIS response's usage, not from getTokenUsage: the provider:response
+   * seam runs before core records the usage, so the tracker still holds the
+   * PREVIOUS call. The raw `prompt_tokens` already contains the cached
+   * portion (TokenTracker stores net = raw - cached and consumers add
+   * cachedTokens back), so raw prompt_tokens IS promptTokens + cachedTokens.
+   * A response with no usage (some streaming backends) leaves any previous
+   * anchor untouched: it still vouches for its prefix, and the tracker
+   * learned nothing new either.
+   */
+  function setWatermarkAnchor(
+    agent: Agent,
+    response: { usage?: { prompt_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } | null } | null | undefined,
+  ): void {
+    const billedTotal = response?.usage?.prompt_tokens ?? 0;
+    if (!(billedTotal > 0)) return;
+    const context = agent.context.getMessages();
+    const probes: Array<{ index: number; ref: Message }> = [];
+    const step = Math.max(1, Math.floor(context.length / WATERMARK_PROBE_STEP));
+    for (let index = 0; index < context.length; index += step) {
+      probes.push({ index, ref: context[index]! });
+    }
+    if (context.length > 0 && (context.length - 1) % step !== 0) {
+      // The LAST anchored message: any deletion inside the anchored range
+      // shifts it, and a shift is exactly the non-prefix mutation the
+      // watermark must not ride.
+      probes.push({ index: context.length - 1, ref: context[context.length - 1]! });
+    }
+    watermarkAnchors.set(agent, {
+      billedTotal,
+      count: context.length,
+      prefixWeights: context.map((m) => estimateMessageTokens(m)),
+      probes,
+    });
+  }
+
+  /**
+   * Live watermark for this agent, or null when no anchor is alive (read
+   * AFTER the check: invalid anchors are deleted, so a failed verification
+   * costs the probe pass once, never again). Every context-size number the
+   * trigger and the rescue loop keep is max(localEstimate, this).
+   */
+  function watermarkTokens(agent: Agent): number | null {
+    const anchor = watermarkAnchors.get(agent);
+    if (!anchor) return null;
+    const current = agent.context.getMessages();
+    // Shrink (compaction, trim, drop, rewind, baton pop): a shorter context
+    // cannot carry the billed number.
+    if (current.length < anchor.count) {
+      watermarkAnchors.delete(agent);
+      return null;
+    }
+    for (const probe of anchor.probes) {
+      if (current[probe.index] !== probe.ref) {
+        watermarkAnchors.delete(agent);
+        return null;
+      }
+    }
+    let appendedWeight = 0;
+    for (let i = 0; i < current.length; i++) {
+      const weight = estimateMessageTokens(current[i]!);
+      if (i < anchor.count) {
+        // Replace (image downgrade, any byte rewrite): the anchored message
+        // no longer weighs what the provider billed it for.
+        if (weight !== anchor.prefixWeights[i]) {
+          watermarkAnchors.delete(agent);
+          return null;
+        }
+      } else {
+        appendedWeight += weight;
+      }
+    }
+    return anchor.billedTotal + appendedWeight;
+  }
 
   // Helpers are nested in create() so they close over core and the registry;
   // every config value is read per run through getExtensionConfig (runSettings).
@@ -689,15 +804,20 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // as the second opinion: the local chars/4 estimate loses the race
         // against the tokenizer on code-heavy sessions, and the window dies at
         // finish_reason=length before the estimate ever crosses the gate.
+        // The watermark generalizes it: billedTotal of the last ACCEPTED
+        // response + the appended delta, so the number tracks the live
+        // context instead of a stale snapshot. The raw tracker read stays
+        // as the floor when no anchor is alive (fresh session, post-shrink).
         const usage = agent.context.getTokenUsage?.();
         const actualPromptTokens = usage ? (usage.promptTokens ?? 0) + (usage.cachedTokens ?? 0) : 0;
+        const anchorFloor = watermarkTokens(agent) ?? 0;
         if (
           !shouldCompact(
             messages,
             modelConfig.contextLimit,
             s.reserveTokens,
             wireFor(agent, modelConfig),
-            actualPromptTokens,
+            Math.max(actualPromptTokens, anchorFloor),
           )
         )
           return;
@@ -934,6 +1054,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
         const usage = agent.context.getTokenUsage?.();
         const actualPromptTokens = usage ? (usage.promptTokens ?? 0) + (usage.cachedTokens ?? 0) : 0;
         const estimated = estimateContextTokens(beforeMessages);
+        // Every context-size number this rescue keeps is the max of the
+        // local estimate and the live watermark: the local chars/4 lens
+        // loses the system prompt, tool schemas, tokenizer density and
+        // provider-side image billing, so a ladder run entirely in that
+        // blind space can 400-loop while claiming "fits".
+        const measured = Math.max(estimated, watermarkTokens(agent) ?? 0);
         let budget: number | null = null;
         let resolvedLimit: number | null = null;
         try {
@@ -945,16 +1071,16 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
         let episode = rescueEpisodes.get(agent);
         if (!episode) {
-          if (budget !== null && estimated < budget && actualPromptTokens < budget) {
+          if (budget !== null && measured < budget && actualPromptTokens < budget) {
             logger.warn(
-              `[compaction] provider error quoted an overflow phrase, but session ${agent.sessionId} fits the budget on both sources (estimate ${estimated}, provider ${actualPromptTokens} < ${budget}); surfacing the error`,
+              `[compaction] provider error quoted an overflow phrase, but session ${agent.sessionId} fits the budget on both sources (measured ${measured}, provider ${actualPromptTokens} < ${budget}); surfacing the error`,
             );
             return;
           }
           episode = {
-            firstRejected: estimated,
+            firstRejected: measured,
             attempts: 0,
-            lastRejected: estimated,
+            lastRejected: measured,
             lastIssued: Number.POSITIVE_INFINITY,
           };
           rescueEpisodes.set(agent, episode);
@@ -962,23 +1088,26 @@ export function create(core: CoreContext): ExtensionInstance | null {
           // Mid-episode discriminator (see the doctrine above): a spurious
           // quoting 5xx on a context that fits returns the error untouched
           // and leaves the episode state exactly as it was.
-          if (!isContextClassRejection(error) && budget !== null && estimated < budget) {
+          if (!isContextClassRejection(error) && budget !== null && measured < budget) {
             logger.warn(
-              `[compaction] provider error quoted an overflow phrase mid-episode, but session ${agent.sessionId} fits the budget (estimate ${estimated} < ${budget}) on a non-context-class rejection (status ${String((error as LlmError).status ?? "none")}); surfacing the error`,
+              `[compaction] provider error quoted an overflow phrase mid-episode, but session ${agent.sessionId} fits the budget (measured ${measured} < ${budget}) on a non-context-class rejection (status ${String((error as LlmError).status ?? "none")}); surfacing the error`,
             );
             return;
           }
-          if (estimated > 0 && estimated < episode.lastIssued) {
+          if (measured > 0 && measured < episode.lastIssued) {
             // The context is SMALLER than what our last attempt re-issued:
             // something outside this seam reduced it (a manual /compact, an
             // external trim). This episode's rejection history no longer
-            // describes it -- restart the ladder against the new size.
-            episode.firstRejected = estimated;
+            // describes it -- restart the ladder against the new size. Both
+            // sides read the max-based number (the reset compares like with
+            // like; an external shrink also invalidated any anchor, so this
+            // degrades to the pure local compare exactly as before).
+            episode.firstRejected = measured;
             episode.attempts = 0;
             episode.lastIssued = Number.POSITIVE_INFINITY;
           }
         }
-        episode.lastRejected = estimated;
+        episode.lastRejected = measured;
 
         if (episode.attempts >= REAIM_SHRINK_STEPS.length) {
           logger.warn(
@@ -1011,12 +1140,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // needed screenshot is still re-readable). Text-only reduction
         // "removing" image-dominated messages barely touches the bytes, and
         // the provider-side image accounting is unknowable from here, so
-        // when the image-inclusive estimate is over the aim, stale pixels go
-        // first (2026-11-18 incident: the chain cut 40->6 messages every
-        // turn while the 26 surviving payloads kept the request over the
-        // limit; see tests/extensions/compaction-image-rescue.test.ts).
+        // when the image-inclusive measurement (watermark included) is over
+        // the aim, stale pixels go first: text-only cuts barely touch the
+        // bytes of surviving payloads (see
+        // tests/extensions/compaction-image-rescue.test.ts).
         let rescued = false;
-        if (estimated > aim) {
+        if (measured > aim) {
           const { messages: downgraded, strippedImages } = downgradeOlderImages(
             beforeMessages,
             RESCUE_KEEP_RECENT_IMAGES,
@@ -1080,9 +1209,22 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // stops -- an identical (or heavier) re-issue never happens.
         const afterMessages = agent.context.getMessages();
         const weightAfter = estimateContextTokens(afterMessages);
+        // Max-space on the bookkeeping, same-estimator on the law:
+        // measuredAfter is what the ladder records as RE-ISSUED (so the
+        // mid-episode reset compares like with like), and the max gate asks
+        // whether the re-issue's best measurement came under the
+        // rejection's. The law's two arms stay in one estimator (local
+        // before vs local after) on purpose: a real shrink kills the anchor,
+        // so a pure "maxAfter < maxBefore" form would rubber-stamp a
+        // locally-GROWN rewrite behind a dead watermark (measuredAfter
+        // degrades to pure local while `measured` still carries the billed
+        // overhead). Both conditions read the max numbers; neither alone is
+        // the law.
+        const measuredAfter = Math.max(weightAfter, watermarkTokens(agent) ?? 0);
         const reduced =
-          weightAfter < estimated ||
-          (afterMessages.length < beforeMessages.length && weightAfter <= estimated);
+          (weightAfter < estimated ||
+            (afterMessages.length < beforeMessages.length && weightAfter <= estimated)) &&
+          measuredAfter <= measured;
         if (!reduced) {
           if (afterMessages.length !== beforeMessages.length || weightAfter !== estimated) {
             // A strategy REWROTE the context but the rewrite is not a
@@ -1118,7 +1260,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // The rung is spent by the SEND, not the hook entry: an entry that
         // re-issues nothing (refusal above) never consumes ladder capacity.
         episode.attempts += 1;
-        episode.lastIssued = weightAfter;
+        episode.lastIssued = measuredAfter;
 
         // The retry must send the compacted context, not the messages captured
         // before the overflow (same params-mutation pattern as tool-call-repair).
@@ -1136,9 +1278,18 @@ export function create(core: CoreContext): ExtensionInstance | null {
        * not the next legitimate overflow -- and the plausibility gate must
        * re-arm, so a later transient body merely quoting an overflow
        * phrase faces the gate again.
+       *
+       * The same seam is the watermark's anchor point: an accepted request
+       * makes the provider's billed prompt size the ground-truth floor for
+       * every later measurement until the context changes shape. The
+       * assistant reply is appended AFTER this hook (core's
+       * #handleLlmResponse), so the context here is exactly the prefix
+       * that was billed.
        */
-      [HOOKS.PROVIDER_RESPONSE]: ({ agent }) => {
-        if (agent) rescueEpisodes.delete(agent);
+      [HOOKS.PROVIDER_RESPONSE]: ({ response, agent }) => {
+        if (!agent) return;
+        rescueEpisodes.delete(agent);
+        setWatermarkAnchor(agent, response);
       },
 
       [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {

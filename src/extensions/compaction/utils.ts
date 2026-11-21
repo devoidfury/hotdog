@@ -73,7 +73,10 @@ export function shouldCompact(
   // so the estimate can sit below the gate while the provider is already at 100%.
   // The provider's own count from the last call is ground truth for the shared
   // prefix; treat it as a second opinion, not a replacement (a fresh turn's
-  // usage predates whatever was appended since).
+  // usage predates whatever was appended since). Callers may pass
+  // max(last-call usage, billed-anchor + appended-delta) so the second
+  // opinion tracks the live context, not a stale snapshot; the raw usage
+  // stays inside that max as the floor when no anchor is alive.
   return (actualPromptTokens ?? 0) > gate;
 }
 

@@ -117,6 +117,9 @@ export async function routeMessage(
     ? MESSAGE_HANDLERS[msg.type as C2SType]
     : undefined;
   if (!handler) {
+    // Direct-send seam: an ERROR commits the client's in-flight row, so
+    // drain this socket's batched tail before the frame lands.
+    registry.flushSocket(ws);
     ws.send(
       JSON.stringify({
         type: S2C.ERROR,

@@ -212,6 +212,10 @@ export async function handleSwitchProfile(ctx: RouteContext): Promise<void> {
       }),
     );
   } else {
+    // Direct-send seam: an ERROR commits the client's in-flight row, so
+    // drain this socket's batched tail before the frame lands (the success
+    // ack above is a non-committing notice and rides raw by doctrine).
+    registry.flushSocket(ws);
     ws.send(
       JSON.stringify({
         type: S2C.ERROR,

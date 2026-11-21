@@ -2683,3 +2683,73 @@ describe("history image stubs (ruling C)", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 });
+
+describe("stream-batch tolerance (the server-side coalescer's merged frames)", () => {
+  // The coalescer (webui.streamBatchMs) ships the first frame of a burst and
+  // ONE concatenated frame after it; the renderer must not assume per-token
+  // granularity. The invariant: the merged posture leaves the DOM exactly as
+  // the per-token posture (the unbatched stream) leaves it.
+  function twin(): { el: HTMLElement; mgr: MessageListManager } {
+    const el = document.createElement("div");
+    (el as unknown as { clientHeight: number }).clientHeight = 500;
+    return { el, mgr: createMessageList(el) };
+  }
+
+  it("one concatenated text frame renders exactly like the per-token stream", () => {
+    const parts = [
+      "Hello ", "# Head\n\n", "alpha **bold** ", "and a list\n\n",
+      "- one\n", "- two\n\n", "```js\n", "const x = 1;\n", "```\n", "tail",
+    ];
+    const perToken = twin();
+    for (const p of parts) perToken.mgr.handleStreamingChunk({ content: p });
+    const merged = twin();
+    merged.mgr.handleStreamingChunk({ content: parts[0]! });
+    merged.mgr.handleStreamingChunk({ content: parts.slice(1).join("") });
+
+    const a = perToken.el.querySelector(".message.assistant .content")!;
+    const b = merged.el.querySelector(".message.assistant .content")!;
+    // Same blocks, same indices, same per-block markup, same per-block text.
+    // The whole-container textContent may differ by whitespace TEXT NODES
+    // between block tags (a first paint via innerHTML keeps mdTreeToHtml's
+    // join newlines, incremental updates append nodes directly) -- invisible
+    // in a real browser, so the per-block pairing is the true invariant.
+    const blocksOf = (root: Element) =>
+      [...root.children].map((n) => [n.getAttribute("data-block-index"), n.innerHTML, n.textContent]);
+    expect(blocksOf(b)).toEqual(blocksOf(a));
+  });
+
+  it("one concatenated reasoning frame renders exactly like the per-token thinking stream", () => {
+    const parts = ["thinking ", "about `code` ", "and *more*\n\n", "done"];
+    const perToken = twin();
+    for (const p of parts) perToken.mgr.handleStreamingReasoningChunk({ content: p });
+    const merged = twin();
+    merged.mgr.handleStreamingReasoningChunk({ content: parts[0]! });
+    merged.mgr.handleStreamingReasoningChunk({ content: parts.slice(1).join("") });
+
+    const a = perToken.el.querySelector(".thinking-block")!;
+    const b = merged.el.querySelector(".thinking-block")!;
+    expect(b.innerHTML.replace(/\n/g, "")).toBe(a.innerHTML.replace(/\n/g, ""));
+    expect(b.querySelector("code")!.textContent).toBe("code");
+    expect(b.querySelector("em")!.textContent).toBe("more");
+  });
+
+  it("a latest-wins collapsed tool preview still lands the newest partial and upgrades on the final frame", () => {
+    // What the batcher leaves on the wire for a collapsed burst: the FIRST
+    // partial, then the NEWEST one. The preview replaces on each frame, so
+    // the rendered state equals the unbatched stream's final state.
+    ml.handleStreamingToolCall({ index: 0, name: "write", args: "{" });
+    ml.handleStreamingToolCall({ index: 0, name: "write", args: "{\"path\":\"/tmp/a\",\"body\":\"...\"}" });
+    const preview = container.querySelector(".tool-call-stream-preview")!;
+    expect(preview.textContent).toBe("{\"path\":\"/tmp/a\",\"body\":\"...\"}");
+    ml.handleToolCall({
+      name: "write",
+      args: '{"path":"/tmp/a","body":"..."}',
+      toolCallId: "c0",
+    });
+    // The preview bubble upgrades into the final block (no second bubble).
+    expect(container.querySelectorAll(".tool-call-block.tool-call-streaming")).toHaveLength(0);
+    const blocks = [...container.querySelectorAll(".tool-call-block")];
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).toContain("write");
+  });
+});

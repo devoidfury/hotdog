@@ -33,6 +33,9 @@ function stubRegistry(overrides: Record<string, unknown> = {}): any {
     removeChannel: () => {},
     registerConnection: () => {},
     removePendingAuth: () => {},
+    // Direct-send seam: handlers drain the target socket's stream batches
+    // before raw ERROR sends; the stub has no batches.
+    flushSocket: () => {},
     sendTaskSnapshot: () => {},
     broadcast: () => {},
     broadcastExcept: () => {},

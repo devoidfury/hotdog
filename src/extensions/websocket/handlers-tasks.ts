@@ -54,6 +54,11 @@ export function handleQuestionAnswer(ctx: RouteContext): void {
   // broadcast fires. (Interactive sids answer byte-identically below; the
   // rest of the kind-table refusals are B3's.)
   if (registry.getRow(sid)?.kind === "worker") {
+    // Direct-send seam: this ERROR commits the client's in-flight row
+    // (handleError -> finalizeAssistant), so the socket's own buffered
+    // stream tail (worker-tail frames ride the batched publish path) must
+    // ship first or it renders as a stray post-commit row.
+    registry.flushSocket(ws);
     ws.send(
       JSON.stringify({
         type: S2C.ERROR,
@@ -71,6 +76,9 @@ export function handleQuestionAnswer(ctx: RouteContext): void {
       answers,
     });
   } else {
+    // Direct-send seam (stale multi-tab answer): the ERROR commits the row,
+    // so drain this socket's batches before it lands mid-window.
+    registry.flushSocket(ws);
     ws.send(
       JSON.stringify({
         type: S2C.ERROR,

@@ -52,6 +52,12 @@ export interface SessionRegistryOptions {
    *  run uncoordinated: two live sessions double up requests on one backend
    *  instead of queueing on the lane. */
   turnLanes?: TurnLanes;
+  /** Live stream-batch window reader (webui.streamBatchMs), handed to every
+   *  channel the hub creates; per-frame read, so panel edits apply without a
+   *  restart. Omitted = off (raw embedders keep today's byte behavior). */
+  streamBatchMs?: () => number;
+  /** Injectable stream-batch timer for deterministic tests. */
+  streamBatchTimer?: (cb: () => void, ms: number) => () => void;
 }
 
 export class SessionRegistry {
@@ -73,6 +79,8 @@ export class SessionRegistry {
       getSession: (sessionId) => this.#sessions.get(sessionId),
       getRow: (sessionId) => this.#sessions.getRow(sessionId),
       getSessionManager: () => this.#sessions.getSessionManager(),
+      streamBatchMs: options.streamBatchMs,
+      streamBatchTimer: options.streamBatchTimer,
     });
   }
 
@@ -140,6 +148,12 @@ export class SessionRegistry {
 
   broadcast(msg: Record<string, unknown>): void {
     this.#hub.broadcast(msg);
+  }
+
+  /** Drain ONE socket's stream batches before a direct `ws.send` that can
+   *  carry a transcript-committing frame (S2C.ERROR); see ChannelHub. */
+  flushSocket(ws: HotdogServerSocket<unknown>): void {
+    this.#hub.flushSocket(ws);
   }
 
   /**

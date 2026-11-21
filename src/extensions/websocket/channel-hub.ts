@@ -23,6 +23,11 @@ export interface ChannelHubOptions {
   getRow(sessionId: string): SessionMetadata | null;
   /** The private SessionManager the WebSocketChannel subscribes through. */
   getSessionManager(): SessionManager;
+  /** Live stream-batch window reader handed to every created channel
+   *  (webui.streamBatchMs, per-frame read; omitted = off). */
+  streamBatchMs?: () => number;
+  /** Injectable stream-batch timer for deterministic tests. */
+  streamBatchTimer?: (cb: () => void, ms: number) => () => void;
 }
 
 export class ChannelHub {
@@ -57,8 +62,50 @@ export class ChannelHub {
   }
 
   broadcast(msg: Record<string, unknown>): void {
+    // The raw fan-out (sendSafe over every connection) bypasses each
+    // watcher's stream batcher, so ANY same-session frame broadcast here --
+    // SESSION_STATE, QUESTION (resume.ts re-presents a held question),
+    // QUESTION_ANSWERED (answer echo / dismiss) -- would otherwise land on a
+    // watcher's socket BEFORE its own still-buffered chunk (the bus
+    // dispatches per channel; a raw frame from anyone's path overtakes
+    // everyone else's window). Drain every channel of the frame's session
+    // first: per-session order holds on EVERY socket, not just the writer's.
+    const sid = typeof msg.sessionId === "string" ? msg.sessionId : null;
+    if (sid) this.flushSession(sid);
     for (const ws of this.#allConnections) {
       ChannelHub.sendSafe(ws, msg);
+    }
+  }
+
+  /**
+   * Drain the stream batch of every channel of one session (the raw fan-out
+   * seam, see broadcast()). A no-op when the session has no watchers or an
+   * empty buffer.
+   */
+  flushSession(sessionId: string): void {
+    const channels = this.#channels.get(sessionId);
+    if (!channels) return;
+    for (const ch of channels) ch.flushPending();
+  }
+
+  /**
+   * Drain the stream batches of every channel of ONE SOCKET (the direct-send
+   * seam). A raw `ws.send(...)` from a handler is neither a hub method nor a
+   * channel sink, so it lands on the socket instantly while that socket's
+   * batch window is open -- an S2C.ERROR frame (whose client handler commits
+   * the in-flight row: message-list handleError -> finalizeAssistant) would
+   * otherwise overtake the requester's own still-buffered tail, and the
+   * flushed continuation would render as a stray post-commit row. Same
+   * doctrine as flushSession, keyed on the destination socket instead of the
+   * session. Synchronous; a no-op when the socket has no channels or empty
+   * buffers; knob 0 already ships everything, so flushing changes nothing;
+   * other sockets' channels are untouched.
+   */
+  flushSocket(ws: HotdogServerSocket<unknown>): void {
+    for (const channels of this.#channels.values()) {
+      for (const ch of channels) {
+        if (ch.ws === ws) ch.flushPending();
+      }
     }
   }
 
@@ -67,6 +114,8 @@ export class ChannelHub {
    * for the adopting socket, which already refreshed its sidebar.
    */
   broadcastExcept(except: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
+    const sid = typeof msg.sessionId === "string" ? msg.sessionId : null;
+    if (sid) this.flushSession(sid);
     for (const ws of this.#allConnections) {
       if (ws === except) continue;
       ChannelHub.sendSafe(ws, msg);
@@ -76,6 +125,11 @@ export class ChannelHub {
   /** Send to sockets whose active session is `sessionId`: task traffic never crosses sessions. */
   broadcastScoped(sessionId: string, msg: Record<string, unknown>): void {
     if (!sessionId) return;
+    // Same raw-fan-out seam as broadcast(): the target sockets' channels for
+    // this session drain first, so a scoped frame (TASK_UPDATE rows ticking
+    // while the session streams) never overtakes that session's buffered
+    // chunk on any of them.
+    this.flushSession(sessionId);
     for (const ws of this.#allConnections) {
       if (ws.activeSessionId === sessionId) ChannelHub.sendSafe(ws, msg);
     }
@@ -132,6 +186,10 @@ export class ChannelHub {
       sessionManager: this.#options.getSessionManager(),
       ws,
       sessionId,
+      // The drain for the raw fan-out lives in broadcast() itself (keyed by
+      // the frame's sessionId), so every raw same-session frame -- this
+      // SESSION_STATE path AND the resume/handlers question broadcasts --
+      // flushes the watchers' batches first.
       broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
       // Live TOOL_CALL args summaries and display parts read the tool's
       // display hints off the session agent's registry (same metadata the
@@ -139,6 +197,8 @@ export class ChannelHub {
       argDisplay: (toolName) => metaOf(toolName)?.argDisplay,
       headerKeys: (toolName) => metaOf(toolName)?.headerKeys,
       display: (toolName) => metaOf(toolName)?.display,
+      streamBatchMs: this.#options.streamBatchMs,
+      streamBatchTimer: this.#options.streamBatchTimer,
     });
 
     if (!this.#channels.has(sessionId)) {
@@ -184,13 +244,16 @@ export class ChannelHub {
    * the row's channel set -- the same activeSessionId-scope semantics
    * broadcastScoped gives, since a channel exists exactly for the session
    * its socket is on). B3's worker live-tail delivery path; interactive
-   * rows keep flowing through the event-bus subscription.
+   * rows keep flowing through the event-bus subscription. Each channel's
+   * OWN stream batcher coalesces (per-watcher buffers: one busy worker never
+   * delays another session), and non-streaming frames flush-before-send in
+   * each channel just like the interactive write() path.
    */
   publish(sessionId: string, frame: Record<string, unknown>): void {
     const channels = this.#channels.get(sessionId);
     if (!channels) return;
     for (const ch of channels) {
-      ChannelHub.sendSafe(ch.ws, frame);
+      ch.deliverFrame(frame);
     }
   }
 

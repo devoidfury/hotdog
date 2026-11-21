@@ -21,6 +21,7 @@ import {
 } from "@core/config/providers.ts";
 import { S2C, C2SMessage } from "./protocol.ts";
 import { taskWire, toS2CMessage } from "./wire-messages.ts";
+import { resolveStreamBatchMs } from "./stream-batcher.ts";
 import { TaskManager } from "@core/session/task-manager.ts";
 import type { TaskObserverEvent } from "@core/session/task-types.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
@@ -239,6 +240,13 @@ export function createWsServer(
     profiles,
     sttTarget,
     turnLanes,
+    // Stream batching (webui.streamBatchMs): a READER over the live config
+    // consulted per frame -- the same doctrine as the question getPolicy
+    // read below -- so a panel edit lands on the next frame without a
+    // restart. 0 = off = byte-identical passthrough; a missing/garbage block
+    // (mock cores, embedders without a webui section) falls to the schema
+    // default via resolveStreamBatchMs.
+    streamBatchMs: () => resolveStreamBatchMs(core.config),
     // Posture strip source: a READER over the live resolved plane, consulted
     // per payload -- the strip follows store.current() instead of holding the
     // boot bag reference (B3).
@@ -776,6 +784,9 @@ export function createWsServer(
       ) as C2SMessage;
     } catch {
       try {
+        // Direct-send seam: an ERROR commits the client's in-flight row, so
+        // drain this socket's batched tail before the frame lands.
+        registry.flushSocket(ws);
         ws.send(JSON.stringify({ type: S2C.ERROR, message: "Invalid JSON" }));
       } catch {}
       return;

@@ -781,6 +781,32 @@ describe("createWsServer", () => {
     expect(msg.message).toBe("Invalid JSON");
   });
 
+  it("an Invalid JSON error never overtakes the socket's own batched tail", async () => {
+    // Stream-batching direct-send seam: the Invalid JSON ERROR lands raw on
+    // the requester's socket while its batch window (default knob 100) is
+    // open; the client's handleError FINALIZES the in-flight row, so the
+    // buffered tail would render as a stray post-commit row. The send is
+    // preceded by registry.flushSocket(ws): the wire must be
+    // [head, merged tail, error], nothing left for the window expiry.
+    const ws = await connectWithSession();
+    await new Promise((r) => setTimeout(r, 20)); // let the attach chatter settle
+    const sid = (ws as unknown as HotdogServerSocket).activeSessionId!;
+    const before = ws.messages.length;
+    // Real channel, real default-on window: head ships, tail buffers.
+    wsServer.sessionRegistry.publish(sid, { type: S2C.STREAMING_CHUNK, sessionId: sid, content: "Head" });
+    wsServer.sessionRegistry.publish(sid, { type: S2C.STREAMING_CHUNK, sessionId: sid, content: "tail" });
+    expect(ws.messages.length).toBe(before + 1);
+
+    wsServer.onMessage(ws, "not valid json");
+
+    const frames = ws.messages.slice(before).map((m) => JSON.parse(m));
+    expect(frames.map((f) => f.type)).toEqual([S2C.STREAMING_CHUNK, S2C.STREAMING_CHUNK, S2C.ERROR]);
+    expect(frames[1].content).toBe("tail"); // drained ahead of the commit frame
+    expect(frames[2].message).toBe("Invalid JSON");
+    await new Promise((r) => setTimeout(r, 150)); // the armed window is long gone
+    expect(ws.messages.length).toBe(before + 3); // expiry adds nothing
+  });
+
   it("handles message without type", async () => {
     const ws = await connectWithSession();
 

@@ -43,6 +43,12 @@
           "type": "string",
           "default": "",
           "description": "Reverse proxy IP or CIDR whose x-forwarded-for header the login rate limiter may believe (e.g. \"127.0.0.1\" or \"10.0.0.0/8\"). Empty (default): x-forwarded-for is never believed and the throttle keys on the direct socket peer; see docs/config-reference.md."
+        },
+        "streamBatchMs": {
+          "type": "number",
+          "default": 100,
+          "minimum": 0,
+          "description": "Stream-batch window (ms) for the session websocket: the first streaming frame of a burst ships immediately, later text/reasoning chunks concatenate and tool-call partials collapse latest-wins inside the window; any other frame flushes before it. 0 = off (one frame per event, the pre-batching behavior). Read per frame: a panel edit applies to the next frame, no restart."
         }
       },
       "additionalProperties": false,

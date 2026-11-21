@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **webui - stream batching cuts streaming frame traffic behind `webui.streamBatchMs` (default 100ms, 0 = off).** The first frame of a burst ships immediately; later text/reasoning chunks concatenate and tool-call partials collapse latest-wins within the window, so a 500-token answer costs a handful of frames instead of 500. Any other frame flushes the buffer before itself, so per-session ordering is strict and worst-case added latency is one window; the knob is read per frame, a settings edit applies with no restart.
+
 - **compaction - the overflow rescue bills the provider's real number as a floor.** The prompt size the provider billed on the last accepted request (cached included) rides the live context as a watermark, so triggers, plausibility gates, and re-aim targets are measured against what the provider actually sees -- system prompt, tool schemas, tokenizer density, image billing -- instead of the local chars/4 estimate alone. Any shrink, rewrite, or non-prefix edit of the context drops the watermark back to the local estimate; with no anchor the behavior is unchanged.
 
 - **compaction - compaction survives restarts.** Every successful reduction now checkpoints the durable session log (marker + the live post-compaction context, written atomically; summary-less rescues get an honest mechanical line), and resume replays from the last checkpoint instead of the whole log -- a restarted session no longer re-inflates history the live session had already compacted. Landing tip: existing logs carry no marker yet, so run `/compact` once in long sessions right after upgrading to stamp the first checkpoint.

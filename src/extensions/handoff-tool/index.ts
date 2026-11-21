@@ -20,8 +20,7 @@ function formatBytes(bytes: number): string {
 
 interface HandoffPayload {
   content: string;
-  title?: string;
-  instructions?: string;
+  failedAttempts?: string[];
   files?: string[];
 }
 
@@ -34,24 +33,23 @@ export class HandoffTool {
   toToolDef() {
     return toolDef(
       HandoffTool.TOOL_NAME,
-      "Transition to a new phase by clearing context and restarting with a prepared plan. Use when transitioning work phase, examples: planning → execution, research → implementation, analysis → action, or need fresh focus on essential context, or when asked to prepare a plan and execute. Be thorough — this is your only bridge to the next phase, but don't paste file contents, and don't over-describe what's inside the files.",
+      "Transition to a new phase by clearing context and restarting with a prepared plan. Use when transitioning work phase, examples: planning → execution, research → implementation, analysis → action, or need fresh focus on essential context, or when asked to prepare a plan and execute. Be thorough yet concise. Don't paste file contents, and don't over-describe what's inside the files.",
       {
         properties: {
           content: param(
             "string",
-            "The handoff content - a clear and concise summary of the task and key decision items for the next phase. This becomes the starting point for the fresh conversation.",
+            "The handoff content - a clear summary of the task and instructions for the next phase.",
           ),
-          title: param(
-            "string",
-            "Optional title for this handoff phase. Used for clarity in the restarted conversation.",
-          ),
-          instructions: param(
-            "string",
-            "Optional specific instructions for the next phase beyond what's in content. These are prefixed to the handoff message to guide the agent's behavior.",
+          failedAttempts: param(
+            "array",
+            "Optional list of approaches tried that failed, saying what was attempted and why it did not work, to avoid repeating dead-ends. Omit anything not relevant to remaining work.",
+            {
+              items: { type: "string" },
+            },
           ),
           files: param(
             "array",
-            "Optional list of file paths relevant to the next phase. Files that exist and are under the auto-include size limit are inlined into the handoff automatically; the rest are listed with their size, or 'not found' if they don't exist yet (e.g. files to be created).",
+            "Optional list of file paths relevant to the next phase.",
             {
               items: { type: "string" },
             },
@@ -70,8 +68,9 @@ export class HandoffTool {
 
     const payload: HandoffPayload = {
       content: args.content,
-      title: (args.title as string) || undefined,
-      instructions: (args.instructions as string) || undefined,
+      failedAttempts: Array.isArray(args.failedAttempts)
+        ? (args.failedAttempts as string[]).filter((f) => typeof f === "string")
+        : undefined,
       files: Array.isArray(args.files)
         ? (args.files as string[]).filter((f) => typeof f === "string")
         : undefined,
@@ -85,11 +84,9 @@ export class HandoffTool {
 
     return ToolResult.stop(
       `Handoff prepared. Context will be cleared and the agent will restart with your plan.\n\n` +
-        `${payload.title ? `Title: ${payload.title}\n\n` : ""}` +
         `Your handoff content has been captured and will be the starting point for the next phase.`,
     ).withEntries({
       status: "handoff_ready",
-      title: payload.title || "",
     });
   }
 }
@@ -208,8 +205,8 @@ export function create(core: CoreContext): ExtensionInstance {
 
   // Formats the handoff payload as the first user message of the fresh
   // conversation, as semantic content parts (see context/wrappers.ts): the
-  // harness framing is `text`, the model-authored title/instructions/plan
-  // ride `untrusted` parts (mangled at the wire regardless of the message's
+  // harness framing is `text`, the model-authored plan/failed-attempts ride
+  // `untrusted` parts (mangled at the wire regardless of the message's
   // provenance), and inlined files ride `file-include` wrapper parts so the
   // wire frames them per the format's trust spec and every sink can split
   // them out as attachments. No hand-rolled fences.
@@ -219,17 +216,17 @@ export function create(core: CoreContext): ExtensionInstance {
   ): Promise<Array<Record<string, unknown>>> {
     const parts: Array<Record<string, unknown>> = [];
 
-    if (payload.title) {
-      parts.push({ type: "untrusted", text: `# ${payload.title}\n\n` });
-    }
-
-    if (payload.instructions) {
-      parts.push({ type: "text", text: "## Instructions\n" });
-      parts.push({ type: "untrusted", text: `${payload.instructions}\n\n` });
-    }
-
     parts.push({ type: "text", text: "## Plan\n" });
     parts.push({ type: "untrusted", text: payload.content });
+
+    if (payload.failedAttempts && payload.failedAttempts.length > 0) {
+      parts.push({ type: "text", text: "\n\n## Tried and Failed\n" });
+      // Dead ends are model-authored too, and the lines interpolate them.
+      parts.push({
+        type: "untrusted",
+        text: payload.failedAttempts.map((f) => `- ${f}`).join("\n"),
+      });
+    }
 
     if (payload.files && payload.files.length > 0) {
       const { includes, notes } = await collectFiles(payload.files, workspace);

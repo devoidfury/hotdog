@@ -178,7 +178,7 @@ export class TaskExecution {
         // wait note); the bare outcome word read as a fault to the manager.
         // omitMeta (see utils/tool-content.ts): this string is delivered as
         // the manager's task result AND renders in its transcript, and a
-        // stop-tool meta envelope (handoff's status/title) only restates the
+        // stop-tool meta envelope (handoff's status) only restates the
         // prose it sits under -- the same ruling that zeroed wait's meta.
         const content = toolContentText(runResult.content, undefined, { omitMeta: true });
         turn = {

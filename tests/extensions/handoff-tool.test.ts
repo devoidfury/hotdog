@@ -13,8 +13,7 @@ import { bootLiveStore, publishLive, createWithLiveStore } from "../mocks/config
 
 interface TestPayload {
   content: string;
-  title?: string;
-  instructions?: string;
+  failedAttempts?: string[];
   files?: string[];
 }
 
@@ -44,15 +43,17 @@ describe("HandoffTool", () => {
       const def = tool.toToolDef();
       const props = def.function.parameters.properties as Record<string, { type: string }>;
       expect(props.content).toEqual(expect.objectContaining({ type: "string" }));
-      expect(props.title).toEqual(expect.objectContaining({ type: "string" }));
-      expect(props.instructions).toEqual(expect.objectContaining({ type: "string" }));
+      expect(props.failedAttempts).toEqual(expect.objectContaining({ type: "array" }));
       expect(props.files).toEqual(expect.objectContaining({ type: "array" }));
     });
 
-    it("defines files as string array", () => {
+    it("defines files and failedAttempts as string arrays", () => {
       const def = tool.toToolDef();
-      const filesParam = (def.function.parameters.properties as Record<string, unknown>).files as { items: { type: string } };
+      const props = def.function.parameters.properties as Record<string, unknown>;
+      const filesParam = props.files as { items: { type: string } };
       expect(filesParam.items.type).toBe("string");
+      const attemptsParam = props.failedAttempts as { items: { type: string } };
+      expect(attemptsParam.items.type).toBe("string");
     });
   });
 
@@ -61,16 +62,14 @@ describe("HandoffTool", () => {
     it("stores handoff payload in state", async () => {
       const input = JSON.stringify({
         content: "Implement the feature",
-        title: "Execution Phase",
-        instructions: "Go step by step",
+        failedAttempts: ["Regex parser (backtracking blew up on nested input)"],
         files: ["src/main.ts"],
       });
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
       expect(pending.get("default")).toEqual({
         content: "Implement the feature",
-        title: "Execution Phase",
-        instructions: "Go step by step",
+        failedAttempts: ["Regex parser (backtracking blew up on nested input)"],
         files: ["src/main.ts"],
       });
     });
@@ -94,6 +93,16 @@ describe("HandoffTool", () => {
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
       expect(pending.get("default")?.files).toEqual(["src/main.ts"]);
+    });
+
+    it("filters non-string items from failedAttempts array", async () => {
+      const input = JSON.stringify({
+        content: "Plan",
+        failedAttempts: ["curl approach", 42, null],
+      });
+      const result = await tool.execute(input, null!);
+      expect(result.success).toBe(true);
+      expect(pending.get("default")?.failedAttempts).toEqual(["curl approach"]);
     });
 
     it("keys the payload by the agent's session id from the tool context", async () => {
@@ -120,7 +129,7 @@ describe("HandoffTool", () => {
 
     it("returns error for missing content", async () => {
       const input = JSON.stringify({
-        title: "No content here",
+        failedAttempts: ["nothing without a plan"],
       });
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(false);
@@ -151,12 +160,11 @@ describe("HandoffTool", () => {
     it("includes handoff_ready status in metadata", async () => {
       const input = JSON.stringify({
         content: "Plan",
-        title: "Test",
+        failedAttempts: ["the old approach"],
       });
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
       expect(result.metadata!.get("status")).toBe("handoff_ready");
-      expect(result.metadata!.get("title")).toBe("Test");
     });
   });
 });
@@ -234,8 +242,7 @@ describe("handoff-tool create() extension", () => {
     await handoffTool.execute(
       JSON.stringify({
         content: "Execute the plan",
-        title: "Execution Phase",
-        instructions: "Be careful",
+        failedAttempts: ["Rewriting the parser by hand (too slow to finish)"],
         files: ["src/main.ts"],
       }),
       null!,
@@ -274,11 +281,10 @@ describe("handoff-tool create() extension", () => {
     const { content, opts } = enqueuedMessages[0]!;
     expect(opts?.source).toBe("harness");
     const message = contentToText(content);
-    expect(message).toContain("# Execution Phase");
-    expect(message).toContain("## Instructions");
-    expect(message).toContain("Be careful");
     expect(message).toContain("## Plan");
     expect(message).toContain("Execute the plan");
+    expect(message).toContain("## Tried and Failed");
+    expect(message).toContain("- Rewriting the parser by hand (too slow to finish)");
     expect(message).toContain("## Relevant Files");
     expect(message).toContain("src/main.ts");
     expect(message).toContain("started from a handoff");
@@ -288,15 +294,15 @@ describe("handoff-tool create() extension", () => {
       .filter((p) => p.type === "untrusted")
       .map((p) => String(p.text))
       .join("\n");
-    expect(untrusted).toContain("Execution Phase");
-    expect(untrusted).toContain("Be careful");
     expect(untrusted).toContain("Execute the plan");
+    expect(untrusted).toContain("Rewriting the parser by hand (too slow to finish)");
     // Structural framing is harness text.
     const trustedText = content
       .filter((p) => p.type === "text")
       .map((p) => String(p.text))
       .join("\n");
     expect(trustedText).toContain("## Plan");
+    expect(trustedText).toContain("## Tried and Failed");
     expect(trustedText).toContain("## Relevant Files");
     expect(trustedText).toContain("started from a handoff");
   });
@@ -367,8 +373,8 @@ describe("handoff-tool create() extension", () => {
     ctxA.set("agent", { sessionId: "session-a" });
     const ctxB = new ToolContext();
     ctxB.set("agent", { sessionId: "session-b" });
-    await handoffTool.execute(JSON.stringify({ content: "Plan A", title: "A" }), ctxA);
-    await handoffTool.execute(JSON.stringify({ content: "Plan B", title: "B" }), ctxB);
+    await handoffTool.execute(JSON.stringify({ content: "Plan A", failedAttempts: ["A dead end"] }), ctxA);
+    await handoffTool.execute(JSON.stringify({ content: "Plan B" }), ctxB);
 
     const enqueuedA: string[] = [];
     const enqueuedB: string[] = [];

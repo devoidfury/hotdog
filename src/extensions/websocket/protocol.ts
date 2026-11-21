@@ -1129,12 +1129,14 @@ export interface TaskInfoWire {
 }
 
 /**
- * Preview ceiling on a `streamingToolCall` frame's accumulated args (see
- * s2cStreamingToolCall). The frame repeats the WHOLE partial on every wire
- * delta, so an uncapped write call (a 200 KB file body streamed in 1 KB
- * deltas) would push tens of megabytes of preview the transcript can never
- * show. Beyond the cap the client sees the head plus the marker; the final
- * `toolCall` frame carries the complete args either way.
+ * Preview ceiling on a `streamingToolCall` frame (see s2cStreamingToolCall):
+ * the ASSEMBLED preview never shows more than this, whichever posture rides.
+ * Uncapped, a 200 KB write body streamed in 1 KB deltas would push tens of
+ * megabytes of preview the transcript can never show. Beyond the cap the
+ * client sees the head plus the `...[truncated]` marker (cumulative posture
+ * caps the repeated frame; delta posture caps the sum of increments, ships
+ * the marker once, then stops the slot). The final `toolCall` frame carries
+ * the complete args either way.
  */
 export const MAX_STREAMING_TOOL_CALL_ARGS_CHARS = 2000;
 

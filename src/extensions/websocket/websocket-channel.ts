@@ -4,7 +4,7 @@
 import { Channel, ChannelSessionManager } from "@core/channel.ts";
 import { OUTPUT_EVENT, OutputEvent } from "@core/context/output.ts";
 import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
-import { toS2CMessage } from "./wire-messages.ts";
+import { toS2CMessage, type StreamingToolCapIndex } from "./wire-messages.ts";
 import { StreamBatcher } from "./stream-batcher.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -56,6 +56,13 @@ export class WebSocketChannel extends Channel {
   #headerKeys: ((toolName: string) => readonly string[] | undefined) | undefined;
   #display: ((toolName: string) => ToolDisplaySpec[] | undefined) | undefined;
   #batcher: StreamBatcher;
+  /**
+   * Per-index cap bookkeeping for the delta posture (this socket's preview).
+   * Cleared when a call round commits (the final TOOL_CALL frame -- all its
+   * deltas have provably streamed by then) and on a stream reset; an
+   * unattested socket never grows it.
+   */
+  #toolDeltaCap = new Map<number, StreamingToolCapIndex>();
 
   constructor(options: WebSocketChannelOptions) {
     super({ sessionManager: options.sessionManager });
@@ -77,10 +84,26 @@ export class WebSocketChannel extends Channel {
   protected write(event: OutputEvent): void {
     if (!this.#ready) return;
 
+    // Preview bookkeeping boundaries: a committed TOOL_CALL frame closes the
+    // round (no further deltas for its slots; the next LLM call reuses the
+    // indexes from zero), and a stream reset kills the dead attempt's calls.
+    if (
+      event.type === OUTPUT_EVENT.TOOL_CALL ||
+      event.type === OUTPUT_EVENT.STREAM_RESET
+    ) {
+      this.#toolDeltaCap.clear();
+    }
+
     const msg = toS2CMessage(event, this.#sessionId, {
       argDisplay: this.#argDisplay,
       headerKeys: this.#headerKeys,
       display: this.#display,
+      // Live posture read: the capability lands with the socket's AUTH,
+      // possibly after this channel was constructed.
+      streamToolCalls: {
+        deltas: () => this.#ws.toolCallDeltas === true,
+        emitted: this.#toolDeltaCap,
+      },
     });
     if (!msg) return; // frame-only event: stays off the wire
 

@@ -37,8 +37,15 @@ export interface StreamCallbacks {
    * Per tool-call wire delta, with the ACCUMULATED name/args so far (the
    * args are usually a partial JSON string mid-stream). Display-only
    * unescaping, same doctrine as onChunk.
+   *
+   * `argsDelta` is the INCREMENT this event added to `args` ("" on a
+   * name-only event). Sinks that want per-delta traffic (the webui preview)
+   * append it; `args` stays the full assembled partial for sinks that
+   * replace. A mangler alias split across two deltas unescapes per side the
+   * same way onChunk's per-chunk display does -- a transient fragment at the
+   * boundary, and the assembled `args`/final tool call is always authoritative.
    */
-  onToolCallDelta?: (tc: { index: number; name: string; args: string }) => void;
+  onToolCallDelta?: (tc: { index: number; name: string; args: string; argsDelta: string }) => void;
   onToolCalls?: (toolCalls: ToolCall[] | null) => void;
   onUsage?: (usage: RawUsage) => void;
   onFinish?: (reason: string | null) => void;
@@ -159,7 +166,7 @@ export class StreamProcessor {
     // the whole accumulated partial unescaped (an alias split across two
     // deltas self-heals on the next one -- transient fragment, same
     // doctrine as the per-chunk onChunk unescape).
-    const emitToolCallDelta = (index: number): void => {
+    const emitToolCallDelta = (index: number, argsDelta: string): void => {
       if (!callbacks.onToolCallDelta) return;
       const tc = toolCallsBuffer.get(index);
       if (!tc) return;
@@ -167,6 +174,7 @@ export class StreamProcessor {
         index,
         name: unescape(tc.name),
         args: unescape(tc.args.join("")),
+        argsDelta,
       });
     };
 
@@ -212,7 +220,7 @@ export class StreamProcessor {
             args: existing?.args ?? [],
             id: event.toolCallId || existing?.id || "",
           });
-          emitToolCallDelta(event.index);
+          emitToolCallDelta(event.index, "");
           break;
         }
 
@@ -225,7 +233,11 @@ export class StreamProcessor {
             };
           existing.args.push(event.arguments);
           toolCallsBuffer.set(event.index, existing);
-          emitToolCallDelta(event.index);
+          // The increment in the same display space as `args`: a mangler
+          // alias split across two deltas unescapes per side (transient
+          // fragment, same per-chunk doctrine as onChunk; the assembled
+          // `args` and the final tool call stay authoritative).
+          emitToolCallDelta(event.index, unescape(event.arguments));
           break;
         }
 

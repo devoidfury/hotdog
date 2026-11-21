@@ -548,6 +548,158 @@ describe("WebSocketChannel - write()", () => {
   });
 });
 
+// ── Streaming tool-call preview postures (delta vs cumulative) ──────────────
+// One builder, two postures: a socket whose C2S AUTH attested
+// `toolCallDeltas: true` gets {index, name, delta} increments with per-index
+// cap bookkeeping; every other socket keeps the cumulative frame BYTE-
+// IDENTICAL to the pre-delta wire (the version-skew guarantee).
+
+function postureRig(attested: boolean) {
+  let savedHandler: ((event: OutputEvent) => void) | null = null;
+  const sm = createMockSessionManager({
+    onSessionEvents: mock((_sessionId, handler) => {
+      savedHandler = handler;
+      return () => {};
+    }),
+  });
+  const ws = createMockWs() as any;
+  if (attested) ws.toolCallDeltas = true;
+  new WebSocketChannel({ sessionManager: sm, ws, sessionId: "session-1" });
+  const raw = () => ws._sentMessages as string[];
+  return {
+    emit: (ev: OutputEvent) => savedHandler!(ev),
+    raw,
+    frames: () => raw().map((s) => JSON.parse(s)),
+  };
+}
+
+describe("WebSocketChannel - streaming tool-call delta posture (attested socket)", () => {
+  it("increment frames carry ONLY the delta, in the fixed field order, no args field", () => {
+    const rig = postureRig(true);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"comm', argsDelta: '{"comm' });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"command":"ls"}', argsDelta: 'and":"ls"}' });
+    expect(rig.raw()).toEqual([
+      '{"type":"streamingToolCall","sessionId":"session-1","index":0,"name":"bash","delta":"{\\"comm"}',
+      '{"type":"streamingToolCall","sessionId":"session-1","index":0,"name":"bash","delta":"and\\":\\"ls\\"}"}',
+    ]);
+    // Defense in depth on the shape: an args field would re-open the flood.
+    for (const f of rig.frames()) expect("args" in f).toBe(false);
+  });
+
+  it("a name-only event ships an empty delta (and an event without argsDelta carries no increment)", () => {
+    const rig = postureRig(true);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "", args: "", argsDelta: "" });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: "" });
+    expect(rig.frames()).toEqual([
+      { type: "streamingToolCall", sessionId: "session-1", index: 0, name: "", delta: "" },
+      { type: "streamingToolCall", sessionId: "session-1", index: 0, name: "bash", delta: "" },
+    ]);
+  });
+
+  it("parallel calls interleave without disturbing each other's slots", () => {
+    const rig = postureRig(true);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "read", args: "a", argsDelta: "a" });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: "L", argsDelta: "L" });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "read", args: "ab", argsDelta: "b" });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: "LM", argsDelta: "M" });
+    expect(rig.frames().map((f) => [f.index, f.delta])).toEqual([
+      [0, "a"],
+      [1, "L"],
+      [0, "b"],
+      [1, "M"],
+    ]);
+  });
+
+  it("the cap binds the ASSEMBLED preview: crossing frame ships head + marker once, then the slot goes silent", () => {
+    const rig = postureRig(true);
+    const head = "x".repeat(1500);
+    const cross = "y".repeat(1500);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: head, argsDelta: head });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: head + cross, argsDelta: cross });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: head + cross + "z", argsDelta: "z" });
+    // Another slot is untouched by index 0's silence.
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: "{}", argsDelta: "{}" });
+    const frames = rig.frames();
+    expect(frames).toHaveLength(3); // second delta truncated; third dropped
+    expect(frames[1]!.delta).toBe(`${"y".repeat(500)}...[truncated]`);
+    expect(frames[2]!.index).toBe(1);
+  });
+
+  it("streamReset clears the per-index bookkeeping: the retry's deltas flow again", () => {
+    const rig = postureRig(true);
+    const big = "x".repeat(MAX_STREAMING_TOOL_CALL_ARGS_CHARS + 10);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: big, argsDelta: big });
+    expect(rig.frames()[0]!.delta.endsWith("...[truncated]")).toBe(true);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: big + "z", argsDelta: "z" });
+    expect(rig.frames()).toHaveLength(1); // still latched
+    rig.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(rig.frames()[1]!.type).toBe(S2C.STREAM_RESET);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: "fresh", argsDelta: "fresh" });
+    expect(rig.frames()[2]).toEqual({
+      type: "streamingToolCall",
+      sessionId: "session-1",
+      index: 0,
+      name: "write",
+      delta: "fresh",
+    });
+  });
+
+  it("the final TOOL_CALL frame releases the slots for the next round", () => {
+    const rig = postureRig(true);
+    const big = "x".repeat(MAX_STREAMING_TOOL_CALL_ARGS_CHARS + 10);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: big, argsDelta: big });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: big + "z", argsDelta: "z" });
+    expect(rig.frames()).toHaveLength(1);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "write", input: big + "z", toolCallId: "c1" });
+    // The next LLM call reuses slot 0 from zero: no marker, no silence.
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "grep", args: "q", argsDelta: "q" });
+    const last = rig.frames()[rig.frames().length - 1]!;
+    expect(last).toEqual({
+      type: "streamingToolCall",
+      sessionId: "session-1",
+      index: 0,
+      name: "grep",
+      delta: "q",
+    });
+  });
+});
+
+describe("WebSocketChannel - streaming tool-call cumulative posture (unattested socket)", () => {
+  it("keeps today's frame BYTE-IDENTICAL, even when the event carries an argsDelta", () => {
+    const rig = postureRig(false);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"comm', argsDelta: '{"comm' });
+    // Exact serialized bytes, field order included: the legacy guarantee.
+    expect(rig.raw()[0]).toBe(
+      '{"type":"streamingToolCall","sessionId":"session-1","index":0,"name":"bash","args":"{\\"comm"}',
+    );
+  });
+
+  it("keeps the legacy cap idiom unchanged", () => {
+    const rig = postureRig(false);
+    const big = "x".repeat(MAX_STREAMING_TOOL_CALL_ARGS_CHARS + 250);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: big, argsDelta: "x".repeat(250) });
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: big, argsDelta: "" });
+    for (const raw of rig.raw()) {
+      const f = JSON.parse(raw);
+      expect(f.args).toHaveLength(MAX_STREAMING_TOOL_CALL_ARGS_CHARS + "...[truncated]".length);
+      expect(f.args.endsWith("...[truncated]")).toBe(true);
+      expect("delta" in f).toBe(false);
+    }
+  });
+
+  it("a capability that never attests never grows cap bookkeeping (junk argsDelta is inert)", () => {
+    const rig = postureRig(false);
+    rig.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: "ab", argsDelta: "ab" });
+    expect(rig.frames()[0]).toEqual({
+      type: "streamingToolCall",
+      sessionId: "session-1",
+      index: 0,
+      name: "bash",
+      args: "ab",
+    });
+  });
+});
+
 describe("WebSocketChannel - write error handling", () => {
   it("marks as not ready when an event send throws", () => {
     let savedHandler: ((event: OutputEvent) => void) | null = null;

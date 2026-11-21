@@ -1,8 +1,8 @@
 // Per-channel coalescer for the websocket S2C sink (webui.streamBatchMs).
 // Streaming frames are the only chatty traffic on a session channel: text and
-// reasoning chunks are true deltas (one frame per provider delta) and the
-// tool-call preview re-sends the CUMULATIVE partial every delta, so a 500-token
-// answer costs 500 frames of wire. The batcher keeps first paint untouched and
+// reasoning chunks are true deltas, and tool-call previews ride one of two
+// postures per frame (see s2cStreamingToolCall) -- an incrementing `delta` or
+// a repeated cumulative `args`. The batcher keeps first paint untouched and
 // folds the burst that follows:
 //
 // - FIRST frame of a burst ships IMMEDIATELY (zero added latency on the first
@@ -10,9 +10,11 @@
 // - STREAMING_CHUNK / STREAMING_REASONING_CHUNK arriving inside the window
 //   CONCATENATE into one frame per kind (byte-equal to the unbatched stream:
 //   frames are {type, sessionId, content}, concatenation only grows `content`).
-// - STREAMING_TOOL_CALL collapses LATEST-WINS per in-flight call `index`: the
-//   partial is cumulative, so every older frame is dead weight the client has
-//   already replaced. No wire change, no sequence numbers.
+// - STREAMING_TOOL_CALL merges per in-flight call `index` BY FRAME SHAPE:
+//   `delta` frames CONCATENATE (a flushed delta frame is byte-equal to the
+//   concatenated increments, the same doctrine as text); cumulative `args`
+//   frames stay LATEST-WINS (every older frame is dead weight the client has
+//   already replaced). No wire change, no sequence numbers.
 // - ANY other frame flushes the buffer BEFORE it is sent (strict per-session
 //   ordering: an assistant response / tool start/result / system message /
 //   question / stream-reset / footer-state frame is never overtaken by a
@@ -109,9 +111,36 @@ export class StreamBatcher {
 
   #merge(key: string, frame: Record<string, unknown>): void {
     if (key.startsWith("tool:")) {
-      // Cumulative partial: the newest frame per call index is all the client
-      // renders. Map.set on an existing key keeps its first-arrival position.
-      this.#pending.set(key, frame);
+      // Tool previews merge by the frame's own posture (self-describing):
+      // a `delta` frame carries an increment and CONCATENATES (the delta
+      // doctrine, mirroring text/reasoning); an `args` frame carries the
+      // cumulative partial and merges LATEST-WINS (every older frame is dead
+      // weight the client has already replaced). Mixed arrivals fold
+      // forward: buffered cumulative + incoming delta grows the cumulative
+      // (both clients show the same bytes), incoming cumulative simply
+      // wins. The slot copy exists because merging mutates, and the same
+      // frame object may fan out to sibling channels' batchers through
+      // ChannelHub.publish.
+      const existing = this.#pending.get(key);
+      if (!existing) {
+        this.#pending.set(key, { ...frame });
+        return;
+      }
+      if (typeof frame.delta === "string") {
+        if (typeof existing.delta === "string") {
+          existing.delta = `${existing.delta as string}${frame.delta}`;
+        } else if (typeof existing.args === "string") {
+          // Cumulative slot (attestation landed mid-window): fold the
+          // increment into the partial both postures render.
+          existing.args = `${existing.args as string}${frame.delta}`;
+        } else {
+          this.#pending.set(key, { ...frame });
+        }
+        return;
+      }
+      // Incoming cumulative frame: replaces the slot (Map.set on an existing
+      // key keeps its first-arrival position). Copied for the same reason.
+      this.#pending.set(key, { ...frame });
       return;
     }
     const existing = this.#pending.get(key);

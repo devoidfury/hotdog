@@ -776,9 +776,9 @@ describe("StreamProcessor", () => {
   });
 
   describe("onToolCallDelta (in-flight tool calls)", () => {
-    it("carries the accumulated name and args per index", async () => {
+    it("carries the accumulated name and args per index, plus the increment", async () => {
       const processor = createStreamProcessor();
-      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      const deltas: Array<{ index: number; name: string; args: string; argsDelta: string }> = [];
       await processEvents(
         processor,
         [
@@ -790,15 +790,18 @@ describe("StreamProcessor", () => {
       );
 
       expect(deltas).toEqual([
-        { index: 0, name: "bash", args: "" },
-        { index: 0, name: "bash", args: '{"comm' },
-        { index: 0, name: "bash", args: '{"command":"ls"}' },
+        { index: 0, name: "bash", args: "", argsDelta: "" },
+        { index: 0, name: "bash", args: '{"comm', argsDelta: '{"comm' },
+        { index: 0, name: "bash", args: '{"command":"ls"}', argsDelta: 'and":"ls"}' },
       ]);
+      // The increment doctrine: concatenated argsDelta rebuilds the full
+      // accumulated args a replace-posture sink renders.
+      expect(deltas.map((d) => d.argsDelta).join("")).toBe(deltas[2]!.args);
     });
 
     it("keeps parallel call indexes independent", async () => {
       const processor = createStreamProcessor();
-      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      const deltas: Array<{ index: number; name: string; args: string; argsDelta: string }> = [];
       await processEvents(
         processor,
         [
@@ -812,14 +815,14 @@ describe("StreamProcessor", () => {
       );
 
       // Each delta reports only ITS index's accumulated args, mid-stream.
-      expect(deltas[1]).toEqual({ index: 0, name: "read", args: '{"path"' });
-      expect(deltas[2]).toEqual({ index: 1, name: "bash", args: "" });
-      expect(deltas[4]).toEqual({ index: 0, name: "read", args: '{"path":"a.ts"}' });
+      expect(deltas[1]).toEqual({ index: 0, name: "read", args: '{"path"', argsDelta: '{"path"' });
+      expect(deltas[2]).toEqual({ index: 1, name: "bash", args: "", argsDelta: "" });
+      expect(deltas[4]).toEqual({ index: 0, name: "read", args: '{"path":"a.ts"}', argsDelta: ':"a.ts"}' });
     });
 
     it("resurrects buffered args on a resent name delta (merge, never replace)", async () => {
       const processor = createStreamProcessor();
-      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      const deltas: Array<{ index: number; name: string; args: string; argsDelta: string }> = [];
       await processEvents(
         processor,
         [
@@ -831,7 +834,8 @@ describe("StreamProcessor", () => {
         { onToolCallDelta: (tc) => deltas.push(tc) },
       );
 
-      expect(deltas[2]).toEqual({ index: 0, name: "read", args: '{"path"' });
+      // A name resend adds no argument bytes: argsDelta is empty.
+      expect(deltas[2]).toEqual({ index: 0, name: "read", args: '{"path"', argsDelta: "" });
     });
 
     it("display-unescapes the whole accumulated args, self-healing a split alias", async () => {
@@ -843,7 +847,7 @@ describe("StreamProcessor", () => {
       const mid = aliasStart + Math.floor((aliasEnd - aliasStart) / 2);
 
       const processor = createStreamProcessor();
-      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      const deltas: Array<{ index: number; name: string; args: string; argsDelta: string }> = [];
       await processEvents(
         processor,
         [
@@ -864,14 +868,14 @@ describe("StreamProcessor", () => {
 
     it("fires for toolName-only calls (no arguments ever streamed)", async () => {
       const processor = createStreamProcessor();
-      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      const deltas: Array<{ index: number; name: string; args: string; argsDelta: string }> = [];
       await processEvents(
         processor,
         [{ type: "toolName", index: 0, name: "now", toolCallId: "c1" }],
         { onToolCallDelta: (tc) => deltas.push(tc) },
       );
 
-      expect(deltas).toEqual([{ index: 0, name: "now", args: "" }]);
+      expect(deltas).toEqual([{ index: 0, name: "now", args: "", argsDelta: "" }]);
     });
   });
 });

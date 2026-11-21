@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **webui - streaming tool-call previews now ship increments instead of re-sending the whole partial.** While a tool call is still being written out, each preview frame carries just the new argument bytes instead of the entire partial again, so web traffic for tool streams drops proportionally (a 50-delta two-call stream: ~66.5 KB becomes ~16 KB unbatched); the committed tool-call frame still carries the complete args, and older clients keep the old frame shape untouched.
+
 - **webui - stream batching cuts streaming frame traffic behind `webui.streamBatchMs` (default 100ms, 0 = off).** The first frame of a burst ships immediately; later text/reasoning chunks concatenate and tool-call partials collapse latest-wins within the window, so a 500-token answer costs a handful of frames instead of 500. Any other frame flushes the buffer before itself, so per-session ordering is strict and worst-case added latency is one window; the knob is read per frame, a settings edit applies with no restart.
 
 - **compaction - the overflow rescue bills the provider's real number as a floor.** The prompt size the provider billed on the last accepted request (cached included) rides the live context as a watermark, so triggers, plausibility gates, and re-aim targets are measured against what the provider actually sees -- system prompt, tool schemas, tokenizer density, image billing -- instead of the local chars/4 estimate alone. Any shrink, rewrite, or non-prefix edit of the context drops the watermark back to the local estimate; with no anchor the behavior is unchanged.

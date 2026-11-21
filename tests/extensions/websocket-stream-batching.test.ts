@@ -115,16 +115,19 @@ function mockSessionManager(
 }
 
 /** A real WebSocketChannel driven through write() (the bus handler the
- *  constructor subscribes), on the injected clock. */
+ *  constructor subscribes), on the injected clock. `attested` flips the
+ *  socket's toolCallDeltas capability (the C2S AUTH attestation). */
 function makeChannel(
   opts: {
     streamBatchMs?: () => number;
     clock?: FakeClock;
     broadcastCallback?: (msg: Record<string, unknown>) => void;
+    attested?: boolean;
   } = {},
 ): { channel: WebSocketChannel; sent: string[]; emit: (ev: OutputEvent) => void } {
   let handler: ((ev: OutputEvent) => void) | null = null;
   const { ws, sent } = mockWs();
+  if (opts.attested) ws.toolCallDeltas = true;
   const channel = new WebSocketChannel({
     sessionManager: mockSessionManager([SID], (h) => {
       handler = h;
@@ -302,6 +305,121 @@ describe("StreamBatcher - tool-call partials collapse latest-wins per index", ()
     batcher.flush();
     expect(sent).toHaveLength(2);
     expect(sent[1]).toEqual(toolDelta(0, "grep", "{\"pat"));
+  });
+});
+
+// ── Delta posture: `delta` frames CONCATENATE per index ─────────────────────
+// The batcher merges tool-preview slots BY FRAME SHAPE: a `delta` frame is an
+// increment (text/reasoning concatenation doctrine), an `args` frame is the
+// repeated cumulative partial (latest-wins, untouched above). Slots never
+// collide across postures, and a merged window stays byte-equal to the
+// concatenated increments.
+
+function toolDeltaInc(index: number, name: string, delta: string): Record<string, unknown> {
+  return { type: S2C.STREAMING_TOOL_CALL, sessionId: SID, index, name, delta };
+}
+
+describe("StreamBatcher - tool-call delta frames concatenate per index", () => {
+  it("the flushed frame is BYTE-EQUAL to the concatenated increments; first paint still ships immediately", () => {
+    const { clock, sent, batcher } = makeBatcher(50);
+    batcher.handle(toolDeltaInc(0, "write", "{"));
+    expect(sent).toHaveLength(1); // zero added latency on the first token
+    batcher.handle(toolDeltaInc(0, "write", "\"a\":"));
+    batcher.handle(toolDeltaInc(0, "write", "1}"));
+    clock.advance(50);
+    expect(sent).toHaveLength(2);
+    expect(JSON.stringify(sent[1])).toBe(
+      JSON.stringify({
+        type: S2C.STREAMING_TOOL_CALL,
+        sessionId: SID,
+        index: 0,
+        name: "write",
+        delta: "\"a\":1}",
+      }),
+    );
+  });
+
+  it("concatenating the shipped deltas reassembles the unbatched stream exactly", () => {
+    const parts = ["{", "\"a\":", "1}", ",\"b\":2}"];
+    const { clock, sent, batcher } = makeBatcher(50);
+    for (const p of parts) batcher.handle(toolDeltaInc(0, "write", p));
+    clock.advance(50);
+    const joined = sent.map((f) => f.delta as string).join("");
+    expect(joined).toBe(parts.join(""));
+  });
+
+  it("interleaved parallel calls keep one concatenation slot each, in first-arrival order", () => {
+    const { clock, sent, batcher } = makeBatcher(50);
+    batcher.handle(toolDeltaInc(0, "write", "a")); // immediate
+    batcher.handle(toolDeltaInc(1, "bash", "L")); // slot tool:1
+    batcher.handle(toolDeltaInc(0, "write", "b")); // slot tool:0
+    batcher.handle(toolDeltaInc(1, "bash", "M"));
+    clock.advance(50);
+    expect(sent).toHaveLength(3);
+    expect(sent.slice(1).map((f) => [f.index, f.delta])).toEqual([
+      [1, "LM"],
+      [0, "b"],
+    ]);
+  });
+
+  it("a mixed slot folds an incoming increment into the buffered cumulative partial", () => {
+    // The attestation lands mid-window: the slot holds an args frame, the
+    // next frame is a delta. Growing the partial keeps BOTH clients honest.
+    const { clock, sent, batcher } = makeBatcher(50);
+    batcher.handle(toolDelta(0, "bash", "{")); // immediate
+    batcher.handle(toolDelta(0, "bash", "{\"a\":")); // cumulative slot
+    batcher.handle(toolDeltaInc(0, "bash", "1}"));
+    clock.advance(50);
+    expect(sent[1]).toEqual(toolDelta(0, "bash", "{\"a\":1}"));
+  });
+
+  it("an incoming cumulative frame wins over a buffered delta slot (latest-wins kept for args)", () => {
+    const { clock, sent, batcher } = makeBatcher(50);
+    batcher.handle(toolDeltaInc(0, "bash", "x")); // immediate
+    batcher.handle(toolDeltaInc(0, "bash", "y")); // delta slot
+    batcher.handle(toolDelta(0, "bash", "complete")); // cumulative frame arrives
+    clock.advance(50);
+    expect(sent[1]).toEqual(toolDelta(0, "bash", "complete"));
+  });
+
+  it("the slot copy keeps the batcher from mutating a shared fan-out frame", () => {
+    // ChannelHub.publish hands the SAME frame object to sibling batchers:
+    // concatenation must not double-append on the second channel.
+    const frame = toolDeltaInc(0, "bash", "a");
+    const { batcher, sent } = makeBatcher(50);
+    batcher.handle(frame); // immediate: unbuffered, sent as-is
+    batcher.handle(frame); // buffered copy grows, never the original
+    batcher.handle(frame);
+    expect(frame.delta).toBe("a");
+    batcher.flush();
+    expect(sent[1]!.delta).toBe("aa");
+  });
+});
+
+describe("WebSocketChannel - both postures batch on separate channels at once", () => {
+  it("an attested socket concatenates increments while a legacy socket collapses latest-wins", () => {
+    const clock = new FakeClock();
+    const fast = makeChannel({ streamBatchMs: () => 50, clock, attested: true });
+    const legacy = makeChannel({ streamBatchMs: () => 50, clock });
+    const script: OutputEvent[] = [
+      { type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: "{", argsDelta: "{" },
+      { type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: "{\"a\":", argsDelta: "\"a\":" },
+      { type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: "{\"a\":1}", argsDelta: "1}" },
+    ];
+    for (const ev of script) {
+      fast.emit(ev);
+      legacy.emit(ev);
+    }
+    clock.advance(50);
+    const fastFrames = fast.sent.map((s) => JSON.parse(s));
+    const legacyFrames = legacy.sent.map((s) => JSON.parse(s));
+    // Attested: increment frames; the merged window carries the concatenation
+    // of what the burst held, and the full-delta reassembly equals the wire.
+    expect(fastFrames.map((f) => f.delta)).toEqual(["{", "\"a\":1}"]);
+    expect(fastFrames.every((f) => !("args" in f))).toBe(true);
+    // Legacy: today's cumulative latest-wins collapse, byte-for-byte.
+    expect(legacyFrames.map((f) => f.args)).toEqual(["{", "{\"a\":1}"]);
+    expect(legacyFrames.every((f) => !("delta" in f))).toBe(true);
   });
 });
 

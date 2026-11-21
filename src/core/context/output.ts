@@ -204,6 +204,13 @@ export interface ToolCallDeltaEvent {
   name: string;
   /** Accumulated arguments so far, display-unescaped. */
   args: string;
+  /**
+   * The INCREMENT this delta added to `args` ("" on a name-only event).
+   * Additive: sinks that read `args` stay byte-identical; the webui preview
+   * ships only this (see s2cStreamingToolCall's delta posture). Hand-built
+   * events may omit it -- treat absent as "" (no increment to show).
+   */
+  argsDelta?: string;
 }
 
 /**

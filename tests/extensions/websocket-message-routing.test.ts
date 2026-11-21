@@ -349,6 +349,27 @@ describe("routeMessage: AUTH attach fallbacks", () => {
     expect(pendingCleared).toBe(true);
     expect(messages.map((m) => m.type)).toEqual([S2C.AUTH_OK, S2C.SESSION_CREATED, S2C.SESSION_STATE]);
   });
+
+  it("records the toolCallDeltas capability on the validated AUTH (absent = false)", async () => {
+    const reg = stubRegistry();
+    const attested = createWsMockWs();
+    await send({ type: C2S.AUTH, token: "good", toolCallDeltas: true }, reg, authStub, attested);
+    expect(attested.toolCallDeltas).toBe(true);
+    // An old bundle sends no field: the socket keeps the cumulative posture.
+    const legacy = createWsMockWs();
+    await send(authMsg(), reg, authStub, legacy);
+    expect(legacy.toolCallDeltas).toBe(false);
+    // An invalid token never records anything (the answer is AUTH_ERROR).
+    const rejected = createWsMockWs();
+    const { messages } = await send(
+      { type: C2S.AUTH, token: "bad", toolCallDeltas: true },
+      reg,
+      authStub,
+      rejected,
+    );
+    expect(messages.map((m) => m.type)).toEqual([S2C.AUTH_ERROR]);
+    expect(rejected.toolCallDeltas).toBeUndefined();
+  });
 });
 
 // ── LIST_LOGS sidebar row fields (index-attested model/profile/ctx) ─────────

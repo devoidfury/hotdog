@@ -2106,6 +2106,78 @@ describe("live activity: the in-flight tool bubble", () => {
   });
 });
 
+// ── Delta posture (the socket attested toolCallDeltas in AUTH) ──────────────
+// s2cStreamingToolCall's increment frames: `delta` APPENDS to the slot's
+// buffer, `args` still REPLACES (legacy posture / merged-window cumulative).
+// The final toolCall frame's full args are the authority, and reset or the
+// final frame wipes the buffer so a reused slot never shows a dead prefix.
+
+describe("live activity: the in-flight tool bubble (delta posture)", () => {
+  const bubbles = () => container.querySelectorAll(".tool-call-streaming");
+  const previews = () => container.querySelectorAll(".tool-call-stream-preview");
+  const startTurn = () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+  };
+
+  it("a delta APPENDS to the slot buffer; a merged-window frame is just a bigger append", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: '{"comm' });
+    expect(bubbles()).toHaveLength(1);
+    expect(previews()[0]!.textContent).toBe('{"comm');
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: 'and":"' });
+    expect(previews()[0]!.textContent).toBe('{"command":"');
+    // The batcher's burst collapse lands as ONE frame holding several
+    // increments: the same append, no frame-shape special case.
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: 'ls"} // list' });
+    expect(bubbles()).toHaveLength(1); // same slot: no second bubble
+    expect(previews()[0]!.textContent).toBe('{"command":"ls"} // list');
+  });
+
+  it("interleaved parallel calls accumulate independently per slot", () => {
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: "A" });
+    ml.handleStreamingToolCall({ index: 1, name: "read", delta: "R" });
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: "B" });
+    ml.handleStreamingToolCall({ index: 1, name: "read", delta: "S" });
+    const hosts = [...bubbles()];
+    expect(hosts).toHaveLength(2);
+    expect(hosts[0]!.querySelector(".tool-call-stream-preview")!.textContent).toBe("AB");
+    expect(hosts[1]!.querySelector(".tool-call-stream-preview")!.textContent).toBe("RS");
+  });
+
+  it("the final toolCall frame is authoritative and releases the slot clean", () => {
+    startTurn();
+    // The attach-mid-call ceiling shape: the client's buffer holds only the
+    // tail it saw; the final frame's full args replace everything.
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: '{"comm' });
+    ml.handleToolCall({ name: "bash", args: '{"command":"ls"}', toolCallId: "t1" });
+    expect(bubbles()).toHaveLength(0);
+    expect(container.querySelector(".tool-call-name")!.textContent).toBe("🛠 bash");
+    // The next round reuses slot 0: the dead buffer never resurfaces.
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: '{"to' });
+    expect(previews()[0]!.textContent).toBe('{"to');
+  });
+
+  it("streamReset clears the accumulators: the retry's first delta shows alone", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: '{"DEAD' });
+    ml.handleStreamReset();
+    expect(bubbles()).toHaveLength(0);
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: '{"comm' });
+    expect(previews()[0]!.textContent).toBe('{"comm'); // fresh, not appended
+  });
+
+  it("a cumulative frame on a delta-grown slot REPLACES (mid-call posture flip stays honest)", () => {
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: "ab" });
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: "complete" });
+    expect(previews()[0]!.textContent).toBe("complete");
+    // The buffer behind the replace is the new base: later deltas continue
+    // from the shown bytes, never from the pre-replace increment.
+    ml.handleStreamingToolCall({ index: 0, name: "bash", delta: "-more" });
+    expect(previews()[0]!.textContent).toBe("complete-more");
+  });
+});
+
 describe("lazy history: scroll-up trigger + prepend anchoring", () => {
   type Geo = { scrollTop: number; scrollHeight: number; clientHeight: number };
 

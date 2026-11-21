@@ -504,20 +504,27 @@ interface StreamingReasoningChunkMessage {
 
 /**
  * Live-only in-flight tool call (S2C streamingToolCall, built by
- * s2cStreamingToolCall): the wire's tool-call slot `index` plus the name and
- * the ACCUMULATED argument text so far, so every frame replaces the client's
- * preview. Deliberately NOT in CONVERSATION_EVENT_TYPES: it is transient
- * render state that appends nothing to the transcript (the committed `toolCall`
- * frame is the durable row, and it marks the cursor dirty itself), and it is
- * never replayed -- a client that joins mid-stream just waits for the next
- * delta.
+ * s2cStreamingToolCall): the wire's tool-call slot `index` plus the name, and
+ * the preview bytes in ONE of two self-describing postures -- `delta` (this
+ * frame's increment; the client appends it to the per-index accumulator) or
+ * `args` (the accumulated partial; the client REPLACES the preview). This
+ * bundle always attests `toolCallDeltas: true` in AUTH, but a stale cached
+ * bundle against a new daemon, or a new bundle against an old daemon, still
+ * renders: the shape says which posture the frame carries. Deliberately NOT
+ * in CONVERSATION_EVENT_TYPES: it is transient render state that appends
+ * nothing to the transcript (the committed `toolCall` frame is the durable
+ * row, and it marks the cursor dirty itself), and it is never replayed -- a
+ * client that joins mid-stream just waits for the next delta (its delta-
+ * posture preview starts at the frame it first sees and self-heals on the
+ * final frame; see the documented ceiling in s2cStreamingToolCall).
  */
 interface StreamingToolCallMessage {
   type: "streamingToolCall";
   sessionId: string;
   index: number;
   name: string;
-  args: string;
+  args?: string;
+  delta?: string;
 }
 
 /**
@@ -1678,7 +1685,10 @@ export function createChat({
       // else may be sent before it: the server gates all non-AUTH traffic.
       // connectedAtom flips on authOk, so no connected effects (listProfiles
       // etc.) can race ahead of the handshake.
-      send({ type: "auth", token });
+      // toolCallDeltas: this bundle accumulates the preview `delta`
+      // increments (additive capability; an old daemon ignores the field and
+      // keeps shipping cumulative frames, which this bundle also renders).
+      send({ type: "auth", token, toolCallDeltas: true });
     };
 
     ws.onmessage = (event: MessageEvent) => {

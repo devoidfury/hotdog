@@ -27,6 +27,10 @@ export async function handleAuthMessage(ctx: RouteContext): Promise<void> {
   }
 
   ws.authToken = msg.token as string;
+  // Per-socket capability, recorded on the validated handshake (additive:
+  // absent = false, the socket keeps the cumulative preview frame). The
+  // frame mapping reads ws.toolCallDeltas live, so a re-AUTH restates it.
+  ws.toolCallDeltas = msg.toolCallDeltas === true;
   // Handshake complete: drop the pending-auth stamp now instead of
   // leaving the reaper to notice ws.authToken on its next sweep.
   registry.removePendingAuth(ws);

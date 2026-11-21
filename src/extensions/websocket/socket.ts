@@ -22,5 +22,14 @@ export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
    *  cleared: a socket takes at most one implicit attach; later switches
    *  are explicit (SWITCH_SESSION). */
   attachStarted?: boolean;
+  /**
+   * Capability attested by this socket's C2S AUTH message
+   * (`toolCallDeltas: true`): the client accumulates `streamingToolCall`
+   * `delta` increments per call index instead of replacing on a repeated
+   * cumulative `args` frame. Set once on a validated AUTH; read live by the
+   * channel's frame mapping (version-skew guard: an old bundle never sends
+   * it and stays on the cumulative frame).
+   */
+  toolCallDeltas?: boolean;
 };
 

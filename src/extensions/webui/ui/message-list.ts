@@ -109,10 +109,13 @@ interface ToolCallMessage { name: string; args: string; argsSummary?: string; di
 /**
  * Live-only in-flight tool call (S2C `streamingToolCall`): `index` is the
  * wire's tool-call slot (the frame's identity -- see s2cStreamingToolCall),
- * `name` is "" until the first toolName delta, `args` is the ACCUMULATED
- * partial text, so each frame REPLACES the preview (never appends).
+ * `name` is "" until the first toolName delta, and the preview bytes ride
+ * ONE posture: `delta` (an increment to APPEND to the per-index accumulator)
+ * or `args` (the accumulated partial, REPLACE -- the legacy/cumulative
+ * posture, also what a merged-window cumulative channel ships). Shape is
+ * self-describing; a frame carrying neither shows nothing new.
  */
-interface StreamingToolCallMessage { index: number; name: string; args: string; }
+interface StreamingToolCallMessage { index: number; name: string; args?: string; delta?: string; }
 interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; startLine?: number; meta?: Record<string, string>; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
@@ -240,9 +243,11 @@ export interface MessageListManager {
   handleStreamingReasoningChunk: (data: StreamingChunk) => void;
   /**
    * Live-only tool-call preview (S2C `streamingToolCall`): one bubble per
-   * wire slot, its args preview replaced by every delta. The regular
-   * `toolCall` frame upgrades the bubble in place; a retry (handleStreamReset)
-   * or a closing turn drops it.
+   * wire slot; `delta` frames append to the slot's arg accumulator, `args`
+   * frames replace it (postures self-describe, see StreamingToolCallMessage).
+   * The regular `toolCall` frame upgrades the bubble in place with the
+   * AUTHORITATIVE full args; a retry (handleStreamReset) or a closing turn
+   * drops the bubble and its accumulator.
    */
   handleStreamingToolCall: (data: StreamingToolCallMessage) => void;
   /**
@@ -471,6 +476,14 @@ export function createMessageList(
   // oldest preview at all, exactly like the name-pairing of results without
   // ids).
   let inflightSlots: Array<{ index: number; name: string }> = [];
+  // Per-slot preview buffer (delta posture): `delta` frames append, `args`
+  // frames replace (the legacy posture needs no buffer, but keeping one for
+  // both makes the two postures coexist mid-stream -- a capability flip
+  // mid-call just changes how the text is grown). It dies with the bubble;
+  // the final `toolCall` frame's args are the authority either way, and a
+  // mid-call attach starts empty and self-heals on that frame (the ceiling
+  // documented on s2cStreamingToolCall).
+  const inflightToolArgs = new Map<number, string>();
 
   /**
    * Drop every in-flight bubble (retry, turn end, clear) and the committed
@@ -481,6 +494,7 @@ export function createMessageList(
   function clearInflightToolCalls(): void {
     for (const host of inflightToolHosts.values()) host.remove();
     inflightToolHosts.clear();
+    inflightToolArgs.clear();
     inflightSlots = [];
     pendingToolResults = 0;
   }
@@ -499,6 +513,9 @@ export function createMessageList(
     inflightSlots.splice(at, 1);
     const host = inflightToolHosts.get(slot.index) ?? null;
     inflightToolHosts.delete(slot.index);
+    // The claimed slot's built-up preview dies with the bubble: the final
+    // frame's args are the authority now.
+    inflightToolArgs.delete(slot.index);
     return host;
   }
 
@@ -646,9 +663,23 @@ export function createMessageList(
     syncThinkingRow();
   }
 
-  function handleStreamingToolCall({ index, name, args }: StreamingToolCallMessage): void {
+  function handleStreamingToolCall({ index, name, args, delta }: StreamingToolCallMessage): void {
     // The preview bubble is the visible activity now: the row retires.
     noteVisibleOutput(true);
+    // Preview bytes by posture (self-describing frame, see
+    // s2cStreamingToolCall): a `delta` APPENDS to the slot's buffer, an
+    // `args` frame REPLACES it (legacy cumulative). A merged-window delta
+    // frame is just a bigger append.
+    let previewText: string;
+    if (typeof delta === "string") {
+      previewText = `${inflightToolArgs.get(index) ?? ""}${delta}`;
+      inflightToolArgs.set(index, previewText);
+    } else if (typeof args === "string") {
+      previewText = args;
+      inflightToolArgs.set(index, previewText);
+    } else {
+      previewText = inflightToolArgs.get(index) ?? "";
+    }
     let host = inflightToolHosts.get(index);
     if (!host) {
       host = document.createElement("div");
@@ -683,8 +714,7 @@ export function createMessageList(
     const nameEl = host.querySelector(".tool-call-name");
     if (nameEl && name !== "") nameEl.textContent = `🛠 ${name}`;
     const preview = host.querySelector(".tool-call-stream-preview");
-    // Cumulative args: REPLACE, never append (see s2cStreamingToolCall).
-    if (preview) preview.textContent = args;
+    if (preview) preview.textContent = previewText;
     scrollBottom();
   }
 

@@ -9,7 +9,7 @@
 // batched = webui.streamBatchMs window coalescing).
 
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
-import { toS2CMessage } from "@extensions/websocket/wire-messages.ts";
+import { toS2CMessage, type WireMapOptions } from "@extensions/websocket/wire-messages.ts";
 import { StreamBatcher } from "@extensions/websocket/stream-batcher.ts";
 
 const SESSION = "measure-session";
@@ -31,22 +31,26 @@ function reasoningStream(nTokens: number): OutputEvent[] {
   return textStream(nTokens).map((e) => ({ ...e, type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK }));
 }
 
-// 50-delta args stream for ONE call: core hands the CUMULATIVE partial on
-// every delta (stream-processor emitToolCallDelta), so frame N carries ~N*10
-// chars of args. Parallel call on index 1 interleaves.
+// 50-delta args stream: core hands the CUMULATIVE partial AND the increment
+// (argsDelta) on every event (stream-processor emitToolCallDelta). The
+// posture decides which one rides the wire: cumulative re-ships ~N*10 chars
+// on frame N; delta ships only the increment. Parallel call on index 1
+// interleaves.
 function toolCallArgsStream(deltas: number): OutputEvent[] {
   const events: OutputEvent[] = [];
   let args0 = "";
   let args1 = "";
   for (let i = 0; i < deltas; i++) {
     if (i === 0) {
-      events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: "" });
-      events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: "" });
+      events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: "", argsDelta: "" });
+      events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: "", argsDelta: "" });
     }
-    args0 += `"p${i}":"${"x".repeat(8)}",`;
-    args1 += `"c${i}":"${"y".repeat(8)}",`;
-    events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: `{${args0}` });
-    events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: `{${args1}` });
+    const inc0 = `"p${i}":"${"x".repeat(8)}",`;
+    const inc1 = `"c${i}":"${"y".repeat(8)}",`;
+    args0 += inc0;
+    args1 += inc1;
+    events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "write", args: `{${args0}`, argsDelta: inc0 });
+    events.push({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: `{${args1}`, argsDelta: inc1 });
   }
   events.push({
     type: OUTPUT_EVENT.TOOL_CALL,
@@ -70,11 +74,19 @@ interface Stats {
   bytes: number;
 }
 
-function runUnbatched(events: OutputEvent[]): Stats {
+// Fresh per-run opts: a delta-posture run gets its own cap bookkeeping Map
+// (one run = one socket = one call round).
+function optsFor(deltaPosture: boolean): WireMapOptions | undefined {
+  return deltaPosture
+    ? { streamToolCalls: { deltas: () => true, emitted: new Map() } }
+    : undefined;
+}
+
+function runUnbatched(events: OutputEvent[], deltaPosture = false): Stats {
   let frames = 0;
   let bytes = 0;
   for (const ev of events) {
-    const msg = toS2CMessage(ev, SESSION);
+    const msg = toS2CMessage(ev, SESSION, optsFor(deltaPosture));
     if (!msg) continue;
     frames++;
     bytes += JSON.stringify(msg).length;
@@ -82,7 +94,7 @@ function runUnbatched(events: OutputEvent[]): Stats {
   return { frames, bytes };
 }
 
-function runBatched(events: OutputEvent[], batchMs: number): Stats {
+function runBatched(events: OutputEvent[], batchMs: number, deltaPosture = false): Stats {
   let frames = 0;
   let bytes = 0;
   const batcher = new StreamBatcher({
@@ -94,15 +106,11 @@ function runBatched(events: OutputEvent[], batchMs: number): Stats {
     setTimer: () => () => {}, // never fires; the run flushes explicitly
   });
   for (const ev of events) {
-    const msg = toS2CMessage(ev, SESSION);
+    const msg = toS2CMessage(ev, SESSION, optsFor(deltaPosture));
     if (msg) batcher.handle(msg);
   }
   batcher.flush(); // window end
   return { frames, bytes };
-}
-
-function runOff(events: OutputEvent[]): Stats {
-  return runBatched(events, 0);
 }
 
 // ── Latency probe ───────────────────────────────────────────────────────────
@@ -151,9 +159,11 @@ function latencyProbe(batchMs: number): { firstAddedMs: number; midWindowAddedMs
 
 // ── Table ───────────────────────────────────────────────────────────────────
 
-const scenarios: Array<{ name: string; events: OutputEvent[] }> = [
+const toolArgsEvents = toolCallArgsStream(50);
+const scenarios: Array<{ name: string; events: OutputEvent[]; delta?: boolean }> = [
   { name: "500-token text stream", events: textStream(500) },
-  { name: "50-delta tool-call args (2 parallel calls)", events: toolCallArgsStream(50) },
+  { name: "50-delta tool-call args cumulative (2 parallel calls)", events: toolArgsEvents },
+  { name: "50-delta tool-call args deltas (2 parallel calls)", events: toolArgsEvents, delta: true },
   { name: "200-token reasoning stream", events: reasoningStream(200) },
 ];
 
@@ -163,8 +173,8 @@ const line = (name: string, mode: string, frames: number, bytes: number) =>
 
 console.log(line("scenario", "mode", "frames", "bytes"));
 for (const sc of scenarios) {
-  const off = runOff(sc.events);
-  const batched = runBatched(sc.events, 100);
+  const off = runBatched(sc.events, 0, sc.delta === true);
+  const batched = runBatched(sc.events, 100, sc.delta === true);
   console.log(line(sc.name, "off", off.frames, off.bytes));
   console.log(line("", "100ms", batched.frames, batched.bytes));
   const savedBytes = off.bytes - batched.bytes;

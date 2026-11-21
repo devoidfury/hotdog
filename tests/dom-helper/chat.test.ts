@@ -81,7 +81,11 @@ describe("handshake", () => {
     const { ws } = makeChat();
     expect(ws.url).toBe("ws://test.host/ws");
     ws.fireOpen();
-    expect(ws.sent).toEqual([JSON.stringify({ type: "auth", token: "tok" })]);
+    // The delta-preview capability rides the AUTH message (additive): an old
+    // daemon ignores it and keeps the cumulative posture.
+    expect(ws.sent).toEqual([
+      JSON.stringify({ type: "auth", token: "tok", toolCallDeltas: true }),
+    ]);
   });
 
   it("authOk flips connected and triggers listLogs; authRequired is a no-op", () => {
@@ -701,6 +705,18 @@ describe("live activity tell + in-flight tool preview routing", () => {
     expect(container.querySelectorAll(".tool-call-block")).toHaveLength(1);
     // A frame from another session never touches this transcript.
     ws.fireMessage({ type: "streamingToolCall", sessionId: "other", index: 0, name: "read", args: "{}" });
+    expect(bubbles(container)).toHaveLength(0);
+  });
+
+  it("a delta-posture frame accumulates through the chat routing too", () => {
+    const { container, ws } = attached();
+    ws.fireMessage({ type: "streamingToolCall", sessionId: "s1", index: 0, name: "bash", delta: '{"comm' });
+    ws.fireMessage({ type: "streamingToolCall", sessionId: "s1", index: 0, name: "bash", delta: 'and":"ls"}' });
+    expect(bubbles(container)).toHaveLength(1);
+    expect(
+      container.querySelector(".tool-call-stream-preview")!.textContent,
+    ).toBe('{"command":"ls"}');
+    ws.fireMessage({ type: "toolCall", sessionId: "s1", name: "bash", args: '{"command":"ls"}', toolCallId: "t1" });
     expect(bubbles(container)).toHaveLength(0);
   });
 

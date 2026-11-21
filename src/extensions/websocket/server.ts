@@ -368,6 +368,9 @@ export function createWsServer(
           argDisplay: (toolName) => metaOf(toolName)?.argDisplay,
           headerKeys: (toolName) => metaOf(toolName)?.headerKeys,
           display: (toolName) => metaOf(toolName)?.display,
+          // No streamToolCalls posture: the tail fans ONE mapped frame out to
+          // a watcher set with mixed capabilities, so the worker-row preview
+          // stays cumulative (the client renders either shape by field).
         });
         if (frame) registry.publish(tailSid, frame);
       }

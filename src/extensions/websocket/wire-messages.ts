@@ -95,7 +95,28 @@ export interface WireMapOptions {
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
   headerKeys?: (toolName: string) => readonly string[] | undefined;
   display?: (toolName: string) => ToolDisplaySpec[] | undefined;
+  /**
+   * Per-socket posture for the live STREAMING_TOOL_CALL preview (live
+   * channels only; replay and the worker-tail fan-out omit it = cumulative).
+   * `deltas` is read PER FRAME (the capability rides the socket's C2S AUTH,
+   * which can land after the channel was constructed); `emitted` is the
+   * channel's per-index cap bookkeeping for the delta posture.
+   */
+  streamToolCalls?: { deltas: () => boolean; emitted: Map<number, StreamingToolCapIndex> };
 }
+
+/** Per-slot cap bookkeeping for the delta posture: preview chars emitted so
+ *  far, plus the truncation latch (once set, further deltas for the index
+ *  are dropped). Owned by the channel; cleared when a call round commits
+ *  (final TOOL_CALL frame) or the stream resets. */
+export interface StreamingToolCapIndex {
+  chars: number;
+  truncated: boolean;
+}
+
+/** The shared truncation idiom: the tail both postures append once the
+ *  preview stops at MAX_STREAMING_TOOL_CALL_ARGS_CHARS assembled chars. */
+const STREAMING_PREVIEW_TRUNCATED = "...[truncated]";
 
 /** Content-only messages (thinking, assistant text, streaming chunks, ...). */
 export function s2cContent(
@@ -259,14 +280,24 @@ export function s2cToolResult(
  * A tool call still growing on the wire. LIVE-ONLY by construction: core
  * accumulates the partial (ToolCallDeltaEvent), nothing persists it, and no
  * replay path builds it -- a client that joins mid-stream simply sees the
- * next delta land. Shape decisions, both forced by the seam:
+ * next delta land. Two postures, one frame builder, decided per call by
+ * `streamToolCalls` (see WireMapOptions):
  *
- * - `args` is the ACCUMULATED text so far, not an increment: core already
- *   hands the whole partial to every delta, so forwarding it verbatim costs
- *   nothing, while a client-side accumulator would need its own reset
- *   doctrine (and a dropped frame would corrupt every later one). The client
- *   REPLACES its preview, so redelivery is idempotent. Capped, see
- *   MAX_STREAMING_TOOL_CALL_ARGS_CHARS.
+ * - Delta posture (the socket attested `toolCallDeltas` in its C2S AUTH):
+ *   the frame carries `delta`, the INCREMENT this event added, and NO args
+ *   field. The client appends per index, so a burst costs the args length
+ *   once instead of once per delta. MAX_STREAMING_TOOL_CALL_ARGS_CHARS binds
+ *   the ASSEMBLED preview: the channel's bookkeeping counts emitted chars
+ *   per index, the crossing frame ships the head plus the `...[truncated]`
+ *   marker once, and the slot then goes silent until the bookkeeping clears
+ *   (final TOOL_CALL frame or a stream reset).
+ * - Cumulative posture (every other caller of this builder): `args` is the
+ *   whole partial so far, capped as ever; the client REPLACES its preview,
+ *   so redelivery is idempotent. The frame shape is the original one,
+ *   byte-identical -- that is the version-skew guarantee for an old client
+ *   meeting a new daemon (and a new client renders either shape: it is
+ *   self-describing by field).
+ *
  * - `index` is the frame's identity: the wire's tool-call slot, stable for
  *   the life of the call (parallel calls interleave deltas, and each keeps
  *   its slot). The provider's tool-call id is NOT carried -- mid-stream it is
@@ -277,16 +308,59 @@ export function s2cToolResult(
  *   lands, matching same-name previews in arrival order (the
  *   pendingToolCallsByName doctrine the result pairing already uses).
  *
+ * Documented ceilings (delta posture, both bounded and self-healing):
+ *  - A socket attaching MID-CALL starts accumulating at attach time, so its
+ *    preview lacks the earlier prefix until the final TOOL_CALL frame's full
+ *    args replace it (the client accumulator is display-only).
+ *  - A cancelled call never emits its final frame, so its truncation latch
+ *    lives until the next TOOL_CALL/reset clears it: the next round's same
+ *    slot previews late, again non-corrupting by final-frame authority.
+ *
  * `name` is "" until the first toolName delta lands; the client renders a
  * nameless preview rather than inventing one.
  */
 export function s2cStreamingToolCall(
   sessionId: string,
-  o: { index: number; name: string; args: string },
-): Record<string, unknown> {
+  o: {
+    index: number;
+    name: string;
+    args: string;
+    /** The increment this delta added (the core event's argsDelta). */
+    argsDelta?: string;
+    /** Channel posture + cap bookkeeping (absent = cumulative posture). */
+    streamToolCalls?: { deltas: () => boolean; emitted: Map<number, StreamingToolCapIndex> };
+  },
+): Record<string, unknown> | null {
+  if (o.streamToolCalls?.deltas()) {
+    const book = o.streamToolCalls.emitted;
+    const state = book.get(o.index) ?? { chars: 0, truncated: false };
+    if (state.truncated) return null;
+    const delta = o.argsDelta ?? "";
+    const remaining = MAX_STREAMING_TOOL_CALL_ARGS_CHARS - state.chars;
+    if (delta.length <= remaining) {
+      state.chars += delta.length;
+      book.set(o.index, state);
+      return {
+        type: S2C.STREAMING_TOOL_CALL,
+        sessionId,
+        index: o.index,
+        name: o.name,
+        delta,
+      };
+    }
+    state.truncated = true;
+    book.set(o.index, state);
+    return {
+      type: S2C.STREAMING_TOOL_CALL,
+      sessionId,
+      index: o.index,
+      name: o.name,
+      delta: `${delta.slice(0, Math.max(0, remaining))}${STREAMING_PREVIEW_TRUNCATED}`,
+    };
+  }
   const capped =
     o.args.length > MAX_STREAMING_TOOL_CALL_ARGS_CHARS
-      ? `${o.args.slice(0, MAX_STREAMING_TOOL_CALL_ARGS_CHARS)}...[truncated]`
+      ? `${o.args.slice(0, MAX_STREAMING_TOOL_CALL_ARGS_CHARS)}${STREAMING_PREVIEW_TRUNCATED}`
       : o.args;
   return {
     type: S2C.STREAMING_TOOL_CALL,
@@ -407,11 +481,15 @@ export function toS2CMessage(
       // Live-only preview of a tool call still streaming (see
       // s2cStreamingToolCall): frame-only in the sense that nothing persists
       // or replays it, but it DOES ride the wire -- the chat needs the
-      // in-progress posture and the Thinking-line dismissal it drives.
+      // in-progress posture and the Thinking-line dismissal it drives. The
+      // delta posture can drop a frame (post-cap slot): null, like any
+      // frame-only event.
       return s2cStreamingToolCall(sessionId, {
         index: event.index,
         name: event.name,
         args: event.args,
+        argsDelta: event.argsDelta,
+        streamToolCalls: opts?.streamToolCalls,
       });
     case OUTPUT_EVENT.COMPACTING:
       return { type: S2C.COMPACTING, sessionId, message: event.message };

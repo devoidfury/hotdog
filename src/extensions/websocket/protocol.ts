@@ -57,6 +57,16 @@ export const C2S = {
   // precedent); refusals (bad index, unknown log) ride the reply's `error`
   // field, still correlated -- never an uncorrelated guess.
   LOAD_OLDER: "loadOlder",
+  // One omitted history image on demand: { type, requestId,
+  // logId | sessionId, entryIndex, imageIndex }. Stands in for a history
+  // frame's image STUB (see WireImageStub below): the server RE-READS the
+  // durable log and answers FETCH_IMAGE_RESULT with exactly ONE image,
+  // correlated by requestId. COORDINATES ONLY -- `entryIndex` is the
+  // FULL-log entry index (the same append-only space the reconnect cursor
+  // lives in, stable across appends and RESETs) and `imageIndex` the slot in
+  // that entry's raw images array; no path ever comes off the wire. The id
+  // names a cold log OR a live session (loadOlder's id space).
+  FETCH_IMAGE: "fetchImage",
   // Profile management
   LIST_PROFILES: "listProfiles",
   SWITCH_PROFILE: "switchProfile",
@@ -178,14 +188,17 @@ export const S2C = {
   // Cold session log management
   LOGS_LISTED: "logsListed",
   // Windowed by default (history-window.ts): the reply carries the TRAILING
-  // window of conversation messages. Additive fields, present ONLY when
-  // older history exists: `oldestIndex` (the epoch-log index of the oldest
-  // shipped entry -- hand it back as loadOlder's `olderThan`),
-  // `hasOlder: true`, and `epochToken` (the full-log epochStartIndex the
-  // window was cut at -- echo it on loadOlder; a mid-socket RESET changes
-  // it and the server refuses the stale page with code "epoch_moved"). A
-  // session that fits the window ships everything with NONE of these
-  // fields, byte-identical to the pre-windowing wire.
+  // window of conversation messages; image payloads ride honest STUBS
+  // ({ omitted, mimeType, bytes, entryIndex, imageIndex }), never
+  // base64: one image comes back through C2S fetchImage by its coordinate.
+  // Additive fields, present ONLY when older history exists: `oldestIndex`
+  // (the epoch-log index of the oldest shipped entry -- hand it back as
+  // loadOlder's `olderThan`), `hasOlder: true`, and `epochToken` (the
+  // full-log epochStartIndex the window was cut at -- echo it on loadOlder;
+  // a mid-socket RESET changes it and the server refuses the stale page with
+  // code "epoch_moved"). A session that fits the window ships everything with
+  // NONE of these fields; text fields are byte-identical to the
+  // pre-windowing wire (image entries ship as stubs).
   LOG_VIEWED: "logViewed",
   LOG_DELETED: "logDeleted",
   // Reply to C2S SEARCH_LOGS (requesting socket only), correlated by requestId.
@@ -200,6 +213,13 @@ export const S2C = {
   // seam on (a mid-socket RESET moved the epoch; the held index means a
   // different entry). See handlers-logs.ts / history-window.ts.
   LOAD_OLDER_RESULT: "loadOlderResult",
+  // Reply to C2S FETCH_IMAGE (requesting socket only), correlated by
+  // requestId. Success: `image` is the ONE WireImage re-read from the entry
+  // (inline data, or the skipped+note posture over the cap). Refusals carry
+  // requestId + `error` and nothing else (the LIST_DIR_RESULT posture). The
+  // echoed `logId`/`entryIndex`/`imageIndex` let the client settle the exact
+  // placeholder the reply belongs to. See handleFetchImage in handlers-logs.ts.
+  FETCH_IMAGE_RESULT: "fetchImageResult",
   // Reply to C2S CONFIG_SNAPSHOT (requesting socket only), correlated by
   // requestId. See the Config snapshot section below and handlers-config.ts.
   CONFIG_SNAPSHOT_RESULT: "configSnapshotResult",
@@ -449,6 +469,31 @@ export interface WireImage {
 }
 
 /**
+ * A BYTE-HONEST STAND-IN for an image omitted from a HISTORY frame
+ * (cold LOG_VIEWED, loadOlder pages, the windowed FULL attach replay; fresh
+ * LIVE frames keep inline payloads). The page ships no base64; it attests
+ * what was omitted (media type + payload size in bytes) plus the fetch
+ * coordinate: `entryIndex` is the FULL-LOG entry index (append-only, the
+ * cursor's own space -- a RESET only appends, so a coordinate stays valid
+ * even after the epoch moves), `imageIndex` the slot in that entry's raw
+ * images array. ONE C2S fetchImage trades the coordinate for the single
+ * WireImage, capped by the same MAX_WIRE_IMAGE_BASE64_BYTES.
+ *
+ * Versioning: wire-additive, nothing removed. The webui is live-served and
+ * moves with the server, so there is no old-client window to negotiate, and
+ * a stale cached client cannot misrender a stub: with no `data` it lands in
+ * every existing image sink's "no data, render the note" branch.
+ */
+export interface WireImageStub {
+  mimeType: string;
+  omitted: true;
+  /** Base64 payload length the inline form would have carried (bytes). */
+  bytes: number;
+  entryIndex: number;
+  imageIndex: number;
+}
+
+/**
  * Hard ceiling on per-image base64 payload bytes sent over the websocket.
  * read-tool images cap out at 10MB raw (~13.7MB base64); anything larger is
  * replaced by a placeholder note rather than flooding the socket.
@@ -462,19 +507,40 @@ function stripDataUrlPrefix(value: string): { mimeType: string; data: string } |
 }
 
 /**
- * Normalize unknown image attachments (core ImageAttachment-shaped, or the
- * legacy data-URL form) into wire entries, applying MAX_WIRE_IMAGE_BASE64_BYTES.
- * Returns undefined when there is nothing to send so messages stay lean.
+ * Normalize unknown image attachments (core ImageAttachment-shaped, the
+ * legacy data-URL form, or an already-formed WireImageStub) into wire
+ * entries, applying MAX_WIRE_IMAGE_BASE64_BYTES. Returns undefined when
+ * there is nothing to send so messages stay lean.
+ *
+ * Stub pass-through: a well-formed stub ({ omitted: true } + non-negative
+ * integer bytes/entryIndex/imageIndex) travels untouched -- this is how the
+ * pre-stubbed FULL attach replay (attach.ts) carries placeholders through
+ * the shared s2c builders without a second serializer. A MALFORMED stub is
+ * dropped like any other junk entry (no invented coordinates).
  */
 export function wireImages(
   images: unknown,
   capBytes: number = MAX_WIRE_IMAGE_BASE64_BYTES,
-): WireImage[] | undefined {
+): Array<WireImage | WireImageStub> | undefined {
   if (!Array.isArray(images) || images.length === 0) return undefined;
-  const out: WireImage[] = [];
+  const out: Array<WireImage | WireImageStub> = [];
   for (const raw of images) {
     if (!raw || typeof raw !== "object") continue;
     const img = raw as Record<string, unknown>;
+    if (img.omitted === true) {
+      const bytes = typeof img.bytes === "number" && Number.isSafeInteger(img.bytes) && img.bytes >= 0 ? img.bytes : undefined;
+      const entryIndex = typeof img.entryIndex === "number" && Number.isSafeInteger(img.entryIndex) && img.entryIndex >= 0 ? img.entryIndex : undefined;
+      const imageIndex = typeof img.imageIndex === "number" && Number.isSafeInteger(img.imageIndex) && img.imageIndex >= 0 ? img.imageIndex : undefined;
+      if (bytes === undefined || entryIndex === undefined || imageIndex === undefined) continue;
+      out.push({
+        mimeType: typeof img.mimeType === "string" && img.mimeType ? img.mimeType : "image/png",
+        omitted: true,
+        bytes,
+        entryIndex,
+        imageIndex,
+      });
+      continue;
+    }
     let mimeType = typeof img.mimeType === "string" ? img.mimeType : "";
     let data = typeof img.data === "string" ? img.data : "";
     if (!data && typeof img.url === "string") {
@@ -496,6 +562,59 @@ export function wireImages(
     } else {
       out.push({ mimeType, data });
     }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * The HISTORY-page image form: the SAME normalization as
+ * wireImages (legacy data-URL stripping, mimeType default), but the payload
+ * is replaced by an honest stub attesting the base64 size plus the fetch
+ * coordinate (entryIndex = the FULL-log index of the entry these images
+ * came from; imageIndex = the slot in the RAW array, junk entries included,
+ * so the server's re-read of full[entryIndex].images[imageIndex] lands on
+ * the very payload the client sees a box for). An already-stubbed entry
+ * rides untouched. Undefined when nothing renderable exists (same posture
+ * as wireImages).
+ */
+export function wireImageStubs(
+  images: unknown,
+  entryIndex: number,
+): WireImageStub[] | undefined {
+  if (!Array.isArray(images) || images.length === 0) return undefined;
+  const out: WireImageStub[] = [];
+  for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
+    const raw = images[imageIndex];
+    if (!raw || typeof raw !== "object") continue;
+    const img = raw as Record<string, unknown>;
+    if (img.omitted === true) {
+      // Pre-stubbed upstream: only a well-formed stub survives (same gate
+      // as the wireImages pass-through).
+      const bytes = typeof img.bytes === "number" && Number.isSafeInteger(img.bytes) && img.bytes >= 0 ? img.bytes : undefined;
+      const ei = typeof img.entryIndex === "number" && Number.isSafeInteger(img.entryIndex) && img.entryIndex >= 0 ? img.entryIndex : undefined;
+      const ii = typeof img.imageIndex === "number" && Number.isSafeInteger(img.imageIndex) && img.imageIndex >= 0 ? img.imageIndex : undefined;
+      if (bytes === undefined || ei === undefined || ii === undefined) continue;
+      out.push({
+        mimeType: typeof img.mimeType === "string" && img.mimeType ? img.mimeType : "image/png",
+        omitted: true,
+        bytes,
+        entryIndex: ei,
+        imageIndex: ii,
+      });
+      continue;
+    }
+    let mimeType = typeof img.mimeType === "string" ? img.mimeType : "";
+    let data = typeof img.data === "string" ? img.data : "";
+    if (!data && typeof img.url === "string") {
+      const stripped = stripDataUrlPrefix(img.url);
+      if (stripped) {
+        mimeType = mimeType || stripped.mimeType;
+        data = stripped.data;
+      }
+    }
+    if (!data) continue;
+    if (!mimeType) mimeType = "image/png";
+    out.push({ mimeType, omitted: true, bytes: data.length, entryIndex, imageIndex });
   }
   return out.length > 0 ? out : undefined;
 }

@@ -364,6 +364,23 @@ interface LogDeletedMessage {
   logId: string;
 }
 
+/**
+ * Reply to C2S fetchImage (correlated by requestId, the transcribe
+ * doctrine). Success carries the single image (inline data, or the honest
+ * skipped+note posture over the server cap); refusals carry `error`. The
+ * waiting placeholder box owns the promise (message-list's onFetchImage
+ * seam): success swaps pixels in, error/refusal paints the honest line.
+ */
+interface FetchImageResultMessage {
+  type: "fetchImageResult";
+  requestId?: number;
+  logId?: string;
+  entryIndex?: number;
+  imageIndex?: number;
+  image?: UiImage;
+  error?: string;
+}
+
 interface AuthRequiredMessage {
   type: "authRequired";
 }
@@ -593,6 +610,7 @@ type ServerMessage =
   | LogViewedMessage
   | LogDeletedMessage
   | LoadOlderResultMessage
+  | FetchImageResultMessage
   | SearchResultsMessage
   | ConfigSnapshotResultWire
   | SetConfigKeyResultWire
@@ -1047,6 +1065,42 @@ export function createChat({
     pendingTranscripts.clear();
   }
 
+  // In-flight history-image fetches keyed by correlation id; the
+  // fetchImageResult reply resolves/rejects the matching placeholder box
+  // (the transcribe doctrine: one requestId, one promise, honest rejection
+  // text in-band). Addressed to the transcript ON SCREEN: a cold log id
+  // while one is open (peek/observe), else the attached session.
+  let imageFetchSeq = 0;
+  const pendingImageFetches = new Map<
+    number,
+    { resolve: (img: UiImage) => void; reject: (err: Error) => void }
+  >();
+
+  function rejectPendingImageFetches(reason: string): void {
+    for (const { reject } of pendingImageFetches.values()) reject(new Error(reason));
+    pendingImageFetches.clear();
+  }
+
+  /** Trade a history stub's coordinate for its ONE image (C2S fetchImage).
+   *  The promise settles from the fetchImageResult reply; a dead socket or a
+   *  view with nothing on screen rejects honestly (the box paints the error,
+   *  no invented retry -- the next render/scroll is the retry). */
+  function fetchHistoryImage(entryIndex: number, imageIndex: number): Promise<UiImage> {
+    const id = viewedLogId ?? sessionIdAtom();
+    if (!id) return Promise.reject(new Error("No session or log on screen to fetch from."));
+    // send() would silently drop the frame: reject honestly so the box
+    // shows the truth instead of hanging on a request that never left.
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Not connected; image not loaded."));
+    }
+    imageFetchSeq++;
+    const requestId = imageFetchSeq;
+    return new Promise<UiImage>((resolve, reject) => {
+      pendingImageFetches.set(requestId, { resolve, reject });
+      send({ type: "fetchImage", requestId, logId: id, entryIndex, imageIndex });
+    });
+  }
+
   function handleServerMessage(data: ServerMessage): void {
     // Session-management messages are handled even before messageList is ready.
     switch (data.type) {
@@ -1275,6 +1329,19 @@ export function createChat({
         // Seek continues through the pages: land if the needle rendered,
         // page once more while the seam is open, else say it never lands.
         if (seek !== null && seek.id === held.id) advanceSeek();
+        return;
+      }
+      case "fetchImageResult": {
+        // Not session-scoped state: purely the waiting placeholder's
+        // promise (correlated by requestId, the transcribe doctrine). A
+        // stale or unknown id drops; `send` already no-ops on a dead
+        // socket, and onclose rejects everything still pending.
+        if (data.requestId === undefined) return;
+        const pending = pendingImageFetches.get(data.requestId);
+        if (!pending) return;
+        pendingImageFetches.delete(data.requestId);
+        if (data.image) pending.resolve(data.image);
+        else pending.reject(new Error(data.error || "image fetch failed"));
         return;
       }
       case "logDeleted":
@@ -1631,6 +1698,8 @@ export function createChat({
       ws = null;
       // Nobody will ever answer in-flight transcribes over a dead socket.
       rejectPendingTranscripts("connection closed");
+      // Same for waiting image boxes: honest failure, no dangling promise.
+      rejectPendingImageFetches("connection closed");
       verifyTokenAndReconnect();
     };
 
@@ -1844,6 +1913,10 @@ export function createChat({
       // Lazy history: scrolling near the top pages older entries through the
       // loadOlder seam (see requestOlderHistory + message-list's TOP_TRIGGER_PX).
       onNearTop: () => requestOlderHistory(),
+      // History image stubs: a placeholder box trades its
+      // coordinate for the ONE image through the socket (fetchImage /
+      // fetchImageResult, correlated).
+      onFetchImage: (entryIndex, imageIndex) => fetchHistoryImage(entryIndex, imageIndex),
       // Jump-to-bottom rides the composer seam (#input-area, via ref); the
       // manager hides it while the view follows the bottom. No host: no button.
       jumpHost: getJumpHost?.() ?? undefined,

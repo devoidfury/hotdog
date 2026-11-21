@@ -213,7 +213,9 @@ describe("routeMessage: async error closures", () => {
     }
   });
 
-  it("VIEW_LOG returns entries, capping images and passing image-free entries through", async () => {
+  it("VIEW_LOG returns entries, stubbing images and passing image-free entries through", async () => {
+    // The cold page ships BYTE-HONEST STUBS, not payloads (the full
+    // stub/fetch grammar lives in websocket-log-image-stubs.test.ts).
     const { messages } = await send({ type: C2S.VIEW_LOG, logId: VIEW_LOG_ID });
     expect(messages).toHaveLength(1);
     const viewed = messages[0]!;
@@ -221,7 +223,9 @@ describe("routeMessage: async error closures", () => {
     expect(viewed.logId).toBe(VIEW_LOG_ID);
     const entries = viewed.entries as Array<Record<string, unknown>>;
     expect(entries).toHaveLength(2);
-    expect(entries[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+    expect(entries[0]!.images).toEqual([
+      { mimeType: "image/png", omitted: true, bytes: "aGVsbG8=".length, entryIndex: 0, imageIndex: 0 },
+    ]);
     expect(entries[1]!.images).toBeUndefined();
     expect(entries[1]!.content).toBe("reply, no image");
   });
@@ -233,7 +237,10 @@ describe("routeMessage: async error closures", () => {
     const entries = messages[0]!.entries as Array<Record<string, unknown>>;
     expect(entries).toHaveLength(1);
     expect(entries[0]!.source).toBe("tool_result");
-    expect(entries[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+    // The persisted image survives as a fetch-addressable stub.
+    expect(entries[0]!.images).toEqual([
+      { mimeType: "image/png", omitted: true, bytes: "aGVsbG8=".length, entryIndex: 0, imageIndex: 0 },
+    ]);
     expect(entries[0]!.content).toEqual([
       { type: "tool-result", tool: "read", status: "success", meta: [], error: null, hint: null, output: "Image: photo.png" },
     ]);
@@ -246,7 +253,10 @@ describe("routeMessage: async error closures", () => {
     const entries = messages[0]!.entries as Array<Record<string, unknown>>;
     expect(entries).toHaveLength(1);
     expect(entries[0]!.source).toBe("input");
-    expect(entries[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+    // The persisted INPUT image survives as a fetch-addressable stub.
+    expect(entries[0]!.images).toEqual([
+      { mimeType: "image/png", omitted: true, bytes: "aGVsbG8=".length, entryIndex: 0, imageIndex: 0 },
+    ]);
     expect(entries[0]!.content).toEqual([{ type: "untrusted", text: "what is in this photo?" }]);
   });
 

@@ -16,13 +16,29 @@ import {
 import type { Agent } from "@core/agent.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
-import { S2C } from "./protocol.ts";
+import { S2C, wireImageStubs } from "./protocol.ts";
 import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { replayLogSlice, replayPendingQuestion } from "./replay.ts";
 import { HISTORY_WINDOW_MESSAGES, windowOlderThan } from "./history-window.ts";
 import { adoptSessionLog, createAndAttachSession, seedResumedQuestions } from "./resume.ts";
 import type { HotdogServerSocket } from "./socket.ts";
+
+/** The FULL-replay image seam: a byte-honest view of the full log with every
+ *  entry's image payload replaced by a fetch-addressable stub
+ *  ({ omitted, mimeType, bytes, entryIndex, imageIndex }, zero base64).
+ *  `entryIndex` is the index in the FULL array -- the same append-only
+ *  coordinate space the replay cursor lives in, so a fetch resolves across
+ *  appends and RESETs. Entries with no images ride by reference (a replay
+ *  over an imageless log is wire-identical to one without stubs);
+ *  wireImages passes well-formed stubs through, so the shared s2c builders
+ *  (wire-messages.ts) need no second serializer. */
+function withStubbedImages(entries: LogEntry[]): LogEntry[] {
+  return entries.map((entry, index) => {
+    const stubs = wireImageStubs(entry.images, index);
+    return stubs ? { ...entry, images: stubs as unknown as LogEntry["images"] } : entry;
+  });
+}
 
 /**
  * Attach a socket to a LIVE session: channel, sessionCreated, history
@@ -113,7 +129,17 @@ export async function attachLiveSession(
     ...(win?.hasOlder ? { hasOlder: true, oldestIndex: win.start, epochToken: epochStart } : {}),
   });
 
-  replayLogSlice(ws, sessionId, full, start, agent?.toolRegistry);
+  // Byte-honest history: the windowed FULL replay ships image STUBS,
+  // fetch-addressable through C2S fetchImage. A delta is the exact tail the
+  // client lacks -- fresh-to-the-client like a live frame -- so its images
+  // stay inline and its wire is unchanged.
+  replayLogSlice(
+    ws,
+    sessionId,
+    replayDelta ? full : withStubbedImages(full),
+    start,
+    agent?.toolRegistry,
+  );
 
   // Flush in-flight chunks that haven't reached the log yet (their LLM
   // entry lands when the response completes).

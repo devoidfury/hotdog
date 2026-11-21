@@ -5001,6 +5001,28 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-secondary, #888);
 }
 
+/* History image stub: the byte-honest page ships no payload, so
+   the box attests what was omitted (media type + size) and fetches the
+   pixels when it comes on screen. Dashed frame reads as a placeholder, not
+   a broken thumbnail; a failed fetch turns honest-red in place. */
+.image-stub {
+    display: inline-flex;
+    align-items: center;
+    min-width: 180px;
+    min-height: 44px;
+    max-width: 320px;
+    padding: 8px 12px;
+    border: 1px dashed var(--border, #444);
+    border-radius: var(--radius, 8px);
+    font-size: 0.85rem;
+    color: var(--text-secondary, #888);
+}
+
+.image-stub-failed {
+    border-style: solid;
+    color: var(--danger, #e5484d);
+}
+
 /* ── Composer file uploads ────────────────────────────────────────────────── */
 #attachment-chips {
     display: flex;

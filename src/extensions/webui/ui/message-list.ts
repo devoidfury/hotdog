@@ -48,12 +48,19 @@ function dbgTree(label: string, tree: MdDocument): void {
 
 // Image payload on the wire (see wireImages in @extensions/websocket/
 // protocol.ts): base64 without data: prefix; oversized images arrive as
-// { skipped, note } with no data.
+// { skipped, note } with no data. HISTORY frames omit image payloads
+// entirely: { omitted: true, bytes } + the fetch coordinate (entryIndex =
+// FULL-log entry, imageIndex = slot) -- rendered as a placeholder box that
+// fetches the pixels when it comes on screen (see onFetchImage).
 export interface UiImage {
   mimeType: string;
   data?: string;
   skipped?: boolean;
   note?: string;
+  omitted?: boolean;
+  bytes?: number;
+  entryIndex?: number;
+  imageIndex?: number;
 }
 
 interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ path: string; content: string }>; }
@@ -216,6 +223,14 @@ interface MessageListOptions {
    *  view is un-pinned from the bottom. Absent (tests, the history mirror)
    *  means no button, never a crash. */
   jumpHost?: HTMLElement;
+  /** History image fetch seam: a stub box's host callback, called
+   *  with the stub's (entryIndex, imageIndex) coordinate when the box comes
+   *  on screen (IntersectionObserver; at render where none exists). Resolves
+   *  with the single WireImage (inline data, or the honest skipped+note
+   *  posture), rejects with the server's refusal text. Absent (mirrors
+   *  without a socket, tests that never fetch): stubs render as static
+   *  honest boxes. Forwarded to the older-page mirror by construction. */
+  onFetchImage?: (entryIndex: number, imageIndex: number) => Promise<UiImage>;
 }
 
 export interface MessageListManager {
@@ -317,7 +332,7 @@ export interface MessageListManager {
 
 export function createMessageList(
   container: HTMLElement,
-  { hideThinking = false, onQuestionAnswer, onNearTop, jumpHost }: MessageListOptions = {},
+  { hideThinking = false, onQuestionAnswer, onNearTop, jumpHost, onFetchImage }: MessageListOptions = {},
 ): MessageListManager {
   let currentAssistantEl: HTMLDivElement | null = null;
   let currentThinkingEl: HTMLDivElement | null = null;
@@ -325,6 +340,11 @@ export function createMessageList(
   // else the oldest unresolved call with the same name (id-less log replay).
   const toolBlocksById = new Map<string, ToolBlockController>();
   const pendingToolCallsByName = new Map<string, ToolBlockController[]>();
+  // Block -> its host div (the element the controller mounts INTO and that
+  // message-list created). Omitted history-image stubs render as sibling
+  // boxes at the block's foot via this map (tool-block's ImagesView only
+  // ever sees inline payloads; that seam stays untouched).
+  const toolBlockHosts = new WeakMap<ToolBlockController, HTMLElement>();
   let hasToolCallsSinceLastAssistant = false;
   let hideThinkingValue = hideThinking;
   // Worker-view question surface (see setQuestionReadOnly); every attach
@@ -791,17 +811,105 @@ export function createMessageList(
   }
 
   // ── Images ────────────────────────────────────────────────────────────────
+  /** Human size for a stub box (display copy only; the wire attests the
+   *  base64 payload length). KB below a MB, MB above, one decimal. */
+  function formatImageBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1).replace(/\.0$/, "")} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, "")} MB`;
+  }
+
+  /** The inline-posture <img> (click toggles full size). Built with
+   * createElement + setAttribute -- no markup ever comes from the wire. */
+  function makeImageEl(mimeType: string, data: string): HTMLImageElement {
+    const el = document.createElement("img");
+    el.className = "message-image";
+    el.setAttribute("src", `data:${mimeType};base64,${data}`);
+    el.setAttribute("loading", "lazy");
+    el.addEventListener("click", () => el.classList.toggle("fullsize"));
+    return el;
+  }
+
+  /**
+   * Placeholder box for an OMITTED history image: shows the media type +
+   * human size and trades the coordinate for pixels through the host
+   * callback. The fetch fires when the box scrolls into the viewport
+   * (IntersectionObserver; a page of heavy images stays free until the user
+   * looks), or at render where no observer exists (headless DOM). One fetch
+   * per box; success swaps the pixels IN (a skipped+note answer renders the
+   * note), failure paints the error into the box. A stub without
+   * coordinates or without a host callback is a static honest box.
+   */
+  function makeImageStubBox(img: UiImage): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "image-stub";
+    box.textContent = `${img.mimeType} image, not loaded (${formatImageBytes(img.bytes ?? NaN)})`;
+    const fetchable =
+      onFetchImage !== undefined
+      && Number.isInteger(img.entryIndex) && (img.entryIndex as number) >= 0
+      && Number.isInteger(img.imageIndex) && (img.imageIndex as number) >= 0;
+    if (!fetchable) return box;
+    let requested = false;
+    const load = (): void => {
+      if (requested) return;
+      requested = true;
+      onFetchImage!(img.entryIndex as number, img.imageIndex as number).then(
+        (got) => {
+          if (got && got.data && got.mimeType.startsWith("image/")) {
+            const el = makeImageEl(got.mimeType, got.data);
+            // Swap WITHOUT replaceChild/replaceWith (the minimal host DOMs
+            // do not all carry them): insert beside, then drop the box. A
+            // box the view already dropped (clear / pane switch) is simply
+            // gone -- nothing to paint into.
+            const parent = box.parentNode;
+            if (parent) {
+              parent.insertBefore(el, box);
+              box.remove();
+            }
+          } else {
+            box.textContent = got?.note || "image not displayed";
+          }
+        },
+        (err: unknown) => {
+          box.classList.add("image-stub-failed");
+          box.textContent = err instanceof Error ? err.message : String(err);
+        },
+      );
+    };
+    if (typeof IntersectionObserver !== "undefined") {
+      const io = new IntersectionObserver((records) => {
+        for (const rec of records) {
+          if (rec.isIntersecting) {
+            io.disconnect();
+            load();
+            break;
+          }
+        }
+      });
+      io.observe(box);
+    } else {
+      load();
+    }
+    return box;
+  }
+
   /**
    * Append image payloads to a message block as data-URL thumbnails (click
    * toggles full size). Built with createElement + setAttribute, never
    * innerHTML, so no markup ever comes from the wire; mimeTypes that are not
-   * images are rejected outright (a data: URL is still a URL).
+   * images are rejected outright (a data: URL is still a URL). OMITTED
+   * history stubs render the fetch-on-view placeholder instead.
    */
   function appendImages(parent: HTMLElement, images?: UiImage[]): void {
     if (!images || images.length === 0) return;
     const wrap = document.createElement("div");
     wrap.className = "message-images";
     for (const img of images) {
+      if (img.omitted) {
+        wrap.appendChild(makeImageStubBox(img));
+        continue;
+      }
       if (img.skipped || !img.data) {
         const note = document.createElement("div");
         note.className = "image-skipped";
@@ -816,12 +924,7 @@ export function createMessageList(
         wrap.appendChild(note);
         continue;
       }
-      const el = document.createElement("img");
-      el.className = "message-image";
-      el.setAttribute("src", `data:${img.mimeType};base64,${img.data}`);
-      el.setAttribute("loading", "lazy");
-      el.addEventListener("click", () => el.classList.toggle("fullsize"));
-      wrap.appendChild(el);
+      wrap.appendChild(makeImageEl(img.mimeType, img.data));
     }
     parent.appendChild(wrap);
   }
@@ -1194,6 +1297,7 @@ export function createMessageList(
     }
     container.appendChild(host);
     const block = new ToolBlockController(host as unknown as DomNode, { name, args, argsSummary, display });
+    toolBlockHosts.set(block, host);
     if (toolCallId) toolBlocksById.set(toolCallId, block);
     const queue = pendingToolCallsByName.get(name);
     if (queue) queue.push(block);
@@ -1237,13 +1341,23 @@ export function createMessageList(
     }
     if (!block) return; // orphan result: no matching call to attach to
 
+    // OMITTED history stubs render as fetch-on-view boxes at the block's
+    // foot (message-list owns the seam; tool-block.tsx's ImagesView stays
+    // inline-only); the inline remainder rides setResult exactly as before,
+    // so live results cannot drift.
+    const stubs = images?.filter((im) => im.omitted === true) ?? [];
+    const inline = stubs.length > 0 ? images!.filter((im) => im.omitted !== true) : images;
     block.setResult({
       ...(output !== undefined ? { output } : {}),
       ...(error !== undefined ? { error } : {}),
-      ...(images ? { images } : {}),
+      ...(inline && inline.length > 0 ? { images: inline } : {}),
       ...(startLine !== undefined ? { startLine } : {}),
       ...(meta ? { meta } : {}),
     });
+    if (stubs.length > 0) {
+      const hostEl = toolBlockHosts.get(block);
+      if (hostEl) appendImages(hostEl, stubs);
+    }
     scrollBottom();
   }
 
@@ -1963,7 +2077,14 @@ export function createMessageList(
     const prevScrollTop = container.scrollTop;
     const prevScrollHeight = container.scrollHeight;
     const scratch = document.createElement("div");
-    const mirror = createMessageList(scratch, { hideThinking: hideThinkingValue, onQuestionAnswer });
+    // The mirror renders the SAME pipeline, including the image-stub fetch
+    // seam: the spliced-in boxes (already live DOM by the time a reply
+    // lands) resolve into real pixels just like the first page's.
+    const mirror = createMessageList(scratch, {
+      hideThinking: hideThinkingValue,
+      onQuestionAnswer,
+      onFetchImage,
+    });
     mirror.renderLogEntries(entries);
     const first = container.firstChild;
     for (const node of [...scratch.childNodes]) {

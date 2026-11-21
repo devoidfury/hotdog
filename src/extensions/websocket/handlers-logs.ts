@@ -9,6 +9,7 @@ import {
   S2C,
   errorFrame,
   wireImages,
+  wireImageStubs,
   MAX_SEARCH_HITS,
   MAX_SEARCH_SNIPPETS_PER_LOG,
   SEARCH_SNIPPET_CONTEXT,
@@ -160,24 +161,30 @@ export async function handleLoadLog(ctx: RouteContext): Promise<void> {
 }
 
 /** The LOG_VIEWED / LOAD_OLDER_RESULT entry cap, ONE seam for both paths:
- *  raw images through the wire cap (a huge base64 must not flood the socket)
- *  and each tool_call annotated with its display parts + title-bar fold
- *  resolved against the LIVE registry (a browsed log has no registry of its
- *  own; the same resolution live frames and replays use, mapped through
- *  wireToolDisplay). Additive per-call fields only -- hintless tools and
- *  non-call entries ride untouched, so the entry SHAPE is unchanged and the
- *  windowing above this seam never touches a cap. */
+ *  images replaced by BYTE-HONEST STUBS ({ omitted, mimeType,
+ *  bytes, entryIndex, imageIndex }, zero base64; the client fetches a single
+ *  image back by coordinate via handleFetchImage below) and each tool_call
+ *  annotated with its display parts + title-bar fold resolved against the
+ *  LIVE registry (a browsed log has no registry of its own; the same
+ *  resolution live frames and replays use, mapped through wireToolDisplay).
+ *  `entryBase` is the FULL-LOG index of entries[0]: the stub coordinate
+ *  lives in the cursor's append-only space (stable across appends AND
+ *  RESETs), not the epoch-relative slice the windowing cuts. Additive
+ *  per-call fields only -- hintless tools and non-call entries ride
+ *  untouched, so the TEXT entry shape is unchanged and the windowing above
+ *  this seam never touches a field. */
 function capViewedLogEntries(
   entries: LogEntry[],
   toolRegistry: ToolRegistry | undefined,
+  entryBase: number,
 ): Array<Record<string, unknown>> {
   const toolDisplay = registryDisplay(toolRegistry);
   const headerKeys = registryHeaderKeys(toolRegistry);
   const argDisplay = registryArgDisplay(toolRegistry);
-  return entries.map((entry) => {
-    const imgs = wireImages(entry.images);
+  return entries.map((entry, i) => {
+    const stubs = wireImageStubs(entry.images, entryBase + i);
     const calls = entry.tool_calls;
-    const withImages = entry.images ? { ...entry, images: imgs } : entry;
+    const withImages = entry.images ? { ...entry, images: stubs } : entry;
     if (!Array.isArray(calls) || calls.length === 0) return withImages;
     let touched = false;
     const wired = calls.map((raw) => {
@@ -244,7 +251,12 @@ export async function handleViewLog(ctx: RouteContext): Promise<void> {
       // session that fits the window ships everything with NONE of the
       // additive fields -- byte-identical to the pre-windowing wire.
       const win = windowOlderThan(entries, entries.length, HISTORY_WINDOW_MESSAGES);
-      const capped = capViewedLogEntries(entries.slice(win.start), core?.toolRegistry);
+      const capped = capViewedLogEntries(
+        entries.slice(win.start),
+        core?.toolRegistry,
+        // Stub coordinates count the FULL log (the cursor's space).
+        epochStart + win.start,
+      );
       SessionRegistry.sendSafe(ws, {
         type: S2C.LOG_VIEWED,
         logId: msg.logId,
@@ -326,7 +338,12 @@ export async function handleLoadOlder(ctx: RouteContext): Promise<void> {
         return refuse(`olderThan ${olderThan} is beyond log ${JSON.stringify(id)} (${entries.length} entries).`);
       }
       const page = windowOlderThan(entries, olderThan, pageSize);
-      const capped = capViewedLogEntries(entries.slice(page.start, olderThan), core?.toolRegistry);
+      const capped = capViewedLogEntries(
+        entries.slice(page.start, olderThan),
+        core?.toolRegistry,
+        // Stub coordinates count the FULL log (the cursor's space).
+        epochStart + page.start,
+      );
       SessionRegistry.sendSafe(ws, {
         type: S2C.LOAD_OLDER_RESULT,
         requestId,
@@ -341,6 +358,85 @@ export async function handleLoadOlder(ctx: RouteContext): Promise<void> {
     })
     .catch((err: unknown) => {
       logger.warn(`[websocket] loadOlder failed: ${formatError(err)}`);
+      refuse(formatError(err));
+    });
+}
+
+/**
+ * C2S fetchImage: ONE image, on demand, for a history frame's stub.
+ * The client holds only coordinates -- (id, entryIndex,
+ * imageIndex); NO path input crosses the wire, and the id names a cold log
+ * OR a live session exactly like loadOlder (workspace/session-scoped by the
+ * core log helper). The server RE-READS the durable FULL log (append-only:
+ * a coordinate stays valid across appends and RESETs, so no epoch token
+ * guards this route) and answers the ONE requested payload through the same
+ * wireImages normalization + MAX_WIRE_IMAGE_BASE64_BYTES cap the live frames
+ * use -- an over-cap image honestly answers skipped+note, never bytes.
+ * Absent log / out-of-range entry / imageless entry / empty payload refuse
+ * with a correlated honest one-liner (the LIST_DIR_RESULT posture); stale or
+ * duplicate replies are the client's to drop by requestId.
+ */
+export async function handleFetchImage(ctx: RouteContext): Promise<void> {
+  const { ws, msg } = ctx;
+  const requestId = typeof msg.requestId === "number" ? msg.requestId : undefined;
+  const id =
+    typeof msg.logId === "string" ? msg.logId : typeof msg.sessionId === "string" ? msg.sessionId : "";
+  const entryIndex =
+    typeof msg.entryIndex === "number" && Number.isSafeInteger(msg.entryIndex) && msg.entryIndex >= 0
+      ? msg.entryIndex
+      : undefined;
+  const imageIndex =
+    typeof msg.imageIndex === "number" && Number.isSafeInteger(msg.imageIndex) && msg.imageIndex >= 0
+      ? msg.imageIndex
+      : undefined;
+  const refuse = (message: string): void => {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.FETCH_IMAGE_RESULT,
+      requestId,
+      ...(id !== "" ? { logId: id } : {}),
+      ...(entryIndex !== undefined ? { entryIndex } : {}),
+      ...(imageIndex !== undefined ? { imageIndex } : {}),
+      error: message,
+    });
+  };
+  if (id === "") return refuse("fetchImage requires a logId or sessionId");
+  if (entryIndex === undefined) {
+    return refuse(`fetchImage entryIndex must be a non-negative integer index, got ${JSON.stringify(msg.entryIndex)}.`);
+  }
+  if (imageIndex === undefined) {
+    return refuse(`fetchImage imageIndex must be a non-negative integer index, got ${JSON.stringify(msg.imageIndex)}.`);
+  }
+  // Awaited for the settle contract (real log read).
+  await readSessionEntries(id, { full: true })
+    .then((full) => {
+      if (full.length === 0) return refuse(`No readable log for ${JSON.stringify(id)}.`);
+      if (entryIndex >= full.length) {
+        return refuse(`entryIndex ${entryIndex} is beyond log ${JSON.stringify(id)} (${full.length} entries).`);
+      }
+      const rawImages = (full[entryIndex] as { images?: unknown }).images;
+      if (!Array.isArray(rawImages) || rawImages.length === 0) {
+        return refuse(`Entry ${entryIndex} of log ${JSON.stringify(id)} carries no images.`);
+      }
+      if (imageIndex >= rawImages.length) {
+        return refuse(
+          `imageIndex ${imageIndex} is out of range for entry ${entryIndex} of log ${JSON.stringify(id)} (${rawImages.length} images).`,
+        );
+      }
+      const imgs = wireImages([rawImages[imageIndex]]);
+      if (!imgs || imgs.length === 0) {
+        return refuse(`Image ${imageIndex} of entry ${entryIndex} has no readable payload.`);
+      }
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.FETCH_IMAGE_RESULT,
+        requestId,
+        logId: id,
+        entryIndex,
+        imageIndex,
+        image: imgs[0],
+      });
+    })
+    .catch((err: unknown) => {
+      logger.warn(`[websocket] fetchImage failed: ${formatError(err)}`);
       refuse(formatError(err));
     });
 }

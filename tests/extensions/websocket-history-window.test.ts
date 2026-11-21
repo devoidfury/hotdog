@@ -243,7 +243,10 @@ describe("viewLog ships the trailing window", () => {
     expect((page.entries as Array<Record<string, unknown>>).pop()).toEqual(entries[0]);
   });
 
-  it("per-entry caps survive windowing (over-cap image still skipped)", async () => {
+  it("windowed pages carry no image payloads (ruling C: honest stub, zero base64)", async () => {
+    // Every history image ships a stub (over-cap or not): the page is
+    // byte-honest and the fetch path answers the cap
+    // (websocket-log-image-stubs.test.ts).
     const lines = [
       JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: "caps", source: LOG_SOURCE.INPUT, content: "look" }),
       JSON.stringify({
@@ -258,9 +261,11 @@ describe("viewLog ships the trailing window", () => {
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "caps" });
     const withImg = (viewed!.entries as Array<Record<string, unknown>>).find((e) => e.images);
     const img = (withImg!.images as Array<Record<string, unknown>>)[0]!;
-    expect(img.skipped).toBe(true);
-    expect(typeof img.note).toBe("string");
+    expect(img.omitted).toBe(true);
+    expect(img.bytes).toBe(9 * 1024 * 1024);
     expect(img.data).toBeUndefined();
+    // The serialized page never grows near the payload size.
+    expect(JSON.stringify(viewed!).length).toBeLessThan(2_000);
   });
 });
 

@@ -2590,3 +2590,96 @@ describe("tool result meta strip (owner ruling 2026-11-18)", () => {
     expect(container.querySelector(".tool-meta-envelope")!.textContent).toContain('"exit_code": "0"');
   });
 });
+
+// ── History image stubs (byte-honest pages, pixels on demand) ───────────────
+// History frames carry { omitted, mimeType, bytes, entryIndex, imageIndex }
+// instead of base64. The list renders a placeholder box (media type + human
+// size) and asks the host for the ONE image (onFetchImage): the browser path
+// fires when the box scrolls on screen (IntersectionObserver); the headless
+// test DOM has none, so the box fetches at render -- deterministic. Success
+// swaps real pixels into the slot; a refusal paints the honest error IN the
+// box. Live inline images stay covered by the tests above (unchanged).
+
+describe("history image stubs (ruling C)", () => {
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+  const stub = { mimeType: "image/png", omitted: true, bytes: 614_400, entryIndex: 7, imageIndex: 0 };
+
+  it("renders a placeholder box (media type + human size) and fetches by coordinate, then swaps in pixels", async () => {
+    const calls: Array<[number, number]> = [];
+    setup({
+      onFetchImage: (ei: number, ii: number) => {
+        calls.push([ei, ii]);
+        return Promise.resolve({ mimeType: "image/png", data: "QUJD" });
+      },
+    });
+    ml.handleUserMessage({ content: "x", images: [stub] });
+    const box = container.querySelector(".image-stub")!;
+    expect(box.textContent).toContain("image/png");
+    expect(box.textContent).toContain("600 KB");
+    expect(container.querySelector("img")).toBeNull();
+    expect(calls).toEqual([[7, 0]]);
+    await flush();
+    const img = container.querySelector("img.message-image")!;
+    expect(img.getAttribute("src")).toBe("data:image/png;base64,QUJD");
+    expect(container.querySelector(".image-stub")).toBeNull();
+  });
+
+  it("a refusal paints the honest error INTO the box (no <img>, no invented retry)", async () => {
+    setup({ onFetchImage: () => Promise.reject(new Error("Entry 7 of log \"x\" carries no images.")) });
+    ml.handleUserMessage({ content: "x", images: [stub] });
+    await flush();
+    const box = container.querySelector(".image-stub")!;
+    expect(box.textContent).toContain("carries no images");
+    expect(box.classList.contains("image-stub-failed")).toBe(true);
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("an over-cap fetch answer (skipped+note) renders the note, never a broken image", async () => {
+    setup({
+      onFetchImage: () =>
+        Promise.resolve({ mimeType: "image/png", skipped: true, note: "image too large to display (9.0MB base64 > 8MB cap)" }),
+    });
+    ml.handleUserMessage({ content: "x", images: [stub] });
+    await flush();
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector(".image-stub")!.textContent).toContain("too large");
+  });
+
+  it("a stub without a fetch callback or coordinates is a static honest box", () => {
+    setup(); // no onFetchImage at all
+    ml.handleUserMessage({ content: "x", images: [stub] });
+    expect(container.querySelector(".image-stub")!.textContent).toContain("image/png");
+    ml.handleUserMessage({
+      content: "y",
+      images: [{ mimeType: "image/png", omitted: true, bytes: 5 }], // no coordinates
+    });
+    expect(container.querySelectorAll(".image-stub")).toHaveLength(2);
+  });
+
+  it("older pages fetch through the mirror too (renderOlderEntries forwards)", async () => {
+    const calls: Array<[number, number]> = [];
+    setup({
+      onFetchImage: (ei: number, ii: number) => {
+        calls.push([ei, ii]);
+        return Promise.resolve({ mimeType: "image/png", data: "QQ==" });
+      },
+    });
+    ml.handleUserMessage({ content: "live tail" });
+    ml.renderOlderEntries([
+      { source: "input", content: "old pic", images: [{ mimeType: "image/png", omitted: true, bytes: 5, entryIndex: 2, imageIndex: 1 }] },
+    ] as never);
+    expect(calls).toEqual([[2, 1]]);
+    await flush();
+    // The spliced-in page now holds the real pixels.
+    expect(container.querySelector("img")!.getAttribute("src")).toBe("data:image/png;base64,QQ==");
+  });
+
+  it("log replay renders stubs (cold browse path)", () => {
+    setup({ onFetchImage: () => new Promise<never>(() => {}) }); // pending forever: box stands
+    ml.renderLogEntries([
+      { source: "input", content: "look", images: [stub] },
+    ] as never);
+    expect(container.querySelector(".image-stub")!.textContent).toContain("600 KB");
+    expect(container.querySelector("img")).toBeNull();
+  });
+});

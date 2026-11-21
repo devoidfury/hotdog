@@ -1072,3 +1072,104 @@ describe("lazy history: chat layer loadOlder", () => {
     expect(olderReqs()).toHaveLength(2);
   });
 });
+
+// ── History image stub fetch ────────────────────────────────────────────────
+// The chat layer owns the socket half: a rendered stub box asks for its ONE
+// image through C2S fetchImage (correlated requestId, the transcribe
+// doctrine), addressed by the transcript CURRENTLY on screen -- the attached
+// session, or the cold log while one is open. S2C fetchImageResult settles
+// the waiting box (pixels or honest error).
+
+describe("history image stub fetch (ruling C)", () => {
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+  const stubImgs = [{ mimeType: "image/png", omitted: true, bytes: 614_400, entryIndex: 4, imageIndex: 0 }];
+
+  it("a stubbed replay frame fetches through the socket and swaps in pixels", async () => {
+    const { chat, ws, container } = makeChat();
+    chat.setSession("s1");
+    ws.fireMessage({ type: "userMessage", sessionId: "s1", content: "x", images: stubImgs });
+    expect(container.querySelector(".image-stub")).not.toBeNull();
+    const req = ws.sent.map((s) => JSON.parse(s) as Sent).find((m) => m.type === "fetchImage");
+    expect(req).toBeDefined();
+    expect(req!.logId).toBe("s1");
+    expect(req!.entryIndex).toBe(4);
+    expect(req!.imageIndex).toBe(0);
+    expect(typeof req!.requestId).toBe("number");
+    ws.fireMessage({
+      type: "fetchImageResult",
+      requestId: req!.requestId,
+      logId: "s1",
+      entryIndex: 4,
+      imageIndex: 0,
+      image: { mimeType: "image/png", data: "QUJD" },
+    });
+    await flush();
+    expect(container.querySelector("img")!.getAttribute("src")).toBe("data:image/png;base64,QUJD");
+    expect(container.querySelector(".image-stub")).toBeNull();
+  });
+
+  it("an honest refusal lands in the box", async () => {
+    const { chat, ws, container } = makeChat();
+    chat.setSession("s1");
+    ws.fireMessage({ type: "toolCall", sessionId: "s1", name: "read", args: "{}" });
+    ws.fireMessage({ type: "toolResult", sessionId: "s1", name: "read", output: "pic", images: stubImgs });
+    const req = ws.sent.map((s) => JSON.parse(s) as Sent).find((m) => m.type === "fetchImage")!;
+    ws.fireMessage({
+      type: "fetchImageResult",
+      requestId: req!.requestId,
+      logId: "s1",
+      entryIndex: 4,
+      imageIndex: 0,
+      error: "entryIndex 4 is beyond log \"s1\" (2 entries).",
+    });
+    await flush();
+    expect(container.querySelector(".image-stub")!.textContent).toContain("beyond log");
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("while a cold log is on screen the fetch names the LOG, not the attached session", () => {
+    const { chat, ws } = makeChat();
+    chat.setSession("s1");
+    ws.fireMessage({ type: "logViewed", logId: "cold-1", entries: [] });
+    // The app renders the viewed entries through the manager; the fetch seam
+    // must follow the transcript ON SCREEN (viewedLogId), not the socket's
+    // attached session.
+    chat.messageListAtom()!.renderLogEntries([
+      { source: "input", content: "old", images: stubImgs },
+    ] as never);
+    const req = ws.sent.map((s) => JSON.parse(s) as Sent).find((m) => m.type === "fetchImage");
+    expect(req!.logId).toBe("cold-1");
+  });
+
+  it("a stale or unknown requestId reply is silently dropped (transcribe doctrine)", async () => {
+    const { chat, ws, container } = makeChat();
+    chat.setSession("s1");
+    ws.fireMessage({ type: "userMessage", sessionId: "s1", content: "x", images: stubImgs });
+    ws.fireMessage({ type: "fetchImageResult", requestId: 9999, logId: "s1", image: { mimeType: "image/png", data: "QUJD" } });
+    await flush();
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector(".image-stub")).not.toBeNull();
+  });
+
+  it("a socket death rejects waiting boxes honestly (no dangling promise)", async () => {
+    // The close routes through /verify; stub it and capture the 3 s
+    // reconnect timer (the handshake suite's trick) so this costs no wall
+    // clock and no network.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ status: 503 }) as Response) as unknown as typeof fetch;
+    const timers = captureLongTimers();
+    try {
+      const { chat, ws, container } = makeChat();
+      chat.setSession("s1");
+      ws.fireMessage({ type: "userMessage", sessionId: "s1", content: "x", images: stubImgs });
+      ws.onclose?.();
+      await new Promise((r) => realSetTimeout(r, 0)); // let the verify settle
+      expect(container.querySelector(".image-stub")!.textContent).toContain("connection closed");
+      expect(container.querySelector("img")).toBeNull();
+      timers.fireCaptured(); // drain the reconnect timer
+    } finally {
+      globalThis.fetch = originalFetch;
+      timers.restore();
+    }
+  });
+});

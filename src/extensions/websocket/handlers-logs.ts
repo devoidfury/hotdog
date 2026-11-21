@@ -246,7 +246,7 @@ export async function handleViewLog(ctx: RouteContext): Promise<void> {
       const epochStart = epochStartIndex(full);
       const entries = full.slice(epochStart);
       // Lazy history: ship the TRAILING window of conversation messages,
-      // aligned to a turn boundary (history-window.ts). Older history pages
+      // k MESSAGES back (history-window.ts). Older history pages
       // through C2S loadOlder against the oldestIndex shipped here. A
       // session that fits the window ships everything with NONE of the
       // additive fields -- byte-identical to the pre-windowing wire.

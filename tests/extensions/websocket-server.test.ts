@@ -1862,14 +1862,15 @@ describe("log replay via SWITCH_SESSION", () => {
     const created = msgs.find((m: any) => m.type === S2C.SESSION_CREATED);
     // The window meta rides the very frame that clears the client's
     // transcript: oldestIndex is the EPOCH-relative index of the first
-    // replayed entry (the boundary-aligned window head).
+    // replayed entry -- the K-th-from-last MESSAGE, which is an llm response
+    // here (18 messages, K=5 -> index 13 = A6). Mid-run starts are correct.
     expect(created.hasOlder).toBe(true);
-    expect(created.oldestIndex).toBe(6); // (9 - K) turns x 2 entries
+    expect(created.oldestIndex).toBe(13);
     expect(created.epochToken).toBe(0); // no RESET: the epoch starts at 0
     const users = msgs
       .filter((m: any) => m.type === S2C.USER_MESSAGE)
       .map((m: any) => m.content);
-    expect(users).toEqual(["Q3", "Q4", "Q5", "Q6", "Q7", "Q8"]);
+    expect(users).toEqual(["Q7", "Q8"]);
     // The cursor bookkeeping is UNTOUCHED by windowing: the client may have
     // paged older history, but its TAIL still ends at the full log length.
     const cursor = msgs.find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
@@ -1878,9 +1879,10 @@ describe("log replay via SWITCH_SESSION", () => {
 
   it("a session that fits the window replays everything with NO window fields", async () => {
     const entries: Array<Record<string, unknown>> = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 2; i++) {
       entries.push({ source: "input", content: `Q${i}` }, { source: "llm", content: `A${i}` });
     }
+    // 4 messages <= K=5: nothing older exists, so no window meta at all.
     const ws = await switchWithLog(entries);
     const created = ws.messages.map((m) => JSON.parse(m)).find((m: any) => m.type === S2C.SESSION_CREATED);
     expect(created.hasOlder).toBeUndefined();

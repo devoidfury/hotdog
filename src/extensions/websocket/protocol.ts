@@ -45,8 +45,8 @@ export const C2S = {
   // Lazy history page (see history-window.ts): { type, requestId,
   // logId | sessionId, olderThan, pageSize?, epochToken? }. Requests the
   // page of conversation messages immediately OLDER than `olderThan` (the
-  // oldestIndex a windowed LOG_VIEWED / sessionCreated shipped), aligned to
-  // the same turn-boundary grammar. `pageSize` is a message count, clamped
+  // oldestIndex a windowed LOG_VIEWED / sessionCreated shipped), cut by
+  // the same message-count grammar. `pageSize` is a message count, clamped
   // server-side (MAX_HISTORY_PAGE_MESSAGES). `epochToken` echoes the token
   // the attestation carried (the full-log epochStartIndex the window was
   // cut at): a mismatch refuses with code "epoch_moved" (a mid-socket RESET

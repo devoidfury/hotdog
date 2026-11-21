@@ -274,7 +274,7 @@ describe("coldLogsPayload: attested worker logs leave the list", () => {
   });
 
   it("viewLog/loadOlder keep reaching the excluded id (the list hides, the log stays addressable)", async () => {
-    // A bigger log: 8 user turns (K=6 window -> the first 2 page older).
+    // A bigger log: 8 user turns + 8 responses = 16 messages, K=5 window.
     const lines = [
       JSON.stringify({ ts: new Date(SPAWN).toISOString(), session_id: "vis-worker", source: "session_start", content: "", model: "m", profile: "default" }),
     ];
@@ -289,30 +289,43 @@ describe("coldLogsPayload: attested worker logs leave the list", () => {
     const viewed = frames(ws).find((m) => m.type === S2C.LOG_VIEWED)!;
     expect(viewed.logId).toBe("vis-worker");
     const entries = viewed.entries as Array<Record<string, unknown>>;
-    // Trailing window: turns 2..7 (user+assistant) == 12 entries, with the
-    // two older turns behind the loadOlder seam.
-    expect(entries.length).toBe(12);
-    expect(entries[0]!.content).toBe("turn 2");
+    // Trailing window of FIVE messages: reply 5 opens it (a page may start
+    // mid-turn), with the older history behind the seam.
+    expect(entries.length).toBe(5);
+    expect(entries[0]!.content).toBe("reply 5");
     expect(viewed.hasOlder).toBe(true);
-    expect(viewed.oldestIndex).toBe(5);
+    expect(viewed.oldestIndex).toBe(12);
 
-    const older = ctxFor(registry, {
-      type: C2S.LOAD_OLDER,
-      logId: "vis-worker",
-      requestId: 4,
-      olderThan: viewed.oldestIndex,
-      epochToken: viewed.epochToken,
-    });
-    await handleLoadOlder(older.ctx);
-    const page = frames(older.ws).find((m) => m.type === S2C.LOAD_OLDER_RESULT)!;
-    expect(page.requestId).toBe(4);
-    expect(page.error).toBeUndefined();
-    // The whole older range: session_start + turns 0 and 1 (pages are whole
-    // turns, leading bookkeeping rides).
-    const pageEntries = page.entries as Array<Record<string, unknown>>;
-    expect(pageEntries.length).toBe(5);
-    expect(pageEntries[1]!.content).toBe("turn 0");
-    expect(page.hasOlder).toBe(false);
+    // Walk the seam to the top: window + every page == the full log, entry
+    // for entry, nothing shipped twice; the last page ships from 0 with the
+    // leading session_start riding and hasOlder false.
+    let cursor = viewed.oldestIndex as number;
+    let hasOlder = viewed.hasOlder === true;
+    const collected = [...entries];
+    let lastPage: { entries: Array<Record<string, unknown>>; hasOlder: boolean } | null = null;
+    let guard = 0;
+    while (hasOlder && guard++ < 10) {
+      const older = ctxFor(registry, {
+        type: C2S.LOAD_OLDER,
+        logId: "vis-worker",
+        requestId: 4,
+        olderThan: cursor,
+        epochToken: viewed.epochToken,
+      });
+      await handleLoadOlder(older.ctx);
+      const page = frames(older.ws).find((m) => m.type === S2C.LOAD_OLDER_RESULT)!;
+      expect(page.requestId).toBe(4);
+      expect(page.error).toBeUndefined();
+      lastPage = { entries: page.entries as Array<Record<string, unknown>>, hasOlder: page.hasOlder === true };
+      collected.unshift(...lastPage.entries);
+      cursor = page.oldestIndex as number;
+      hasOlder = page.hasOlder === true;
+    }
+    expect(hasOlder).toBe(false);
+    expect(lastPage!.entries[0]!.source).toBe("session_start"); // leading bookkeeping rides
+    expect(lastPage!.entries[1]!.content).toBe("turn 0");
+    const raw = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(JSON.stringify(collected)).toBe(JSON.stringify(raw));
   });
 
   it("search reaches the excluded log and labels the hit; interactive hits stay byte-identical", async () => {

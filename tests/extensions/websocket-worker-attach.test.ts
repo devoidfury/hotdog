@@ -257,7 +257,7 @@ describe("worker attach: windowed replay, cursor, working, subagent fields", () 
   it("full replay rides the windowed seam; sessionCreated carries kind/parentSessionId; working = task inRun; delta reconnect keeps the transcript", async () => {
     const h = await makeHarness();
     try {
-      // A long durable log (10 conversation pairs > the 6-message window).
+      // A long durable log (20 messages > the 5-message window).
       const lines: string[] = [];
       for (let i = 0; i < 10; i++) {
         lines.push(JSON.stringify({ ts: `2024-01-01T00:00:0${i}Z`, session_id: h.workerSid, source: "input", content: `in ${i}` }));

@@ -179,8 +179,9 @@ describe("LOG_VIEWED ships image stubs, zero base64", () => {
     writeFileSync(join(SESSIONS_DIR, "plain.jsonl"), imgless.map((e) => JSON.stringify(e)).join("\n") + "\n");
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "plain" });
     const entries = viewed!.entries as Array<Record<string, unknown>>;
-    // The window is lines 6..17 of the same shape; compare each shipped entry
-    // byte-for-byte against the raw parsed line at its full-log index.
+    // The window is lines 13..17 of the same shape (the 5th-from-last
+    // message); compare each shipped entry byte-for-byte against the raw
+    // parsed line at its full-log index.
     const start = (viewed!.oldestIndex as number) ?? 0;
     const raw = imgless.slice(start);
     expect(entries.map((e) => JSON.stringify(e))).toEqual(raw.map((e) => JSON.stringify(e)));
@@ -193,8 +194,13 @@ describe("loadOlder pages ship image stubs too", () => {
   it("the older page stubs every image and ships zero base64", async () => {
     writePagesLog("pages"); // rewrite (the describe above is read-only usage)
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "pages" });
+    // The 5-message window opens at a5 (index 13; its slice carries q7's
+    // stub). Eleven countable messages remain below, so the DEFAULT
+    // 5-message page would cut q0's image out; ask for 11 and the whole
+    // older range ships (the <= K short-circuit to index 0), A stub and
+    // legacy data-URL included.
     const [page] = await send({
-      type: C2S.LOAD_OLDER, requestId: 7, logId: "pages", olderThan: viewed!.oldestIndex,
+      type: C2S.LOAD_OLDER, requestId: 7, logId: "pages", olderThan: viewed!.oldestIndex, pageSize: 11,
     });
     expect(page!.type).toBe(S2C.LOAD_OLDER_RESULT);
     const wire = JSON.stringify(page)!;
@@ -341,7 +347,7 @@ describe("attach FULL replay ships stubs; a delta replay stays inline", () => {
     const frames = ws.messages.map((m) => JSON.parse(m) as Record<string, unknown>);
     const created = frames.find((f) => f.type === S2C.SESSION_CREATED)!;
     expect(created.hasOlder).toBe(true);
-    expect(created.oldestIndex).toBe(5); // the 3rd boundary: last K=6 turns ship
+    expect(created.oldestIndex).toBe(12); // the 5th-from-last message (llm a5): 16 messages, K=5
     const withImg = frames.filter((f) => f.images !== undefined);
     expect(withImg.length).toBeGreaterThan(0);
     for (const f of withImg) {

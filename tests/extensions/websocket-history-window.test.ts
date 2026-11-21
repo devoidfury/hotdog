@@ -1,16 +1,23 @@
 // Lazy history windowing: the pure window seam (history-window.ts) and the
 // wire pair it powers -- viewLog now ships the trailing window with the
 // additive oldestIndex/hasOlder/epochToken meta, and loadOlder pages
-// backwards through the SAME alignment (requestId-correlated,
+// backwards through the SAME message-count grammar (requestId-correlated,
 // LIST_DIR_RESULT-style honest refusals, epochToken staleness guard).
 // Handler-level driving is the message-routing harness (stub registry, mock
 // socket, real temp-dir logs).
+//
+// The unit is a MESSAGE: one user input/prompt entry or one model response
+// (llm) entry -- a response counts 1 whether it stopped, called tools, or
+// continued. tool_result / system_prompt / compaction / token_usage /
+// tool_started / question_asked are NON-message baggage riding inside
+// whatever page their index falls in. Alignment is per-message, not per
+// turn: a window MAY start at an llm entry mid-turn.
 //
 // The search deep-link decision rides these pins: a search hit only OPENS a
 // log (never positions to a match), so the window can never "miss" a match
 // on open -- and the loop-to-the-top test below proves every match is
 // REACHABLE through the loadOlder seam (window + all pages == the full
-// epoch, entry for entry).
+// epoch, entry for entry, nothing shipped twice).
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -28,75 +35,124 @@ import type { WebSocketQuestionBridge } from "@extensions/websocket/question-inp
 import type { CoreContext } from "@core/extensions/types.ts";
 import { createWsMockWs } from "../mocks/websocket.ts";
 
-// ── pure windowOlderThan: the boundary table ────────────────────────────────
+// ── pure windowOlderThan: the message table ─────────────────────────────────
 
-type Seed = { source: string; content?: string };
+type Seed = { source: string; content?: string; tool_call_id?: string };
 const input = (c: string): Seed => ({ source: LOG_SOURCE.INPUT, content: c });
 const prompt = (c: string): Seed => ({ source: LOG_SOURCE.PROMPT, content: c });
 const llm = (c: string): Seed => ({ source: LOG_SOURCE.LLM, content: c });
 const tool = (c = "out"): Seed => ({ source: LOG_SOURCE.TOOL_RESULT, content: c });
+const toolStarted = (id: string): Seed => ({ source: LOG_SOURCE.TOOL_STARTED, content: "{}", tool_call_id: id });
 const usage = (): Seed => ({ source: LOG_SOURCE.TOKEN_USAGE, content: "" });
 const bookkeeping = (): Seed => ({ source: LOG_SOURCE.SESSION_START, content: "" });
+const sysPrompt = (): Seed => ({ source: LOG_SOURCE.SYSTEM_PROMPT, content: "" });
 
-/** `k` complete turns: input + llm (+ token_usage bookkeeping). */
+/** `k` complete stopped turns: input + llm (+ token_usage baggage). 2
+ *  countable messages per turn. */
 function turns(k: number): Seed[] {
   const out: Seed[] = [];
   for (let i = 0; i < k; i++) out.push(input(`Q${i}`), llm(`A${i}`), usage());
   return out;
 }
 
+const isCountable = (s: Seed): boolean =>
+  s.source === LOG_SOURCE.INPUT || s.source === LOG_SOURCE.PROMPT || s.source === LOG_SOURCE.LLM;
+const countCountable = (seeds: Seed[]): number => seeds.filter(isCountable).length;
+
 function win(seeds: Seed[], k = HISTORY_WINDOW_MESSAGES) {
   return windowOlderThan(seeds as unknown as LogEntry[], seeds.length, k);
 }
 
-describe("windowOlderThan boundary table", () => {
+describe("windowOlderThan message table", () => {
+  it("the window is FIVE messages", () => {
+    expect(HISTORY_WINDOW_MESSAGES).toBe(5);
+  });
+
   it("empty log ships everything", () => {
     expect(win([])).toEqual({ start: 0, hasOlder: false });
   });
 
-  it("a log smaller than the window ships everything (hasOlder false)", () => {
-    expect(win(turns(2))).toEqual({ start: 0, hasOlder: false });
+  it("<= K countable messages ship everything (hasOlder false)", () => {
+    expect(win(turns(2))).toEqual({ start: 0, hasOlder: false }); // 4 messages
+    // Exactly K, mixed sources: still nothing older to page for.
+    expect(win([input("a"), llm("b"), prompt("c"), llm("d"), input("e")])).toEqual({
+      start: 0,
+      hasOlder: false,
+    });
   });
 
-  it("exactly K messages ship everything (hasOlder false)", () => {
-    const r = win(turns(HISTORY_WINDOW_MESSAGES));
-    expect(r).toEqual({ start: 0, hasOlder: false });
-  });
-
-  it("K+1 messages: start is the SECOND user boundary, hasOlder true", () => {
-    const seeds = turns(HISTORY_WINDOW_MESSAGES + 1);
+  it("K+1 messages: start is the SECOND message (llm entries count), hasOlder true", () => {
+    const seeds = [input("u1"), llm("r1"), input("u2"), llm("r2"), input("u3"), llm("r3")];
     const r = win(seeds);
-    expect(r.hasOlder).toBe(true);
-    expect(seeds[r.start]!.source).toBe(LOG_SOURCE.INPUT);
-    expect(seeds[r.start]!.content).toBe("Q1");
+    expect(r).toEqual({ start: 1, hasOlder: true });
+    expect(countCountable(seeds.slice(r.start))).toBe(HISTORY_WINDOW_MESSAGES);
   });
 
-  it("bookkeeping riding between boundaries travels with its turn (start stays a boundary)", () => {
-    const seeds = [
-      bookkeeping(),
-      ...turns(HISTORY_WINDOW_MESSAGES + 2),
-    ];
+  it("a single-prompt worker log (ONE prompt + hundreds of llm/tool_result rounds) PAGES", () => {
+    const seeds: Seed[] = [prompt("the delegated task")];
+    for (let i = 0; i < 60; i++) seeds.push(llm(""), toolStarted(`c${i}`), tool(`out ${i}`));
+    seeds.push(llm("final answer"));
     const r = win(seeds);
+    expect(r.start).toBeGreaterThan(0);
     expect(r.hasOlder).toBe(true);
-    expect(seeds[r.start]!.source).toMatch(/^(input|prompt)$/);
-  });
-
-  it("a log ending mid-tool-run ships the trailing tool run whole", () => {
-    const seeds = [
-      ...turns(HISTORY_WINDOW_MESSAGES + 1),
-      input("mid run"),
-      llm("calling"),
-      tool(),
-      tool(), // ends before the turn closes: the baggage must ride, not get cut
-    ];
-    const r = win(seeds);
-    expect(r.hasOlder).toBe(true);
-    // The trailing half-turn is smaller than a boundary-to-boundary turn; the
-    // window holds its K boundaries AND everything after the last one.
     const shipped = seeds.slice(r.start);
-    expect(shipped[0]!.source).toBe(LOG_SOURCE.INPUT);
-    expect(shipped[shipped.length - 1]!.source).toBe(LOG_SOURCE.TOOL_RESULT);
-    expect(shipped[shipped.length - 2]!.source).toBe(LOG_SOURCE.TOOL_RESULT);
+    // Exactly K countable messages (+ their riding tool_started/tool_result
+    // baggage), NOT the whole log.
+    expect(countCountable(shipped)).toBe(HISTORY_WINDOW_MESSAGES);
+    expect(shipped.length).toBeLessThan(seeds.length);
+    // The seam starts AT a countable message (an llm response here).
+    expect(isCountable(shipped[0]!)).toBe(true);
+    // The trailing stopped response rides too.
+    expect(shipped[shipped.length - 1]!.content).toBe("final answer");
+  });
+
+  it("window counts BOTH input and llm entries; a tool-calling response counts 1", () => {
+    const seeds = [
+      input("in0"), llm("llm0"),
+      input("in1"), llm("llm1"), tool("r1"),
+      input("in2"), llm("llm2"), tool("r2a"), tool("r2b"),
+      input("in3"), llm("llm3"),
+    ];
+    const r = win(seeds);
+    // The 5th-from-last message is llm1 itself (index 3): had a tool-calling
+    // response counted as anything other than 1, the cut would land elsewhere.
+    expect(r).toEqual({ start: 3, hasOlder: true });
+    const shipped = seeds.slice(r.start);
+    expect(shipped[0]!.content).toBe("llm1");
+    expect(countCountable(shipped)).toBe(HISTORY_WINDOW_MESSAGES);
+    expect(shipped.filter((s) => s.source === LOG_SOURCE.INPUT)).toHaveLength(2);
+    expect(shipped.filter((s) => s.source === LOG_SOURCE.LLM)).toHaveLength(3);
+    // The results of the shipped calls ride inside the page.
+    expect(shipped.filter((s) => s.source === LOG_SOURCE.TOOL_RESULT)).toHaveLength(3);
+  });
+
+  it("non-message baggage never counts: 100 tool_results + 5 messages ships whole", () => {
+    const msgs = [input("i0"), llm("a0"), input("i1"), llm("a1"), input("i2")];
+    const seeds = [...msgs, ...Array.from({ length: 100 }, (_, i) => tool(`t${i}`))];
+    expect(win(seeds)).toEqual({ start: 0, hasOlder: false }); // whole-log page
+  });
+
+  it("...and 100 tool_results + 7 messages PAGES with all 100 results riding", () => {
+    const msgs = [input("i0"), llm("a0"), input("i1"), llm("a1"), input("i2"), llm("a2"), llm("a3")];
+    const seeds = [...msgs, ...Array.from({ length: 100 }, (_, i) => tool(`t${i}`))];
+    const r = win(seeds);
+    expect(r).toEqual({ start: 2, hasOlder: true });
+    const shipped = seeds.slice(r.start);
+    expect(countCountable(shipped)).toBe(HISTORY_WINDOW_MESSAGES);
+    expect(shipped).toHaveLength(HISTORY_WINDOW_MESSAGES + 100); // trailing baggage rides whole
+  });
+
+  it("system_prompt / bookkeeping / usage / tool_started / question_asked never count", () => {
+    const seeds = [
+      sysPrompt(), bookkeeping(),
+      ...turns(3),
+      { source: LOG_SOURCE.QUESTION_ASKED, content: "q", tool_call_id: "x" },
+    ];
+    // 6 countable -> the SECOND one (llm A0) opens the window.
+    const r = win(seeds);
+    expect(r.hasOlder).toBe(true);
+    expect(seeds[r.start]!.source).toBe(LOG_SOURCE.LLM);
+    expect(countCountable(seeds.slice(r.start))).toBe(HISTORY_WINDOW_MESSAGES);
   });
 
   it("consecutive prompts each count as a message", () => {
@@ -107,46 +163,118 @@ describe("windowOlderThan boundary table", () => {
     expect(r.hasOlder).toBe(true);
   });
 
-  it("PROMPT counts as a boundary alongside INPUT", () => {
-    const seeds: Seed[] = [input("a"), llm("b"), prompt("c"), llm("d")];
-    expect(win(seeds, 1)).toMatchObject({ start: 2, hasOlder: true });
-  });
-
-  it("a log with NO boundary ships everything (nothing to align to)", () => {
-    const seeds = [bookkeeping(), llm("no user ever spoke"), usage()];
+  it("a log with NO countable message ships everything (nothing to align to)", () => {
+    const seeds = [bookkeeping(), sysPrompt(), tool("orphan-ish"), usage()];
     expect(win(seeds)).toEqual({ start: 0, hasOlder: false });
   });
 
-  it("leading bookkeeping under the first boundary ships with the last page (hasOlder false)", () => {
-    const seeds = [bookkeeping(), bookkeeping(), ...turns(HISTORY_WINDOW_MESSAGES + 1)];
+  it("leading bookkeeping under the first message ships with the last page (hasOlder false)", () => {
+    // 2 bookkeeping rows + 6 countable messages.
+    const seeds = [bookkeeping(), bookkeeping(), ...turns(3)];
     const firstPage = win(seeds);
     const older = windowOlderThan(seeds as unknown as LogEntry[], firstPage.start, HISTORY_WINDOW_MESSAGES);
-    // Only K-1 boundaries remain below -> there is nothing older to page to:
-    // the whole remainder ships from 0, the two bookkeeping rows included
-    // (they render nothing; paging for them would buy nothing).
+    // Only 1 countable message remains below -> there is nothing countable
+    // older to page to: the whole remainder ships from 0, the two
+    // bookkeeping rows included (they render nothing; paging for them would
+    // buy nothing).
     expect(older.start).toBe(0);
     expect(older.hasOlder).toBe(false);
   });
 
+  it("a log ending mid-tool-run ships the trailing run whole", () => {
+    const seeds: Seed[] = [
+      ...turns(3), // 6 countable
+      input("run opener"), llm("calling"), toolStarted("c1"), tool("r1"), tool("r2"),
+    ];
+    const r = win(seeds);
+    expect(r.hasOlder).toBe(true);
+    const shipped = seeds.slice(r.start);
+    // The window holds its K messages AND everything after them; the slice
+    // just ENDS at the last tool_result (it may cut right after an llm entry
+    // the same way -- the client renders what it holds).
+    expect(countCountable(shipped)).toBe(HISTORY_WINDOW_MESSAGES);
+    expect(shipped[shipped.length - 1]!.source).toBe(LOG_SOURCE.TOOL_RESULT);
+    expect(shipped[shipped.length - 2]!.source).toBe(LOG_SOURCE.TOOL_RESULT);
+  });
+
   it("CJK/unicode content shifts no index (alignment is source-based)", () => {
     const seeds: Seed[] = [];
-    for (let i = 0; i < HISTORY_WINDOW_MESSAGES + 1; i++) {
-      seeds.push(input(`问题 ${i} 🚀 café`), llm(`回答 ${i} — ok`));
+    for (let i = 0; i < 4; i++) {
+      seeds.push(input(`问题 ${i} 🚀 café`), llm(`回答 ${i} -- ok`));
     }
-    const r = win(seeds);
-    expect(seeds[r.start]!.content).toBe("问题 1 🚀 café");
+    const r = win(seeds); // 8 countable -> the 5th-from-last is index 3
+    expect(countCountable(seeds)).toBe(8);
+    expect(r.start).toBe(3); // the 5th-from-last message: llm answer 1
+    expect(seeds[r.start]!.content).toBe("回答 1 -- ok");
   });
 
   it("untrusted k is sanitized into [1, MAX_HISTORY_PAGE_MESSAGES]", () => {
     const seeds = turns(3);
-    // k=0 / NaN clamp to 1: the last turn only (the LAST boundary to the
-    // turn's end), older history honestly flagged.
-    expect(win(seeds, 0)).toMatchObject({ start: 6, hasOlder: true });
-    expect(win(seeds, NaN)).toMatchObject({ start: 6, hasOlder: true });
-    // k beyond the cap collapses to the cap: 100 turns still page at MAX.
+    // k=0 / NaN / k<0 clamp to 1: the LAST countable message only, older
+    // history honestly flagged.
+    expect(win(seeds, 0)).toMatchObject({ start: 7, hasOlder: true });
+    expect(win(seeds, NaN)).toMatchObject({ start: 7, hasOlder: true });
+    expect(win(seeds, -5)).toMatchObject({ start: 7, hasOlder: true });
+    // k beyond the cap collapses to the cap: 100 turns (200 messages) still
+    // page at MAX -- the window opens at A87, the 25th-from-last message.
     const big = turns(100);
     const r = windowOlderThan(big as unknown as LogEntry[], big.length, 10_000);
-    expect(r.start).toBe((100 - MAX_HISTORY_PAGE_MESSAGES) * 3);
+    expect(r.start).toBe(262);
+    expect(big[r.start]!.content).toBe("A87");
+    expect(r.hasOlder).toBe(true);
+    expect(countCountable(big.slice(r.start))).toBe(MAX_HISTORY_PAGE_MESSAGES);
+  });
+
+  it("upper is clamped into range", () => {
+    const seeds = turns(4);
+    expect(windowOlderThan(seeds as unknown as LogEntry[], seeds.length + 50, HISTORY_WINDOW_MESSAGES))
+      .toEqual(win(seeds));
+    expect(windowOlderThan(seeds as unknown as LogEntry[], 0, HISTORY_WINDOW_MESSAGES))
+      .toEqual({ start: 0, hasOlder: false });
+  });
+
+  it("loadOlder paging uses the same seam below olderThan", () => {
+    const seeds = turns(8); // 16 countable
+    const first = win(seeds);
+    expect(first.start).toBe(16); // the 5th-from-last message (llm A5)
+    const p1 = windowOlderThan(seeds as unknown as LogEntry[], first.start, HISTORY_WINDOW_MESSAGES);
+    expect(p1).toEqual({ start: 9, hasOlder: true }); // 11 remain below -> input Q3 opens
+    const p2 = windowOlderThan(seeds as unknown as LogEntry[], p1.start, HISTORY_WINDOW_MESSAGES);
+    expect(p2).toEqual({ start: 1, hasOlder: true }); // 6 remain -> llm A0
+    // 1 countable remains below 1 -> <= K: the whole head ships, hasOlder false.
+    const p3 = windowOlderThan(seeds as unknown as LogEntry[], p2.start, HISTORY_WINDOW_MESSAGES);
+    expect(p3).toEqual({ start: 0, hasOlder: false });
+  });
+
+  it("walking the pages concatenates back to the full epoch view, entry for entry", () => {
+    // A mixed log: prompts, stopped responses, tool runs, trailing baggage,
+    // and leading bookkeeping -- 14 turns plus odds and ends.
+    const seeds: Seed[] = [bookkeeping(), sysPrompt()];
+    for (let i = 0; i < 14; i++) {
+      seeds.push(i % 3 === 0 ? prompt(`p${i}`) : input(`q${i}`));
+      seeds.push(llm(`a${i}`));
+      if (i % 2 === 0) seeds.push(toolStarted(`c${i}`), tool(`r${i}`));
+      seeds.push(usage());
+    }
+    seeds.push(llm("tail after everything"));
+    const asEntries = seeds as unknown as LogEntry[];
+    let upper = seeds.length;
+    const collected: Seed[] = [];
+    let guard = 0;
+    for (;;) {
+      const p = windowOlderThan(asEntries, upper, HISTORY_WINDOW_MESSAGES);
+      collected.unshift(...(seeds.slice(p.start, upper) as Seed[]));
+      if (!p.hasOlder) {
+        expect(p.start).toBe(0);
+        break;
+      }
+      expect(p.start).toBeGreaterThan(0); // a countable message opens every continuing page
+      expect(p.start).toBeLessThan(upper); // strictly progressing
+      upper = p.start;
+      expect(guard++).toBeLessThan(50);
+    }
+    // No gaps, no overlaps: the concatenation IS the epoch view.
+    expect(JSON.stringify(collected)).toBe(JSON.stringify(seeds));
   });
 });
 
@@ -189,7 +317,8 @@ async function send(msg: Record<string, unknown>): Promise<Array<Record<string, 
   return ws.messages.map((m) => JSON.parse(m) as Record<string, unknown>);
 }
 
-/** Write an N-turn log: per turn input, llm (+ one bookkeeping row). */
+/** Write an N-turn log: per turn input, llm (+ one bookkeeping row). Two
+ *  countable messages per turn: [session_start, (input, llm, session_start)*N]. */
 function writeTurnLog(logId: string, n: number, contentTag = "q"): void {
   const lines: string[] = [];
   let t = 0;
@@ -203,6 +332,9 @@ function writeTurnLog(logId: string, n: number, contentTag = "q"): void {
   writeFileSync(join(SESSIONS_DIR, `${logId}.jsonl`), lines.join("\n") + "\n");
 }
 
+const wireCountable = (entries: Array<Record<string, unknown>>): number =>
+  entries.filter((e) => e.source === "input" || e.source === "prompt" || e.source === "llm").length;
+
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
 });
@@ -214,30 +346,36 @@ afterAll(() => {
 
 describe("viewLog ships the trailing window", () => {
   it("a log that fits the window ships everything with NEITHER additive field", async () => {
-    writeTurnLog("fits", HISTORY_WINDOW_MESSAGES);
+    // 4 countable messages: well inside the K=5 window.
+    writeTurnLog("fits", 2);
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "fits" });
     expect(viewed!.type).toBe(S2C.LOG_VIEWED);
     expect(viewed!.hasOlder).toBeUndefined();
     expect(viewed!.oldestIndex).toBeUndefined();
     // Everything ships: the only INPUT entries are all present.
     const inputs = (viewed!.entries as Array<Record<string, unknown>>).filter((e) => e.source === "input");
-    expect(inputs).toHaveLength(HISTORY_WINDOW_MESSAGES);
+    expect(inputs).toHaveLength(2);
   });
 
-  it("a bigger log ships the last K turns, boundary-aligned, with oldestIndex/hasOlder", async () => {
+  it("a bigger log ships the last K MESSAGES with oldestIndex/hasOlder", async () => {
+    // [session_start, (input, llm, session_start)*10]: 20 countable. The
+    // 5th-from-last message is llm a7 at index 23: the window opens
+    // MID-TURN (a7 rides with its trailing turns).
     writeTurnLog("big", 10);
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "big" });
     const entries = viewed!.entries as Array<Record<string, unknown>>;
     expect(viewed!.hasOlder).toBe(true);
-    const oldestIndex = viewed!.oldestIndex as number;
-    // Per turn: [bookkeeping, (input, llm, bookkeeping)*10] -> the window
-    // starts AT a boundary, and ships the last K INPUTs.
-    expect(entries[0]!.source).toBe("input");
-    expect(entries[0]!.content).toBe("q4"); // 10 turns - K=6
-    const inputs = entries.filter((e) => e.source === "input");
-    expect(inputs).toHaveLength(HISTORY_WINDOW_MESSAGES);
+    expect(viewed!.oldestIndex).toBe(23);
+    expect(entries[0]!.source).toBe("llm");
+    expect(entries[0]!.content).toBe("a7");
+    expect(wireCountable(entries)).toBe(HISTORY_WINDOW_MESSAGES);
+    // a7, q8, a8, q9, a9 (+ the bookkeeping rows between them ride).
+    const users = entries.filter((e) => e.source === "input").map((e) => e.content);
+    expect(users).toEqual(["q8", "q9"]);
     // oldestIndex is the index in the (epoch) log read, and the entry there
-    // is exactly the first shipped one.
+    // is exactly the first shipped one: a page ending at oldestIndex+1
+    // lands its LAST entry right on the window head.
+    const oldestIndex = viewed!.oldestIndex as number;
     const all = await send({ type: C2S.LOAD_OLDER, requestId: 1, logId: "big", olderThan: oldestIndex + 1 });
     const page = all[0]!;
     expect((page.entries as Array<Record<string, unknown>>).pop()).toEqual(entries[0]);
@@ -273,19 +411,22 @@ describe("loadOlder pages backwards through the same seam", () => {
   it("round trip: requestId-correlated page, then hasOlder flips false at the beginning", async () => {
     writeTurnLog("page", 10);
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "page" });
-    const oldest = viewed!.oldestIndex as number;
-    const replies = await send({ type: C2S.LOAD_OLDER, requestId: 77, logId: "page", olderThan: oldest });
+    const oldest = viewed!.oldestIndex as number; // 23
+    const replies = await send({
+      type: C2S.LOAD_OLDER, requestId: 77, logId: "page", olderThan: oldest, pageSize: MAX_HISTORY_PAGE_MESSAGES,
+    });
     const result = replies.find((m) => m.type === S2C.LOAD_OLDER_RESULT)!;
     expect(result.requestId).toBe(77);
     expect(result.logId).toBe("page");
     const entries = result.entries as Array<Record<string, unknown>>;
-    // The 4 remaining turns ride, whole, ending right above the held window
-    // head -- trailing per-turn bookkeeping included (the page is the raw
-    // epoch slice [start, olderThan), aligned only at the START boundary).
-    expect(entries[entries.length - 1]!.source).toBe("session_start");
-    expect(entries[entries.length - 2]!.content).toBe("a3");
-    expect(entries[entries.length - 3]!.content).toBe("q3");
-    expect(result.hasOlder).toBe(false); // <=K boundaries left -> everything ships
+    // The 15 remaining messages (<= MAX) ride, whole, ending right above the
+    // held window head -- leading session_start bookkeeping included (the
+    // page is the raw epoch slice [start, olderThan); start is 0 because
+    // nothing countable sits below the K-th-from-last message of the range).
+    expect(entries[0]!.source).toBe("session_start");
+    expect(entries[entries.length - 1]!.content).toBe("q7");
+    expect(result.oldestIndex).toBe(0);
+    expect(result.hasOlder).toBe(false);
     // The epoch truth: a second page cannot exist (olderThan 0 refuses).
     const refusals = await send({ type: C2S.LOAD_OLDER, requestId: 78, logId: "page", olderThan: result.oldestIndex });
     const refusal = refusals.find((m) => m.type === S2C.LOAD_OLDER_RESULT)!;
@@ -304,13 +445,25 @@ describe("loadOlder pages backwards through the same seam", () => {
       const [result] = await send({ type: C2S.LOAD_OLDER, requestId: 100 + guard, logId: "deep-link", olderThan: cursor });
       expect(result!.type).toBe(S2C.LOAD_OLDER_RESULT);
       expect(result!.error).toBeUndefined();
+      // Every page carries at most K countable messages; a hasOlder-true
+      // page carries exactly K (the seam cuts at the K-th-from-last one).
+      const pageCount = wireCountable(result!.entries as Array<Record<string, unknown>>);
+      expect(pageCount).toBeLessThanOrEqual(HISTORY_WINDOW_MESSAGES);
+      if (result!.hasOlder === true) expect(pageCount).toBe(HISTORY_WINDOW_MESSAGES);
+      expect(result!.oldestIndex as number).toBeLessThan(cursor); // strictly progressing
       collected.unshift(...(result!.entries as Array<Record<string, unknown>>));
       cursor = result!.oldestIndex as number;
       hasOlder = result!.hasOlder === true;
     }
     expect(hasOlder).toBe(false);
     // No gaps, no overlaps, log order: the loop delivers EVERY epoch entry
-    // (deep-linked search matches page into view through this same seam).
+    // byte-for-byte (deep-linked search matches page into view through this
+    // same seam).
+    const raw = readFileSync(join(SESSIONS_DIR, "deep-link.jsonl"), "utf-8")
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(JSON.stringify(collected)).toBe(JSON.stringify(raw));
     const inputs = collected.filter((e) => e.source === "input").map((e) => e.content);
     expect(inputs).toEqual(Array.from({ length: 20 }, (_, i) => `q${i}`));
   });
@@ -321,16 +474,17 @@ describe("loadOlder pages backwards through the same seam", () => {
     const [result] = await send({
       type: C2S.LOAD_OLDER, requestId: 5, logId: "sizes", olderThan: viewed!.oldestIndex, pageSize: 2,
     });
-    const inputs = (result!.entries as Array<Record<string, unknown>>).filter((e) => e.source === "input");
-    expect(inputs).toHaveLength(2);
+    const entries = result!.entries as Array<Record<string, unknown>>;
+    // 2 countable messages per page (baggage rides: a session_start row sits
+    // between the two).
+    expect(wireCountable(entries)).toBe(2);
     expect(result!.hasOlder).toBe(true);
     // Beyond the cap: the request clamps to MAX_HISTORY_PAGE_MESSAGES, and
     // the older history is STILL there below (hasOlder stays honest).
     const [clamped] = await send({
       type: C2S.LOAD_OLDER, requestId: 6, logId: "sizes", olderThan: viewed!.oldestIndex, pageSize: 10_000,
     });
-    const many = (clamped!.entries as Array<Record<string, unknown>>).filter((e) => e.source === "input");
-    expect(many).toHaveLength(MAX_HISTORY_PAGE_MESSAGES);
+    expect(wireCountable(clamped!.entries as Array<Record<string, unknown>>)).toBe(MAX_HISTORY_PAGE_MESSAGES);
     expect(clamped!.hasOlder).toBe(true);
   });
 
@@ -386,7 +540,8 @@ describe("windowing never moves the sidebar counts", () => {
     const [listed] = await send({ type: C2S.LIST_LOGS });
     const row = (listed!.logs as Array<Record<string, unknown>>).find((l) => l.id === "counts");
     // The durable truth: 20 inputs + 20 llm records count; the window is a
-    // view, not a count (webui-count-parity doctrine).
+    // view, not a count (webui-count-parity doctrine). Same unit -- the
+    // window pages over these very messages.
     expect(row!.messageCount).toBe(40);
   });
 });
@@ -398,28 +553,29 @@ describe("windowing never moves the sidebar counts", () => {
 // the held oldestIndex, the old coordinate means a DIFFERENT entry -- the
 // attestation's epochToken (full-log epochStartIndex) is echoed on loadOlder
 // and a mismatch refuses with code "epoch_moved" instead of serving a page
-// that duplicates the on-screen head. Pins the judge-reproduced probe.
+// that duplicates the on-screen head. The token machinery is ORTHOGONAL to
+// the window grammar: it guards index validity, not where the cut lands.
 
 describe("epoch token guards stale indexes", () => {
   it("windowed logViewed attests epochToken = the epoch start (0 with no RESET)", async () => {
     writeTurnLog("tok-attest", 10);
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "tok-attest" });
-    expect(viewed!.oldestIndex).toBe(13); // the probe's held head
+    expect(viewed!.oldestIndex).toBe(23); // the held window head (llm a7)
     expect(viewed!.epochToken).toBe(0);
   });
 
   it("RESET + kept history + regrowth past the head: stale token refuses, fresh attestation pages on", async () => {
     writeTurnLog("tok-undo", 10);
     const [viewed] = await send({ type: C2S.VIEW_LOG, logId: "tok-undo" });
-    const oldest = viewed!.oldestIndex as number; // 13
+    const oldest = viewed!.oldestIndex as number; // 23
     const token = viewed!.epochToken as number; // 0
-    expect(oldest).toBe(13);
+    expect(oldest).toBe(23);
 
-    // Emulate the live /undo the judge's probe ran: the log APPENDS a RESET,
-    // the kept turns (q0..q8) re-appear below the marker, and two fresh
-    // turns regrow the epoch past the held index (epoch-relative 13 lands
-    // INSIDE the re-emitted kept history: q4 -- a duplicate of the head the
-    // client already shows, with the true older history off by a turn).
+    // Emulate a live /undo: the log APPENDS a RESET, the kept turns (q0..q8)
+    // re-appear below the marker, and two fresh turns regrow the epoch past
+    // the held index (epoch-relative 23 lands INSIDE the re-emitted kept
+    // history -- a row the client already shows -- while the true older
+    // history sits at different coordinates).
     const kept = [
       { source: LOG_SOURCE.SESSION_START, content: "" },
       ...[...Array(9).keys()].flatMap((i) => [
@@ -440,8 +596,8 @@ describe("epoch token guards stale indexes", () => {
     const original = readFileSync(path, "utf-8").trimEnd().split("\n");
     const lines = [...original, ...appended.map((e) => JSON.stringify({ ts: "2024-02-01T00:00:00Z", session_id: "tok-undo", ...e }))];
     writeFileSync(path, lines.join("\n") + "\n");
-    // Sanity: the epoch really moved (epochStart = original 31 lines + the
-    // RESET line = 32) and really regrew past the held index (epoch 34 long).
+    // Sanity: the epoch really moved (original 31 lines + the RESET line =
+    // 32) and really regrew past the held index (epoch 31 long).
     expect(lines.length).toBe(31 + 1 + 27 + 4);
 
     // The held window's request: REFUSED, correlated, no entries.
@@ -468,9 +624,10 @@ describe("epoch token guards stale indexes", () => {
     expect(ok[0]!.error).toBeUndefined();
     expect(ok[0]!.code).toBeUndefined();
     expect(ok[0]!.epochToken).toBe(32);
-    // The fresh page is aligned in the NEW epoch (a boundary entry first).
+    // The fresh page is aligned in the NEW epoch (a countable message first).
     const entries = ok[0]!.entries as Array<Record<string, unknown>>;
-    expect(entries[0]!.source).toBe("input");
+    expect(["input", "prompt", "llm"]).toContain(entries[0]!.source as string);
+    expect(wireCountable(entries)).toBe(HISTORY_WINDOW_MESSAGES);
   });
 
   it("pure appends never move the token (paging keeps working across new turns)", async () => {

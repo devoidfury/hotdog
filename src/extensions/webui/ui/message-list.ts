@@ -2096,12 +2096,14 @@ export function createMessageList(
    * Prepend an older history page (loadOlderResult) without the viewport
    * jumping: capture geometry, render the page through the SAME pipeline in
    * a detached mirror list, splice the finished nodes above the current
-   * first child, then restore `scrollTop += heightDelta`. Pages arrive
-   * boundary-aligned (whole turns), so tool-call/result pairing resolves
-   * inside the mirror and never touches the live manager's state -- the
-   * mirror is simply discarded with its (never-destroyed) handles: the
-   * moved tool blocks are live transcript now, and its scroll listener
-   * dies with the detached node.
+   * first child, then restore `scrollTop += heightDelta`. Pages lead at a
+   * countable message, so a result's calling llm entry is on the page with
+   * it and tool-call/result pairing resolves inside the mirror; a page that
+   * ends right after an llm entry leaves its blocks in the ordinary pending
+   * posture (the interrupted-call idiom, never a crash) -- the mirror never
+   * touches the live manager's state and is simply discarded with its
+   * (never-destroyed) handles: the moved tool blocks are live transcript
+   * now, and its scroll listener dies with the detached node.
    */
   function renderOlderEntries(entries: LogEntry[]): void {
     const prevScrollTop = container.scrollTop;

@@ -2825,3 +2825,67 @@ describe("stream-batch tolerance (the server-side coalescer's merged frames)", (
     expect(container.textContent).toContain("write");
   });
 });
+
+// ── windowed-page resilience (history-window.ts cuts at MESSAGE bounds) ─────
+// The lazy-history window pages by MESSAGE (input | prompt | llm): a shipped
+// slice can start mid-turn and a page can end right after an llm entry
+// whose tool_results live in the newer page the client already holds. The
+// renderer must tolerate both edges with the existing idioms.
+
+describe("windowed-page entry mapping", () => {
+  it("a page LEADING with a tool_result whose call is not in the set: no crash, the rest renders", () => {
+    expect(() =>
+      ml.renderLogEntries([
+        { source: "tool_result", content: "orphan output", tool_call_id: "c-gone", tool_name: "bash" } as any,
+        { source: "input", content: "hello" },
+        { source: "llm", content: "hi there" },
+      ]),
+    ).not.toThrow();
+    // The existing no-matching-call idiom: the orphan attaches nowhere and
+    // mints no phantom block; the page's real content all renders.
+    expect(container.querySelectorAll(".tool-call-block")).toHaveLength(0);
+    expect(container.querySelector(".message.user .content")!.textContent).toContain("hello");
+    expect(container.querySelector(".message.assistant .content")!.textContent).toContain("hi there");
+  });
+
+  it("an llm entry whose tool_results live in the newer held page renders PENDING blocks", () => {
+    expect(() =>
+      ml.renderLogEntries([
+        { source: "input", content: "go" },
+        {
+          source: "llm",
+          content: "",
+          tool_calls: [
+            { id: "c1", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } },
+            { id: "c2", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } },
+          ],
+        } as any,
+      ]),
+    ).not.toThrow();
+    // The ordinary pending posture (same idiom a crashed log's dangling
+    // call gets): header-only blocks with the pending glyph, no result box.
+    const blocks = container.querySelectorAll(".tool-call-block");
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]!.className).toContain("status-pending");
+    expect(blocks[0]!.querySelector(".tool-call-name")!.textContent).toContain("bash");
+    expect(blocks[0]!.querySelector(".tool-result-box")).toBeNull();
+    expect(blocks[1]!.querySelector(".tool-result-box")).toBeNull();
+    expect(container.querySelector(".message.user .content")!.textContent).toContain("go");
+  });
+
+  it("a result riding the SAME page as its leading call still pairs", () => {
+    // The seam starts AT a message, so the head call keeps its results
+    // inside the page. Mapping pairs by id as usual.
+    ml.renderLogEntries([
+      {
+        source: "llm",
+        content: "",
+        tool_calls: [{ id: "c9", type: "function", function: { name: "grep", arguments: "{}" } }],
+      } as any,
+      { source: "tool_result", content: "grep hit", tool_call_id: "c9", tool_name: "grep" },
+    ]);
+    const block = container.querySelector(".tool-call-block")!;
+    openResult(block);
+    expect(block.querySelector(".tool-result-pre")!.textContent).toContain("grep hit");
+  });
+});

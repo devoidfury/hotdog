@@ -356,6 +356,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
     agent: Agent,
     strategy: CompactionStrategy,
     s: CompactionSettings,
+    /**
+     * Overflow rescue only: park the compaction_result event instead of
+     * firing it. The rescue may UNDO a reported-successful compaction (the
+     * monotonicity-law rollback below), and a durable marker written for a
+     * phantom reduction would truncate replays at a checkpoint the live
+     * session never kept. The rescuer fires the parked payload itself, only
+     * after the reduction has actually landed.
+     */
+    parkResultEvent?: (data: Record<string, unknown>) => void,
   ): Promise<boolean> {
     const messages = agent.context.getMessages(); // defensive copy — strategies expect Message[]
     const model = agent.model;
@@ -538,18 +547,27 @@ export function create(core: CoreContext): ExtensionInstance | null {
       // output.ts) so any sink bridge can forward it verbatim: token
       // figures come from the strategy metadata, and a strategy with no
       // summary (baton, drop, trim) omits the field rather than sending
-      // null — consumers render "Summary: null" if it is present.
-      await core.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, {
-        type: "compaction_result",
-        data: {
-          messagesCompacted: result.messagesCompacted,
-          tokensBefore: result.metadata?.tokensBefore,
-          tokensAfter: result.metadata?.tokensAfter,
-          strategy: result.metadata?.strategyName ?? strategy.name,
-          ...(result.summary ? { summary: result.summary } : {}),
-        },
-        agent,
-      });
+      // null -- consumers render "Summary: null" if it is present. Every
+      // successful reduction fires this event: the session-log writer
+      // persists the durable compaction marker from it (summary present or
+      // mechanical), which is what keeps a restart from replaying the
+      // pre-compaction history whole.
+      const resultEventData: Record<string, unknown> = {
+        messagesCompacted: result.messagesCompacted,
+        tokensBefore: result.metadata?.tokensBefore,
+        tokensAfter: result.metadata?.tokensAfter,
+        strategy: result.metadata?.strategyName ?? strategy.name,
+        ...(result.summary ? { summary: result.summary } : {}),
+      };
+      if (parkResultEvent) {
+        parkResultEvent(resultEventData);
+      } else {
+        await core.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, {
+          type: "compaction_result",
+          data: resultEventData,
+          agent,
+        });
+      }
       return true;
 
     } catch (e: unknown) {
@@ -1170,10 +1188,19 @@ export function create(core: CoreContext): ExtensionInstance | null {
             ? { ...s, reserveTokens: Math.max(0, resolvedLimit - aim) }
             : s;
 
+        // The durable marker's compaction_result is PARKED during the
+        // chain: a rewrite the monotonicity law later rolls back must not
+        // checkpoint the log (a marker truncates every later resume, and a
+        // phantom one would truncate the context the rollback restored).
+        let parkedCompactionEvent: Record<string, unknown> | null = null;
+        const parkResultEvent = (data: Record<string, unknown>): void => {
+          parkedCompactionEvent = data;
+        };
+
         if (!rescued) {
           const baton = strategyRegistry.get("pass-the-baton");
           if (baton && baton.canCompact(agent.context.getMessages(), chain)) {
-            rescued = await _performCompaction(agent, baton, chain);
+            rescued = await _performCompaction(agent, baton, chain, parkResultEvent);
           }
         }
         if (!rescued) {
@@ -1181,12 +1208,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
           // so a genuine overflow of few but huge messages is rescued even
           // below the message-count gate.
           const trim = strategyRegistry.get("trim");
-          if (trim) rescued = await _performCompaction(agent, trim, chain);
+          if (trim) rescued = await _performCompaction(agent, trim, chain, parkResultEvent);
         }
         if (!rescued) {
           const drop = strategyRegistry.get("drop");
           if (drop && drop.canCompact(agent.context.getMessages(), chain)) {
-            rescued = await _performCompaction(agent, drop, chain);
+            rescued = await _performCompaction(agent, drop, chain, parkResultEvent);
           }
         }
         if (!rescued) {
@@ -1261,6 +1288,20 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // re-issues nothing (refusal above) never consumes ladder capacity.
         episode.attempts += 1;
         episode.lastIssued = measuredAfter;
+
+        // The reduction landed: fire the parked compaction_result NOW, so
+        // the session-log writer checkpoints the durable compaction marker
+        // (marker + re-logged live context) BEFORE the retry re-issues. A
+        // rolled-back phantom never reaches this line, and a marker-less
+        // success (none exists on this path) would simply fire nothing.
+        if (parkedCompactionEvent) {
+          await core.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, {
+            type: "compaction_result",
+            data: parkedCompactionEvent,
+            agent,
+          });
+          parkedCompactionEvent = null;
+        }
 
         // The retry must send the compacted context, not the messages captured
         // before the overflow (same params-mutation pattern as tool-call-repair).

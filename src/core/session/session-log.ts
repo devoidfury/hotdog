@@ -650,10 +650,35 @@ export function replayEntriesIntoContext(
 
   // Durability bookkeeping for the resume protocol: started/asked/answered
   // drive the missing-result classification below; openTurn drives the
-  // auto-resume continuation.
+  // auto-resume continuation. The scan covers the full epoch: the
+  // durable-compaction truncation below cuts CONTEXT, not the audit, so an
+  // unanswered question or open turn predating the last checkpoint is
+  // still reported.
   const { started, answered, asked, openTurn } = collectDurabilityFacts(entries);
 
-  for (const entry of entries) {
+  // Durable compaction: a checkpoint marker replaces every entry before it.
+  // The marker message leads the replayed context and only entries logged
+  // after it replay; the writer (session-log extension) re-logs the live
+  // post-compaction context behind the marker, so this view is exactly what
+  // the session held when the marker was written, plus whatever arrived
+  // since. Without it, resume would replay the whole log and re-inflate
+  // every compaction the live session had already made.
+  //
+  // Only the LAST checkpoint truncates; markers without `checkpoint: true`
+  // (older records, or writers that could not read the live context to
+  // snapshot) stay inline audit messages, so logs with no checkpoint
+  // replay byte-identically.
+  let checkpoint = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.source === LOG_SOURCE.COMPACTION && e.checkpoint === true) {
+      checkpoint = i;
+      break;
+    }
+  }
+  const replayView = checkpoint >= 0 ? entries.slice(checkpoint) : entries;
+
+  for (const entry of replayView) {
     const source = entry.source;
 
     // System prompts are regenerated dynamically via ensureSystemPrompt().

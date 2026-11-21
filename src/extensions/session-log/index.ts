@@ -835,34 +835,114 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         }
 
         if (type === "compaction_result") {
-          const compactionData = data as { summary?: string; messagesCompacted?: number };
-          if (compactionData?.summary) {
-            const sessionId = agent.sessionId || "unknown";
-            const logPath = resolveLogPath(sessionId);
-            if (!logPath) return;
-            // Log the message exactly as it enters the context: harness
-            // structure with the real wrapper tag parts around the RAW
-            // model-generated summary (`untrusted` part, mangled only at the
-            // wire). Never escape here: the log must stay re-serializable by
-            // any future session's mangler.
-            const tag = "previous-context-summary";
-            const entry = stripNulls({
-              ts: new Date().toISOString(),
-              session_id: sessionId,
-              source: LOG_SOURCE.COMPACTION,
-              v: LOG_VERSION,
-              content: [
-                { type: "text", text: `<${tag}>` },
-                { type: "untrusted", text: compactionData.summary },
-                { type: "text", text: `</${tag}>` },
-              ],
-              summary: compactionData.summary,
-              messages_compacted: compactionData.messagesCompacted,
-              // Compaction summaries are harness-generated content.
-              origin: "harness",
-            });
+          const compactionData = data as { summary?: string; messagesCompacted?: number; strategy?: string };
+          const evicted =
+            typeof compactionData?.messagesCompacted === "number" && compactionData.messagesCompacted > 0
+              ? compactionData.messagesCompacted
+              : 0;
+          // Nothing was reduced and no summary arrived (pass-the-baton's
+          // notice-only append): nothing to mark. An image-downgrade-only
+          // overflow rescue never fires this event at all -- a marker that
+          // covers no message eviction must not truncate replay, and the
+          // downgrade's payload lives inside existing entries, so no marker
+          // is written for it (covers=0 would checkpoint without evicting).
+          if (!compactionData?.summary && evicted === 0) return;
+          const sessionId = agent.sessionId || "unknown";
+          // Replay re-emissions never re-checkpoint (same suppression class
+          // as token_usage).
+          if (restoringSessions.has(sessionId)) return;
+          const logPath = resolveLogPath(sessionId);
+          if (!logPath) return;
+          // A strategy without a summary (trim/drop/baton pop) gets an
+          // honest mechanical harness line instead: count, strategy, time --
+          // never invented summary text. The evicted content stays in the
+          // log above the marker.
+          const summary =
+            compactionData?.summary ||
+            `${evicted} messages evicted by compaction (strategy '${compactionData?.strategy ?? "unknown"}') at ${new Date().toISOString()}. Their content is preserved in this session log.`;
+          // Log the message exactly as it enters the context: harness
+          // structure with the real wrapper tag parts around the RAW
+          // model-generated summary (`untrusted` part, mangled only at the
+          // wire). Never escape here: the log must stay re-serializable by
+          // any future session's mangler.
+          const tag = "previous-context-summary";
+          const entry = stripNulls({
+            ts: new Date().toISOString(),
+            session_id: sessionId,
+            source: LOG_SOURCE.COMPACTION,
+            v: LOG_VERSION,
+            content: [
+              { type: "text", text: `<${tag}>` },
+              { type: "untrusted", text: summary },
+              { type: "text", text: `</${tag}>` },
+            ],
+            summary,
+            messages_compacted: compactionData?.messagesCompacted,
+            strategy: compactionData?.strategy ?? null,
+            // Compaction summaries are harness-generated content.
+            origin: "harness",
+          });
+          // CHECKPOINT: a resume truncates every entry above this marker, so
+          // the live post-compaction context must be re-logged behind it --
+          // the same block shape CONTEXT_REWOUND writes (minus the RESET:
+          // compaction cuts the CONTEXT, not the epoch; durability facts
+          // keep scanning the full epoch). Without a readable context the
+          // writer falls back to the inert inline marker (no checkpoint
+          // field, replay stays byte-identical).
+          const getMessages = (
+            agent as { context?: { getMessages?: () => SessionLogMessage[] } }
+          ).context?.getMessages;
+          const snapshot =
+            typeof getMessages === "function"
+              ? getMessages
+                  .call(agent)
+                  .filter(
+                    (m) =>
+                      m.role !== "system" &&
+                      !(
+                        m.role === "harness" &&
+                        Array.isArray(m.content) &&
+                        (m.content as unknown[]).some(
+                          (p) =>
+                            !!p &&
+                            typeof p === "object" &&
+                            (p as Record<string, unknown>).type === "untrusted" &&
+                            (p as Record<string, unknown>).text === summary,
+                        )
+                      ),
+                  )
+              : null;
+          if (!snapshot) {
             await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.COMPACTION);
+            return;
           }
+          const checkpointEntry = { ...entry, checkpoint: true };
+          if (snapshot.length === 0) {
+            await queuedFsyncAppend(
+              sessionId,
+              logPath,
+              JSON.stringify(checkpointEntry) + "\n",
+              LOG_SOURCE.COMPACTION,
+            );
+            return;
+          }
+          // Enqueue the whole block synchronously (no await in between): the
+          // marker and its snapshot must land contiguous, or a message
+          // dispatched mid-block would replay between them and vanish from
+          // every later resume (everything above the marker is truncated).
+          // The LAST record is fsync-class: the marker is meaning-carrying,
+          // and one trailing sync lands the whole block.
+          let done: Promise<void> = queuedAppend(
+            sessionId,
+            logPath,
+            JSON.stringify(checkpointEntry) + "\n",
+            LOG_SOURCE.COMPACTION,
+          );
+          for (let i = 0; i < snapshot.length; i++) {
+            // appendMessageEntry queues synchronously before its first await.
+            done = appendMessageEntry(agent, snapshot[i]!, i === snapshot.length - 1);
+          }
+          await done;
         }
       },
     },

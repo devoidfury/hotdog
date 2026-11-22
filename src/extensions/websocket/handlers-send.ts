@@ -19,10 +19,16 @@ export function handleSend(ctx: RouteContext): void {
   // B3 refusal table (design (d), R4's attribute-not-fork): a worker row is
   // not a turn-taking session. Today this silently vanished (the private
   // SessionManager has no entry, so enqueue hit nothing); now it answers.
-  if (registry.getRow(sid)?.kind === "worker") {
+  // An ADOPTED worker row gets the honest variant: there is no task for a
+  // follow-up to steer.
+  const row = registry.getRow(sid);
+  if (row?.kind === "worker") {
     SessionRegistry.sendSafe(ws, {
       type: S2C.ERROR,
-      message: "Subagents are steered with a follow-up, not a turn.",
+      message:
+        row.adoptedWorker === true
+          ? "This adopted subagent takes no new prompts: its run was interrupted; the session keeps only its adopted continuation."
+          : "Subagents are steered with a follow-up, not a turn.",
     });
     return;
   }
@@ -82,11 +88,17 @@ export function handleCancel(ctx: RouteContext): void {
   // held worker question UNMARKED (defaults-as-answer, a D10 breach). The
   // refusal leaves the pending HELD for the manager; the kill control is
   // task-side (interrupt_task), and the manager's own cancel route above
-  // stays exactly as B2 shipped it.
-  if (registry.getRow(managerSid)?.kind === "worker") {
+  // stays exactly as it is. An ADOPTED worker row gets the honest
+  // variant: its task died with the old process -- naming a task control
+  // it cannot reach would misstate what can stop it.
+  const row = registry.getRow(managerSid);
+  if (row?.kind === "worker") {
     SessionRegistry.sendSafe(ws, {
       type: S2C.ERROR,
-      message: "Subagent runs are stopped with the task control (interrupt_task), not cancel.",
+      message:
+        row.adoptedWorker === true
+          ? "This adopted subagent has no task left to interrupt: it runs on its adopted continuation, which settles on its own."
+          : "Subagent runs are stopped with the task control (interrupt_task), not cancel.",
     });
     return;
   }

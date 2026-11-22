@@ -483,6 +483,10 @@ export interface RunLogEvents {
   started: { runId: string; workflow: string; nodes: string[]; startedAt: number };
   /** node id -> last node event state seen */
   lastState: Map<string, string>;
+  /** node id -> task id carried by the last node event that named one (the
+   *  re-dispatch guard keys the PRIOR attempt's task; warm follow-ups update
+   *  it with the same id they already named). */
+  lastTask: Map<string, string>;
   succeeded: Map<string, SucceededClaim>;
   finished: { outcome: string } | null;
 }
@@ -497,6 +501,7 @@ export async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
   let started: RunLogEvents["started"] | null = null;
   let finished: RunLogEvents["finished"] = null;
   const lastState = new Map<string, string>();
+  const lastTask = new Map<string, string>();
   const succeeded = new Map<string, SucceededClaim>();
   for (const ev of parseJsonLines(text, "skip")) {
     // Shape guard: parseJsonLines guarantees valid JSON only; a garbage
@@ -528,6 +533,7 @@ export async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
     } else if (ev.ev === "node") {
       const id = String(ev.id);
       const state = String(ev.state);
+      if (typeof ev.task === "string") lastTask.set(id, ev.task);
       if (!TERMINAL_NODE_STATES.has(state)) continue;
       lastState.set(id, state);
       if (state === "succeeded") {
@@ -544,7 +550,7 @@ export async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
       }
     }
   }
-  return started ? { started, lastState, succeeded, finished } : null;
+  return started ? { started, lastState, lastTask, succeeded, finished } : null;
 }
 
 export interface ReconcileReport {

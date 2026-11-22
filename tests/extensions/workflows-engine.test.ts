@@ -1297,6 +1297,46 @@ describe("engine: run log, reconcile & resume", () => {
       new WorkflowRun({ workflow: other, runId: "r", runDir: dir, tasks: fake.manager }).run(),
     ).rejects.toThrow("holds workflow 'two'");
   });
+
+  it("re-dispatch refuses while a prior attempt's worker session is live (no double-run on one tree)", async () => {
+    const dir = freshDir();
+    await completedRun(dir);
+    writeFile(dir, "b.txt", "tampered with"); // invalidate b only: it re-runs
+
+    const bTask = [...readLog(dir)].reverse().find(
+      (e) => e.ev === "node" && e.id === "b" && typeof e.task === "string",
+    )!.task as string;
+
+    const fake = makeFake(dir, { b: good({ "b.txt": "rerun" }) });
+    // The hazard shape: the old process died mid-node, the browser
+    // reconnect adopted the worker, and its session is STILL editing the
+    // tree in this process.
+    fake.manager.setLiveWorkerProbe((taskId: string) => (taskId === bTask ? "adopted-worker-sid" : null));
+    await expect(
+      new WorkflowRun({ workflow: twoGraph(), runId: "r2", runDir: dir, tasks: fake.manager }).run(),
+    ).rejects.toThrow(/re-dispatch refused[\s\S]*adopted-worker-sid/);
+    expect(fake.turns["b"]).toBeUndefined(); // nothing cold-admitted or driven
+    expect(fake.manager.activeTasks()).toEqual([]);
+    // The refusal leaves the journal untouched: the run stays resumable
+    // once the live session settles.
+    expect(readLog(dir).some((e) => e.ev === "resumed")).toBe(false);
+  });
+
+  it("probe silence means no hazard: the interrupted node cold-admits a fresh attempt", async () => {
+    const dir = freshDir();
+    await completedRun(dir);
+    writeFile(dir, "b.txt", "tampered with");
+
+    const fake = makeFake(dir, {
+      a: good({ "a.txt": "should-not-run" }),
+      b: good({ "b.txt": "rerun" }),
+    });
+    fake.manager.setLiveWorkerProbe(() => null); // wired, nothing live: plain re-dispatch proceeds
+    const summary = await new WorkflowRun({ workflow: twoGraph(), runId: "r2", runDir: dir, tasks: fake.manager }).run();
+    expect(summary.outcome).toBe("succeeded");
+    expect(fake.turns["a"]).toBeUndefined(); // reused, never re-executed
+    expect(fake.turns["b"]).toBe(1);
+  });
 });
 
 describe("engine: enableRuntimeTimeouts toggle", () => {

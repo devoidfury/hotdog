@@ -45,11 +45,16 @@ export function handleDeleteSession(ctx: RouteContext): void {
   const { ws, msg, registry } = ctx;
   if (!msg.sessionId) return;
   // B3 refusal table: the task lifecycle owns a worker's terminal (and its
-  // sweep); nothing here may fire -- not even the pin drop below.
-  if (registry.getRow(msg.sessionId as string)?.kind === "worker") {
+  // sweep); nothing here may fire -- not even the pin drop below. An
+  // ADOPTED worker row gets the honest variant (no task lifecycle owns it).
+  const row = registry.getRow(msg.sessionId as string);
+  if (row?.kind === "worker") {
     SessionRegistry.sendSafe(ws, {
       type: S2C.ERROR,
-      message: "Subagent sessions are ended by their task lifecycle, not deleted.",
+      message:
+        row.adoptedWorker === true
+          ? "An adopted subagent goes cold when its adopted turn settles; it cannot be deleted here."
+          : "Subagent sessions are ended by their task lifecycle, not deleted.",
     });
     return;
   }
@@ -90,11 +95,16 @@ export async function handleDismissSession(ctx: RouteContext): Promise<void> {
   // carries the core session-id gate (it reaches the filesystem scan).
   if (typeof sessionId !== "string" || !isSafeSessionId(sessionId)) return;
   // B3 refusal table: a worker row is not a dismissable live session (its
-  // row is reclaimed by the sweep after the task's terminal event).
-  if (registry.getRow(sessionId)?.kind === "worker") {
+  // row is reclaimed by the sweep after the task's terminal event). An
+  // ADOPTED worker row gets the honest variant (no task lifecycle owns it).
+  const row = registry.getRow(sessionId);
+  if (row?.kind === "worker") {
     SessionRegistry.sendSafe(ws, {
       type: S2C.ERROR,
-      message: "Subagent sessions are ended by their task lifecycle, not dismissed.",
+      message:
+        row.adoptedWorker === true
+          ? "An adopted subagent goes cold when its adopted turn settles; it cannot be dismissed here."
+          : "Subagent sessions are ended by their task lifecycle, not dismissed.",
     });
     return;
   }

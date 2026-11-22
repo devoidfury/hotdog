@@ -299,6 +299,11 @@ export function createWsServer(
     // registry; the task manager still works, only delegate_task lookup is skipped.
     if (core.services) registerTaskManagerService(core, tm);
     registry.setTaskManager(tm);
+    // Re-dispatch guard seam: the engine's resume probe asks the task
+    // manager which worker SESSION is live for a prior attempt's task id,
+    // and only the session book knows (an adopted worker has no task
+    // entry). See WorkflowRun's re-dispatch refusal.
+    tm.setLiveWorkerProbe((taskId) => registry.liveWorkerSessionForTask(taskId));
     tm.setObserver((ev: TaskObserverEvent) => {
       if (ev.kind === "task") {
         if (ev.task.sessionId) {

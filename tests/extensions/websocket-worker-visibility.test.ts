@@ -36,7 +36,10 @@ import {
   handleViewLog,
   searchSessionLogs,
 } from "@extensions/websocket/handlers-logs.ts";
-import { handleSetPinned } from "@extensions/websocket/handlers-sessions.ts";
+import { handleSetPinned, handleDeleteSession } from "@extensions/websocket/handlers-sessions.ts";
+import { handleSend, handleCancel } from "@extensions/websocket/handlers-send.ts";
+import { handleQuestionAnswer } from "@extensions/websocket/handlers-tasks.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { attachResumedSession } from "@extensions/websocket/attach.ts";
 import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
@@ -527,6 +530,288 @@ describe("promotion: manual Continue adopts, pins, and survives cold + restart",
       expect(rows2.map((r) => r.id)).not.toContain(AUTO);
     } finally {
       tm2.stop();
+    }
+  });
+});
+
+// ── Restart adoption of an attested worker (the honest middle state) ───────
+// The browser-reconnect auto path cold-adopts a worker log whose sidecar
+// record still attests the worker join. The auto-resume MIDDLE STATE stays
+// alive (the interactive engine runs the continuation) and stays honest:
+// the row carries the worker birth attributes the sidecar attests
+// (kind/taskId/parentSessionId), list() hides it, the attach payload badges
+// the pane, the manager's durable card nests the same agentSessionId, the
+// refusal texts never name a task the adopted session cannot touch, and the
+// turn's settle writes the adopted terminal attestation
+// ("adopted-completed"/"adopted-died") that closes the card. A manual
+// Continue stays the only promotion; ordinary logs adopt interactive
+// untouched.
+
+const ADOPT = "vis5-adopted";
+const ADOPT_DIED = "vis5-died";
+const ADOPT_TORN = "vis5-torn";
+const ADOPT_CLOSED = "vis5-closed";
+const PLAIN5 = "vis5-plain";
+const ADOPT_MGR = "vis5-mgr";
+
+function makeAdoptFixture(name: string) {
+  const log = (id: string) =>
+    writeFileSync(
+      join(SESSIONS, `${id}.jsonl`),
+      [
+        JSON.stringify({ ts: new Date(SPAWN).toISOString(), session_id: id, source: "session_start", content: "", model: "m", profile: "default" }),
+        JSON.stringify({ ts: new Date(SPAWN + 1000).toISOString(), session_id: id, source: "input", content: `work on ${id}` }),
+        JSON.stringify({ ts: new Date(SPAWN + 2000).toISOString(), session_id: id, source: "llm", content: "done" }),
+      ].join("\n") + "\n",
+    );
+  for (const id of [ADOPT, ADOPT_DIED, ADOPT_TORN, ADOPT_CLOSED, PLAIN5, ADOPT_MGR]) log(id);
+  const path = sidecar(name, [
+    spawnLine({ id: "run:a1", desc: "adopted job", session: ADOPT_MGR }),
+    { t: new Date(SPAWN + 1).toISOString(), ev: "agent", id: "run:a1", agent: ADOPT },
+    spawnLine({ id: "run:a2", desc: "dying job", session: ADOPT_MGR }),
+    { t: new Date(SPAWN + 1).toISOString(), ev: "agent", id: "run:a2", agent: ADOPT_DIED },
+    spawnLine({ id: "run:a3", desc: "settled job", session: ADOPT_MGR }),
+    { t: new Date(SPAWN + 1).toISOString(), ev: "agent", id: "run:a3", agent: ADOPT_CLOSED },
+    { t: new Date(END).toISOString(), ev: "end", id: "run:a3", outcome: "completed" },
+    spawnLine({ id: "run:a4", desc: "torn job", session: ADOPT_MGR }),
+    { t: new Date(SPAWN + 1).toISOString(), ev: "agent", id: "run:a4", agent: ADOPT_TORN },
+  ]);
+  // TURN_END-capable agents: the settle latch reads hooks.on, the test
+  // fires the hook by hand (real Agents carry the real HookSystem).
+  const hooks: Record<string, Array<(d: unknown) => unknown>> = {};
+  const tm = manager(path);
+  const registry = new SessionRegistry({
+    buildAgent: async (config: { sessionId?: string }) =>
+      makeWsMockAgent({
+        sessionId: config.sessionId || "fresh-5",
+        hooks: {
+          notifyHooks: () => {},
+          runHookPipeline: async () => undefined,
+          registerHook: () => {},
+          unregisterHook: () => {},
+          on: (hook: string, h: (d: unknown) => unknown) => {
+            (hooks[hook] ||= []).push(h);
+            return () => {};
+          },
+        } as never,
+      }),
+    toolExecResolved: { toolExec: "inline", execFence: "probe" },
+  });
+  registry.setTaskManager(tm);
+  return {
+    path,
+    tm,
+    registry,
+    fire: (hook: string, data: unknown) => {
+      for (const h of hooks[hook] ?? []) h(data);
+    },
+  };
+}
+
+describe("restart adoption: an attested worker returns honest, not top-level", () => {
+  it("auto adoption stamps the worker row: hidden, linked, badged, nested under the manager", async () => {
+    const f = makeAdoptFixture("adopt-stamp");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
+
+      const row = f.registry.getRow(ADOPT)!;
+      expect(row.kind).toBe("worker");
+      expect(row.adoptedWorker).toBe(true);
+      expect(row.taskId).toBe("run:a1");
+      expect(row.parentSessionId).toBe(ADOPT_MGR);
+      expect(row.workerTerminal).toBe(false);
+      expect(row.attestPending).toBe(true); // the record was OPEN at adoption
+      expect(row.getAgent?.()).toBeTruthy(); // the engine keeps running it
+
+      // The worker projection holds THROUGH adoption: the orphan is never
+      // a top-level live row (the SESSIONS payload is built from list()).
+      expect(f.registry.list().map((s) => s.id)).not.toContain(ADOPT);
+      expect(f.registry.size).toBe(0);
+
+      // The RENDER inputs, pinned: the pane's payload badges it as a
+      // subagent of the attested parent (adopted tell rides too), and the
+      // manager's cold row nests the durable card for the SAME task -- the
+      // agentSessionId is the client's join key between the two.
+      const created = frames(ws).find((m) => m.type === S2C.SESSION_CREATED)!;
+      expect(created.kind).toBe("subagent");
+      expect(created.parentSessionId).toBe(ADOPT_MGR);
+      expect(created.adopted).toBe(true);
+      const rows = (await coldLogsPayload(f.registry)).logs;
+      expect(rows.map((r) => r.id)).not.toContain(ADOPT); // hidden from the cold list too
+      const nested = (rows.find((r) => r.id === ADOPT_MGR)!.subagents ?? []) as Array<Record<string, unknown>>;
+      const card = nested.find((t) => t.taskId === "run:a1");
+      expect(card).toBeDefined();
+      expect(card!.status).toBe("interrupted");
+      expect(card!.durable).toBe(true);
+      expect(card!.agentSessionId).toBe(ADOPT);
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("the refusal table stays honest with no task to name (the Stop button included)", async () => {
+    const f = makeAdoptFixture("adopt-refusals");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
+
+      // Stop on the adopted pane: refused, and the text does NOT send the
+      // user hunting for a task control that cannot reach this session.
+      const cancel = ctxFor(f.registry, { type: C2S.CANCEL, sessionId: ADOPT });
+      handleCancel(cancel.ctx);
+      const cancelErr = frames(cancel.ws).find((m) => m.type === S2C.ERROR)!;
+      expect(String(cancelErr.message)).toContain("adopted");
+      expect(String(cancelErr.message)).not.toContain("interrupt_task");
+
+      // Send: refused; the follow-up route the book-row text names has no
+      // task to steer here either.
+      const send = ctxFor(f.registry, { type: C2S.SEND, sessionId: ADOPT, content: "steer me" });
+      handleSend(send.ctx);
+      const sendErr = frames(send.ws).find((m) => m.type === S2C.ERROR)!;
+      expect(String(sendErr.message)).toContain("adopted");
+      expect(String(sendErr.message)).not.toContain("follow-up");
+
+      // Delete: refused (posture unchanged), saying what actually ends it.
+      const del = ctxFor(f.registry, { type: C2S.DELETE_SESSION, sessionId: ADOPT });
+      handleDeleteSession(del.ctx);
+      const delErr = frames(del.ws).find((m) => m.type === S2C.ERROR)!;
+      expect(String(delErr.message)).toContain("adopted");
+      expect(String(delErr.message)).not.toContain("task lifecycle");
+
+      // Question answers DO land from the pane: the delegating manager lane
+      // is gone (that is what adoption means), and the human answer is not
+      // the defaults-as-answer breach the refusal guards.
+      const answered: string[] = [];
+      const qBridge = {
+        ...bridgeStub,
+        answer: (sid: string) => {
+          answered.push(sid);
+          return true;
+        },
+      };
+      const qws = createWsMockWs();
+      await handleQuestionAnswer({
+        ws: qws,
+        msg: { sessionId: ADOPT, answers: { ok: "yes" } },
+        registry: f.registry,
+        bridge: qBridge,
+        core: coreStub,
+      } as never);
+      expect(answered).toEqual([ADOPT]);
+      expect(frames(qws).some((m) => m.type === S2C.ERROR)).toBe(false);
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("the adopted turn settling lands the terminal attestation and closes the card", async () => {
+    const f = makeAdoptFixture("adopt-settle");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
+      expect(f.registry.getRow(ADOPT)!.attestPending).toBe(true);
+
+      f.fire(HOOKS.TURN_END, { stopped: true, reason: "completion" });
+      const text = await waitForFileText(f.path, "adopted-completed");
+      expect(text).toContain('"ev":"end"');
+      expect(text).toContain('"id":"run:a1"');
+      const row = f.registry.getRow(ADOPT)!;
+      expect(row.attestPending).toBe(false);
+      expect(row.workerTerminal).toBe(true); // sweep may reclaim it once unwatched
+
+      // The card stops claiming "interrupted" -- THIS lifetime reads the
+      // record CLOSED (the cached boot view follows its own line)...
+      const rec = (await f.tm.lineageTasks()).find((r) => r.taskId === "run:a1")!;
+      expect(rec.outcome).toBe("adopted-completed");
+      expect(rec.endedAt).not.toBeNull();
+      // ...and so does the next lifetime (a fresh boot snapshot).
+      const tm2 = manager(f.path);
+      try {
+        const rec2 = (await tm2.lineageTasks()).find((r) => r.taskId === "run:a1")!;
+        expect(rec2.outcome).toBe("adopted-completed");
+      } finally {
+        tm2.stop();
+      }
+
+      // Once-only: a later turn-end and a teardown never rewrite the line.
+      f.fire(HOOKS.TURN_END, { stopped: true, reason: "completion" });
+      expect(f.registry.delete(ADOPT)).toBe(true);
+      const ends = readFileSync(f.path, "utf8")
+        .split("\n")
+        .filter((l) => l.includes('"ev":"end"') && l.includes('"run:a1"'));
+      expect(ends.length).toBe(1);
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("an abnormal turn end attests adopted-died; a teardown before any settle does too", async () => {
+    const f = makeAdoptFixture("adopt-died");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT_DIED, 0, true);
+      f.fire(HOOKS.TURN_END, { stopped: true, reason: "error" });
+      const text = await waitForFileText(f.path, "adopted-died");
+      expect(text).toContain('"id":"run:a2"');
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("a teardown while the adopted turn is unsettled still closes the card", async () => {
+    const f = makeAdoptFixture("adopt-teardown");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT_TORN, 0, true);
+      expect(f.registry.getRow(ADOPT_TORN)!.attestPending).toBe(true);
+      // No turn ever settled: deleting the session writes the died
+      // attestation (the alternative is a card frozen on "interrupted").
+      expect(f.registry.delete(ADOPT_TORN)).toBe(true);
+      const text = await waitForFileText(f.path, "adopted-died");
+      expect(text).toContain('"id":"run:a4"');
+      expect(f.registry.getRow(ADOPT_TORN)).toBeNull();
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("adopting an already-closed attested worker never rewrites its recorded outcome", async () => {
+    const f = makeAdoptFixture("adopt-closed");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT_CLOSED, 0, true);
+      const row = f.registry.getRow(ADOPT_CLOSED)!;
+      expect(row.kind).toBe("worker"); // worker posture holds...
+      expect(row.attestPending).toBeFalsy(); // ...but the closed card is owed nothing
+      f.fire(HOOKS.TURN_END, { stopped: true, reason: "completion" });
+      expect(row.workerTerminal).toBe(true); // settle still frees the sweep
+      const text = readFileSync(f.path, "utf8");
+      const ends = text.split("\n").filter((l) => l.includes('"ev":"end"') && l.includes('"run:a3"'));
+      expect(ends.length).toBe(1); // only the original "completed" line
+      expect(text).not.toContain("adopted-completed");
+      // The recorded outcome stands in the rebuilt view.
+      expect((await f.tm.lineageTasks()).find((r) => r.taskId === "run:a3")!.outcome).toBe("completed");
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("an ordinary (unattested) log adopts interactive -- zero regression", async () => {
+    const f = makeAdoptFixture("adopt-plain");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, PLAIN5, 0, true);
+      const row = f.registry.getRow(PLAIN5)!;
+      expect(row.kind).toBeUndefined();
+      expect(row.taskId).toBeUndefined();
+      expect(row.parentSessionId).toBeUndefined();
+      expect(f.registry.list().map((s) => s.id)).toContain(PLAIN5);
+      const created = frames(ws).find((m) => m.type === S2C.SESSION_CREATED)!;
+      expect("kind" in created).toBe(false);
+      expect(f.registry.delete(PLAIN5)).toBe(true);
+    } finally {
+      f.tm.stop();
     }
   });
 });

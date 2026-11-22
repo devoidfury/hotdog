@@ -79,10 +79,16 @@ export class SpawnLog {
   #dirReady = false;
   #orphans: Promise<OrphanedTask[]> | null = null;
   #lineage: Promise<LineageRecord[]> | null = null;
-  /** Joins appended by THIS lifetime. The once-cached lineage view cannot
-   *  see them (boot-snapshot doctrine); the list filter's live half reads
-   *  this set (joinedAgentSessionIds). */
-  #liveJoined = new Set<string>();
+  /** Spawns recorded by THIS lifetime: taskId -> delegating session. The
+   *  live joins resolve their parent through it (the boot snapshot cannot
+   *  see either). */
+  #liveSpawnSession = new Map<string, string | null>();
+  /** Joins recorded by THIS lifetime: worker sid -> what its task attests
+   *  (id, delegating session, terminal outcome once one lands). The
+   *  once-cached lineage view cannot see them (boot-snapshot doctrine); the
+   *  list filter's live half reads this map (joinedAgentSessionIds) and the
+   *  adoption stamp resolves linkage through attestationForAgentSession. */
+  #liveAttest = new Map<string, { taskId: string; sessionId: string | null; outcome: string | null }>();
   /** Promotions recorded by THIS lifetime (recordPromote). */
   #livePromoted = new Set<string>();
   /** Promote ids the lineage read attested (boot file; refreshed with it). */
@@ -103,6 +109,7 @@ export class SpawnLog {
     /** The engine run dir (reveal target for workflow rows). */
     runDir?: string | null;
   }): void {
+    this.#liveSpawnSession.set(rec.taskId, rec.sessionId);
     this.#append({
       ev: "spawn",
       id: rec.taskId,
@@ -116,6 +123,21 @@ export class SpawnLog {
   }
 
   recordEnd(taskId: string, outcome: string): void {
+    // This lifetime's own facts follow the append: the live-join attestation
+    // and the cached boot record read CLOSED from here on (an adopted
+    // worker's completion lands the card's terminal truth without waiting
+    // for a restart; ids that are not in the cache -- this lifetime's
+    // spawns -- simply miss and stay live-half-only).
+    for (const att of this.#liveAttest.values()) {
+      if (att.taskId === taskId) att.outcome = outcome;
+    }
+    void this.#lineage?.then((recs) => {
+      for (const rec of recs) {
+        if (rec.taskId !== taskId) continue;
+        rec.endedAt = Date.now();
+        rec.outcome = outcome;
+      }
+    });
     this.#append({ ev: "end", id: taskId, outcome });
   }
 
@@ -125,9 +147,13 @@ export class SpawnLog {
    *  stays inert on read (same stance as a stray end line). */
   recordAgent(taskId: string, agentSessionId: string): void {
     // The list filter's live half: the boot lineage cache predates this
-    // line, so the id is remembered beside the append (one add; the
-    // fire-and-forget chain and the line format are untouched).
-    this.#liveJoined.add(agentSessionId);
+    // line, so the attestation is remembered beside the append (one
+    // entry; the fire-and-forget chain and the line format are untouched).
+    this.#liveAttest.set(agentSessionId, {
+      taskId,
+      sessionId: this.#liveSpawnSession.get(taskId) ?? null,
+      outcome: null,
+    });
     this.#append({ ev: "agent", id: taskId, agent: agentSessionId });
   }
 
@@ -156,10 +182,34 @@ export class SpawnLog {
     return this.lineage().then((recs) => {
       const ids = new Set<string>();
       for (const rec of recs) if (rec.agentSessionId !== null) ids.add(rec.agentSessionId);
-      for (const id of this.#liveJoined) ids.add(id);
+      for (const id of this.#liveAttest.keys()) ids.add(id);
       for (const id of this.#bootPromoted) ids.delete(id);
       for (const id of this.#livePromoted) ids.delete(id);
       return ids;
+    });
+  }
+
+  /**
+   * What the sidecar attests about the task a WORKER session id ran: the
+   * task id, its delegating (manager) session, and the recorded outcome
+   * (null while the record is open). The boot lineage view answers first;
+   * this lifetime's live joins cover spawns the boot snapshot predates.
+   * Null when nothing attests the id: no attestation, no claim (the
+   * adoption stamp must never invent linkage the file does not hold).
+   */
+  attestationForAgentSession(agentSessionId: string): Promise<{
+    taskId: string;
+    sessionId: string | null;
+    outcome: string | null;
+  } | null> {
+    return this.lineage().then((recs) => {
+      for (const rec of recs) {
+        if (rec.agentSessionId === agentSessionId) {
+          return { taskId: rec.taskId, sessionId: rec.sessionId, outcome: rec.outcome };
+        }
+      }
+      const live = this.#liveAttest.get(agentSessionId);
+      return live ? { ...live } : null;
     });
   }
 

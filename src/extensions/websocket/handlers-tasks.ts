@@ -52,8 +52,13 @@ export function handleQuestionAnswer(ctx: RouteContext): void {
   // text. A direct answer here is refused with an honest error: the pending
   // stays untouched, the manager wake stays armed, and no QUESTION_ANSWERED
   // broadcast fires. (Interactive sids answer byte-identically below; the
-  // rest of the kind-table refusals are B3's.)
-  if (registry.getRow(sid)?.kind === "worker") {
+  // rest of the kind-table refusals stand.) An ADOPTED worker row answers
+  // from the pane: the delegating manager and its task lane are gone (that
+  // is what adoption means), the seeded resumed-question continuation can
+  // come from nowhere else, and a real human answer over the socket is not
+  // the defaults-as-answer breach this refusal guards.
+  const row = registry.getRow(sid);
+  if (row?.kind === "worker" && row.adoptedWorker !== true) {
     // Direct-send seam: this ERROR commits the client's in-flight row
     // (handleError -> finalizeAssistant), so the socket's own buffered
     // stream tail (worker-tail frames ride the batched publish path) must

@@ -25,6 +25,7 @@ import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
 import { trySessionPath } from "@core/session/session-log.ts";
 import { getPinnedIds } from "./pin-store.ts";
+import { bumpListMembership } from "./list-gen.ts";
 import type { TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { S2C } from "./protocol.ts";
@@ -104,6 +105,22 @@ export interface SessionMetadata {
    *  interactive-sessions policy), and a released row sweeps free of the
    *  hot-idle exemption. */
   workerTerminal?: boolean;
+  /**
+   * Birth-by-ADOPTION (registerAdoptedWorker): a cold log the sidecar
+   * attests as a worker's was adopted by the resume path (reconnect, or any
+   * adoption that is not a manual Continue). The row keeps worker posture
+   * (hidden, nested under its attested parent, guarded) while the session
+   * runs a REAL agent in the private manager -- its adopted continuation
+   * stays alive. The task lifecycle behind the worker refusal texts does
+   * not exist for these rows (the texts say so), and teardown lands through
+   * delete(), not the book-only reclaim.
+   */
+  adoptedWorker?: boolean;
+  /** Adopted rows only: an end attestation is owed to the sidecar when the
+   *  adopted turn settles. Cleared by the once-only writer (the TURN_END
+   *  latch or a teardown before it); a record already closed at adoption
+   *  never arms it (its recorded outcome stands untouched). */
+  attestPending?: boolean;
   /** Worker rows only: an ACCESSOR over the LIVE task entry's agent (not a
    *  raw handle), null after releaseWorker. The accessor goes null on its
    *  own once finalizeTurn nulls entry.agent (task-execution.ts) -- matching
@@ -522,6 +539,57 @@ export class AgentSessions {
   }
 
   /**
+   * Re-title a cold-log adoption to the worker birth attributes when the
+   * sidecar attests the id as an UNPROMOTED worker's (registerAdoptedWorker
+   * is the registerWorker machinery for that path: same kind/taskId/
+   * parentSessionId stamps). create() had to build the row because an
+   * orphan must still run -- the interactive engine keeps it alive; the
+   * book keeps worker posture: list() hides it, the payload badges it, the
+   * refusal table guards it, the sidebar nests it under the attested
+   * parent. getAgent reads the live manager entry (null once deleted).
+   * `attest` (the attested record was OPEN at adoption) arms the turn-end
+   * latch: the adopted terminal attestation closes the dead-lifetime card
+   * exactly once and marks the row terminal, so the sweep may reclaim the
+   * settled session.
+   */
+  registerAdoptedWorker(
+    sessionId: string,
+    link: { taskId: string | null; parentSessionId: string | null; attest: boolean },
+  ): void {
+    const meta = this.#metadata.get(sessionId);
+    if (!meta) return;
+    meta.kind = "worker";
+    meta.taskId = link.taskId ?? undefined;
+    meta.parentSessionId = link.parentSessionId;
+    meta.adoptedWorker = true;
+    meta.workerTerminal = false;
+    meta.getAgent = () => this.#sessionManager.getAgentBySessionId(sessionId) ?? null;
+    if (link.attest && link.taskId !== null) meta.attestPending = true;
+    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
+    if (!agent?.hooks || typeof agent.hooks.on !== "function") return;
+    agent.hooks.on(HOOKS.TURN_END, (data: unknown) => {
+      const p = data as { stopped?: boolean; reason?: string } | undefined;
+      if (p?.stopped !== true) return;
+      this.#settleAdoption(meta, p.reason === "completion" || p.reason === "tool_return");
+    });
+  }
+
+  /** The once-only writer behind registerAdoptedWorker: completed and died
+   *  are the adopted grammar's two terminals (an abnormal turn end -- error,
+   *  cancel, iteration cap -- is a died; nothing upgrades it to a verdict).
+   *  The sidecar write is owed only when the attested record was OPEN at
+   *  adoption; either way the row marks terminal so the sweep may reclaim
+   *  the settled session (a hookless agent never marks; its row then stays
+   *  non-terminal and escapes the sweep, exempt like any live worker). */
+  #settleAdoption(meta: SessionMetadata, completed: boolean): void {
+    const owed = meta.attestPending === true;
+    meta.attestPending = false;
+    const taskId = meta.taskId;
+    if (owed && taskId) this.#taskManager?.recordAdoptionEnd(taskId, completed ? "adopted-completed" : "adopted-died");
+    meta.workerTerminal = true;
+  }
+
+  /**
    * Release a worker row at its task's terminal event. MARKS the row
    * terminal and nulls the agent accessor; it does NOT force-close watcher
    * channels (frames simply stop -- a pane mid-read must not get yanked) and
@@ -538,6 +606,20 @@ export class AgentSessions {
     // #eventHandlers key once the set empties (no dead key per worker).
     meta.offUsage?.();
     meta.offUsage = null;
+  }
+
+  /**
+   * The liveness probe behind the workflow re-dispatch guard: the sid of a
+   * NON-TERMINAL worker row (spawn-born or adopted) attested to this task
+   * id, else null. A terminal row's claim on the tree is over (its end line
+   * landed), so it never blocks a re-dispatch.
+   */
+  liveWorkerSessionForTask(taskId: string): string | null {
+    for (const [id, meta] of this.#metadata) {
+      if (meta.kind !== "worker" || meta.workerTerminal === true) continue;
+      if (meta.taskId === taskId) return id;
+    }
+    return null;
   }
 
   list(): Array<{
@@ -619,8 +701,16 @@ export class AgentSessions {
     if (!meta) return false;
     // A worker row's lifecycle belongs to the TaskManager, not this book:
     // delete() reads exactly like the pre-B1 "unknown id" refusal for one
-    // (the terminal observer releases it; B3's refusal table formalizes it).
-    if (meta.kind === "worker") return false;
+    // (the terminal observer releases it; the routes refuse worker ids
+    // outright). ADOPTED worker rows are the exception the adoption
+    // makes: their task book is gone and the real agent lives in the
+    // private manager, so teardown is this book's job (the sweep calls it;
+    // handlers still refuse at the route).
+    if (meta.kind === "worker" && meta.adoptedWorker !== true) return false;
+    if (meta.attestPending === true && meta.taskId) {
+      meta.attestPending = false;
+      this.#taskManager?.recordAdoptionEnd(meta.taskId, "adopted-died");
+    }
 
     this.#closeChannels(sessionId);
 
@@ -761,8 +851,21 @@ export class AgentSessions {
     );
     // Keep the recent few hot (the in-memory agent makes a return visit
     // instant). Older ones go cold (log-only); logs are never deleted here.
-    for (const [id] of staleInteractive.slice(MAX_HOT_IDLE_SESSIONS)) this.delete(id);
-    for (const [id] of staleWorkers) this.#reclaimWorker(id);
+    const evicted = staleInteractive.slice(MAX_HOT_IDLE_SESSIONS);
+    for (const [id] of evicted) this.delete(id);
+    for (const [id, meta] of staleWorkers) {
+      // An ADOPTED settled row ran a real agent in the private manager:
+      // reclaim through the interactive teardown (manager entry, SESSION_END
+      // re-fire, question-hold cleanup), not the book-only reclaim.
+      if (meta.adoptedWorker === true) this.delete(id);
+      else this.#reclaimWorker(id);
+    }
+    // Swept sessions demote to the cold list WITHOUT a row push (no payload
+    // build on the sweep ticker; their rows were never client-held). The
+    // watermark bump is the honest notice: any tab's next LOGS_LISTED
+    // mismatches and re-attests full. (Worker sweeps bump nothing: a
+    // reclaimed worker log stays attested-hidden from the cold list.)
+    if (evicted.length > 0) bumpListMembership();
   }
 
   /** Reclaim a released worker row: drop the book entry (and any channel

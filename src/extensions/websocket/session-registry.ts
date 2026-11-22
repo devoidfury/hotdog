@@ -218,6 +218,15 @@ export class SessionRegistry {
     this.#sessions.registerWorker(info);
   }
 
+  /** Re-title a cold-log adoption of a worker-attested id to the worker
+   *  birth attributes (see AgentSessions.registerAdoptedWorker). */
+  registerAdoptedWorker(
+    sessionId: string,
+    link: { taskId: string | null; parentSessionId: string | null; attest: boolean },
+  ): void {
+    this.#sessions.registerAdoptedWorker(sessionId, link);
+  }
+
   /**
    * Release a worker row at its task's terminal event (marks it terminal,
    * nulls the agent accessor; no channel force-close). Unknown sid is a
@@ -225,6 +234,12 @@ export class SessionRegistry {
    */
   releaseWorker(workerSid: string): void {
     this.#sessions.releaseWorker(workerSid);
+  }
+
+  /** Live worker session (if any) attested to a task id (the re-dispatch
+   *  guard's liveness probe; see AgentSessions.liveWorkerSessionForTask). */
+  liveWorkerSessionForTask(taskId: string): string | null {
+    return this.#sessions.liveWorkerSessionForTask(taskId);
   }
 
   list() {

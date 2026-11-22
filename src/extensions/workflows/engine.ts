@@ -92,6 +92,13 @@ export interface EngineTaskPort {
   interruptTask(taskId: string): boolean;
   sendFollowUp(taskId: string, message: string): boolean;
   taskStatus?(taskId: string): TaskStatus | null;
+  /**
+   * Liveness probe for the re-dispatch guard: the worker SESSION live in
+   * this process for this task id, else null. Hosts holding a session book
+   * wire it (the websocket server -> the session registry); hosts without
+   * one leave it absent and the guard stays dormant.
+   */
+  liveWorkerForTask?(taskId: string): string | null;
 }
 
 export interface RunConfig {
@@ -1143,6 +1150,28 @@ export class WorkflowRun {
           ? priorState
           : "blocked";
       this.#settleJudge(j, mirror, mirror === "blocked" ? "judge of reused node needs reconcile" : undefined);
+    }
+    // Re-dispatch must not double-run: a prior attempt's worker session can
+    // be LIVE in this process (the browser-reconnect adoption kept its
+    // continuation running), still editing the tree while a cold re-admission
+    // would fork a second worker onto it. Adopting the live session into the
+    // attempt would mean fabricating a TaskEntry the attempt loop never
+    // spawned (lane accounting, gate wiring, and agent ownership all expect
+    // spawn-authorship), so the guard refuses and names the session.
+    // The journal stays untouched: the run remains resumable once the live
+    // session settles (its adopted end attestation closes the card too).
+    for (const nr of this.#runs.values()) {
+      if (TERMINAL.has(nr.state)) continue;
+      const priorTask = prior.lastTask.get(nr.node.id);
+      if (priorTask === undefined) continue;
+      const live = this.#cfg.tasks.liveWorkerForTask?.(priorTask);
+      if (!live) continue;
+      throw new Error(
+        `re-dispatch refused: node '${nr.node.id}' last attempt '${priorTask}' has a LIVE worker ` +
+          `session ${live} in this process (its log was adopted after the restart and it is still ` +
+          `editing the tree). End that session first -- it settles and goes cold when its adopted ` +
+          `turn finishes -- then re-dispatch with run_id.`,
+      );
     }
     await this.#log({
       ev: "resumed",

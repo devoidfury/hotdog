@@ -316,6 +316,18 @@ describe("registerWorker / releaseWorker mechanics", () => {
     expect(row.questionPending).toBeUndefined();
     expect(row.workerTerminal).toBeUndefined();
   });
+
+  it("liveWorkerSessionForTask answers for live worker rows only (the re-dispatch probe)", () => {
+    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
+    registry.registerWorker(makeWorkerInfo().info);
+    // A live (non-terminal) worker row claims the tree: the probe names it.
+    expect(registry.liveWorkerSessionForTask("run1:step2#1")).toBe("worker-sid-1");
+    // Terminal (task ended, end line landed): the claim is over.
+    registry.releaseWorker("worker-sid-1");
+    expect(registry.liveWorkerSessionForTask("run1:step2#1")).toBeNull();
+    // Unknown task ids and other rows answer nothing.
+    expect(registry.liveWorkerSessionForTask("no-such-task")).toBeNull();
+  });
 });
 
 // ── Idle sweep vs worker rows ──────────────────────────────────────────────

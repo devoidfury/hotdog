@@ -21,8 +21,12 @@ export function sessionCreatedPayload(
   // Worker rows read null from the live-agent oracle (B1); their bookkeeping
   // half comes from the raw row, the behavior half from the row agent's
   // ACCESSOR (null after release: the fields fall back like a released
-  // interactive agent's do). Interactive rows never touch getRow.
-  const workerRow = session ? null : registry.getRow(sessionId);
+  // interactive agent's do). The kind read keys on the ROW, not the oracle:
+  // an ADOPTED worker row has both a live agent and worker posture, and the
+  // badge must ride for exactly that row. Interactive rows (kind absent)
+  // never touch getRow's output, so their payload bytes are unchanged.
+  const row = registry.getRow(sessionId);
+  const workerRow = row?.kind === "worker" ? row : null;
   const agent = (session?.agent ?? workerRow?.getAgent?.() ?? null) as Agent | AgentLike | null;
   const meta = session?.metadata ?? workerRow;
   return {
@@ -38,8 +42,15 @@ export function sessionCreatedPayload(
     // B3 (design (d), client-facing vocabulary; the row's birth attribute
     // stays "worker"): additive -- OMITTED on interactive rows, so an
     // interactive payload's bytes are unchanged. Absence = old behavior.
-    ...(workerRow?.kind === "worker"
-      ? { kind: "subagent", parentSessionId: workerRow.parentSessionId ?? null }
+    // `adopted` (additive, same omit rule): this worker session was born by
+    // restart-adoption -- no manager lane answers its questions, the pane's
+    // human does.
+    ...(workerRow
+      ? {
+          kind: "subagent",
+          parentSessionId: workerRow.parentSessionId ?? null,
+          ...(workerRow.adoptedWorker === true ? { adopted: true } : {}),
+        }
       : {}),
   };
 }

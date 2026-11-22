@@ -382,6 +382,25 @@ export class TaskManager {
     return null;
   }
 
+  #liveWorkerProbe: ((taskId: string) => string | null) | null = null;
+
+  /**
+   * Host seam for the workflow re-dispatch guard: which worker SESSION is
+   * live in this process for a task id. The session book (the websocket
+   * registry) is the only live-session oracle -- the task book dies with the
+   * process, and a restart-adopted worker runs without any TaskManager
+   * entry. Hosts without a session book (CLI) leave it unset; the probe
+   * then answers nothing and the guard stays dormant (documented limit).
+   */
+  setLiveWorkerProbe(probe: ((taskId: string) => string | null) | null): void {
+    this.#liveWorkerProbe = probe;
+  }
+
+  /** The probe's answer for a task id (null: nothing live, or no probe). */
+  liveWorkerForTask(taskId: string): string | null {
+    return this.#liveWorkerProbe?.(taskId) ?? null;
+  }
+
 
 
   /** Exposed for extensions. */
@@ -824,6 +843,38 @@ export class TaskManager {
       : new Set<string>();
     for (const sid of this.#promotedAgentSessions) joined.delete(sid);
     return joined;
+  }
+
+  /**
+   * What the sidecar attests about the task a worker session ran (task id,
+   * delegating session, recorded outcome) -- the source of truth for the
+   * restart-adoption stamp: an adopted row carries the linkage the sidecar
+   * attests, never a fabricated one. Null when nothing attests the id.
+   */
+  attestedWorkerLineage(agentSessionId: string): Promise<{
+    taskId: string;
+    parentSessionId: string | null;
+    outcome: string | null;
+  } | null> {
+    if (!this.#spawnLog) return Promise.resolve(null);
+    return this.#spawnLog.attestationForAgentSession(agentSessionId).then((att) =>
+      att === null
+        ? null
+        : { taskId: att.taskId, parentSessionId: att.sessionId, outcome: att.outcome },
+    );
+  }
+
+  /**
+   * Close a dead-lifetime task with an ADOPTED terminal outcome: the
+   * reconnect-adopted worker session of an interrupted task reached the end
+   * of its turn ("adopted-completed") or died mid-settlement
+   * ("adopted-died"). No TaskManager entry backs the adopted session, so
+   * this one sidecar line is the whole attestation -- it rides the existing
+   * ev:"end" grammar (last line decides, orphans() goes quiet, the card
+   * stops claiming "interrupted") and is never an engine gate verdict.
+   */
+  recordAdoptionEnd(taskId: string, outcome: string): void {
+    this.#spawnLog?.recordEnd(taskId, outcome);
   }
 
   /** Locked model + provider lane for a spawned task, or null if unknown. Provider is null while a multi-candidate task waits unplaced (model then shows the intent). */

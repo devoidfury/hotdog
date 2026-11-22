@@ -119,6 +119,25 @@ export async function adoptSessionLog(
       if (createdAt > 0) meta.createdAt = createdAt;
       if (lastActivityAt > 0) meta.lastActivityAt = lastActivityAt;
     }
+    // Restart-adoption honesty: a log the sidecar attests as a WORKER's
+    // (an ev:"agent" join minus manual promotions) must not return as a
+    // top-level interactive session -- the reconnect that adopted it is not
+    // a human claim (a manual Continue is the only promotion path, and
+    // handleLoadLog promotes BEFORE attaching, so a manual Continue never
+    // lands here with an attested-unpromoted id). Re-title the created row
+    // to the worker birth attributes the sidecar attests
+    // (kind/taskId/parentSessionId; ordinary logs carry no attestation and
+    // ride interactive, untouched); the interactive engine keeps running
+    // the adopted continuation.
+    const taskManager = registry.getTaskManager();
+    if (taskManager && (await taskManager.joinedAgentSessionIds()).has(sessionId)) {
+      const lineage = await taskManager.attestedWorkerLineage(sessionId);
+      registry.registerAdoptedWorker(sessionId, {
+        taskId: lineage?.taskId ?? null,
+        parentSessionId: lineage?.parentSessionId ?? null,
+        attest: lineage?.outcome == null,
+      });
+    }
     return { pendingQuestions, openTurn, modelWarning };
   })();
   pendingAdoptions.set(sessionId, attempt);

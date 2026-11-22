@@ -263,6 +263,10 @@ interface SessionCreatedMessage {
    *  delegating manager's id rides beside it. Drives the webui chrome. */
   kind?: string;
   parentSessionId?: string | null;
+  /** Additive (restart-adoption): the attached worker session was adopted
+   *  from an interrupted run -- no manager lane answers its questions, the
+   *  pane's human does (the card stays interactive instead of read-only). */
+  adopted?: boolean;
 }
 
 interface SessionDeletedMessage {
@@ -1333,8 +1337,10 @@ export function createChat({
         // the card renders read-only, awaiting the delegating manager. The
         // flag also lands on the manager the app's onSessionCreated callback
         // builds AFTER this frame (setSession below re-applies it), so the
-        // order of the two never hands a worker an interactive card.
-        questionReadOnlyWanted = viewKind === "subagent";
+        // order of the two never hands a worker an interactive card. An
+        // ADOPTED worker has no delegating manager lane left to await: its
+        // questions (the resumed hold included) answer from this pane.
+        questionReadOnlyWanted = viewKind === "subagent" && data.adopted !== true;
         messageList?.setQuestionReadOnly(questionReadOnlyWanted);
         // On page reload the server can send working state before
         // sessionCreated, so restore it from the map here. The chat-log tell

@@ -46,7 +46,7 @@
         },
         "streamBatchMs": {
           "type": "number",
-          "default": 100,
+          "default": 200,
           "minimum": 0,
           "description": "Stream-batch window (ms) for the session websocket: the first streaming frame of a burst ships immediately, later text/reasoning chunks concatenate and tool-call partials collapse latest-wins inside the window; any other frame flushes before it. 0 = off (one frame per event, the pre-batching behavior). Read per frame: a panel edit applies to the next frame, no restart."
         }

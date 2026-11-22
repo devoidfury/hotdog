@@ -10,7 +10,7 @@
 
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import { toS2CMessage, type WireMapOptions } from "@extensions/websocket/wire-messages.ts";
-import { StreamBatcher } from "@extensions/websocket/stream-batcher.ts";
+import { StreamBatcher, DEFAULT_STREAM_BATCH_MS } from "@extensions/websocket/stream-batcher.ts";
 
 const SESSION = "measure-session";
 
@@ -174,9 +174,9 @@ const line = (name: string, mode: string, frames: number, bytes: number) =>
 console.log(line("scenario", "mode", "frames", "bytes"));
 for (const sc of scenarios) {
   const off = runBatched(sc.events, 0, sc.delta === true);
-  const batched = runBatched(sc.events, 100, sc.delta === true);
+  const batched = runBatched(sc.events, DEFAULT_STREAM_BATCH_MS, sc.delta === true);
   console.log(line(sc.name, "off", off.frames, off.bytes));
-  console.log(line("", "100ms", batched.frames, batched.bytes));
+  console.log(line("", `${DEFAULT_STREAM_BATCH_MS}ms`, batched.frames, batched.bytes));
   const savedBytes = off.bytes - batched.bytes;
   const savedPct = off.bytes > 0 ? ((savedBytes / off.bytes) * 100).toFixed(1) : "0.0";
   console.log(
@@ -185,7 +185,7 @@ for (const sc of scenarios) {
 }
 
 // ── Latency claims ──────────────────────────────────────────────────────────
-const lat = latencyProbe(100);
+const lat = latencyProbe(DEFAULT_STREAM_BATCH_MS);
 console.log(`latency: first-token added = ${lat.firstAddedMs} ms (first frame of a burst ships synchronously; the window arms behind it)`);
-console.log(`latency: worst-case added = one window = 100 ms (a frame arriving inside the window ships at expiry; probe: mid-burst frame added ${lat.midWindowAddedMs} ms <= window)`);
-console.log("latency: knob webui.streamBatchMs default 100 ms; 0 disables all added latency (byte-identical passthrough)");
+console.log(`latency: worst-case added = one window = ${DEFAULT_STREAM_BATCH_MS} ms (a frame arriving inside the window ships at expiry; probe: mid-burst frame added ${lat.midWindowAddedMs} ms <= window)`);
+console.log(`latency: knob webui.streamBatchMs default ${DEFAULT_STREAM_BATCH_MS} ms; 0 disables all added latency (byte-identical passthrough)`);

@@ -34,7 +34,7 @@ import { S2C } from "./protocol.ts";
 
 /** Fallback window when the config carries no usable number (mock cores,
  *  embedders, hand-built hosts). Mirrors the webui schema default. */
-export const DEFAULT_STREAM_BATCH_MS = 100;
+export const DEFAULT_STREAM_BATCH_MS = 200;
 
 /** The knob from a live config bag: webui.streamBatchMs, min 0 (0 = off).
  *  Non-number / non-finite falls back to the default, negatives clamp to 0. */

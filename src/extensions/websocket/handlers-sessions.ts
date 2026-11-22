@@ -9,8 +9,9 @@ import { S2C, errorFrame } from "./protocol.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { sessionCreatedPayload } from "./session-created.ts";
 import { attachLiveSession } from "./attach.ts";
-import { dropPinned, setPinned } from "./pin-store.ts";
-import { coldLogsPayload } from "./handlers-logs.ts";
+import { dropPinned, getPinnedIds, setPinned } from "./pin-store.ts";
+import { bumpListMembership } from "./list-gen.ts";
+import { coldLogRows } from "./handlers-logs.ts";
 import type { RouteContext } from "./route-types.ts";
 
 export function handleCreateSession(ctx: RouteContext): void {
@@ -56,7 +57,13 @@ export function handleDeleteSession(ctx: RouteContext): void {
   // unconditionally -- even if the live agent vanished a moment ago, the id
   // may still ride the cold-log list, and a deleted row must not keep it).
   dropPinned(msg.sessionId as string);
-  registry.delete(msg.sessionId as string);
+  const deleted = registry.delete(msg.sessionId as string);
+  // Membership watermark bump on a real teardown: the log file survives a
+  // delete, so the id may surface as a plain cold row. No row push here
+  // (the row build would be async I/O on a sync route, and a zero-turn
+  // session has no log to announce): gen catches it -- every tab's next
+  // LOGS_LISTED re-attests full.
+  if (deleted) bumpListMembership();
   const sessionDeletedMsg = {
     type: S2C.SESSION_DELETED,
     sessionId: msg.sessionId,
@@ -72,8 +79,9 @@ export function handleDeleteSession(ctx: RouteContext): void {
  * survives (pins span both sidebar sections, so no dropPinned here). The
  * id lands back in the cold "Recent Logs" list, visibly, in every tab:
  * SESSION_DELETED drops the live row (the client also clears the transcript
- * when the dismissed session was the attached view), then the refreshed
- * SESSIONS + LOGS_LISTED payloads re-land it as a cold row.
+ * when the dismissed session was the attached view), the refreshed SESSIONS
+ * payload follows, and a targeted logRowAdded frame re-lands the single
+ * demoted row -- same pin flag and all -- without a windowed-payload fanout.
  */
 export async function handleDismissSession(ctx: RouteContext): Promise<void> {
   const { ws, msg, registry } = ctx;
@@ -109,14 +117,28 @@ export async function handleDismissSession(ctx: RouteContext): Promise<void> {
   SessionRegistry.sendSafe(ws, sessionDeletedMsg);
   registry.broadcast(sessionDeletedMsg);
   // Demote now, not on the next refresh: live half first (cheap and sync),
-  // then the cold half -- one directory scan shared by all sockets. Awaited
-  // per the handleSetPinned settle contract; a failed scan must not fail
-  // the dismissal (it is already done): note it and let listLogs recover.
+  // then the TARGETED cold half -- one watermark bump and one logRowAdded
+  // frame carrying the single demoted row (built through the same
+  // coldLogRows grammar, onlyId path), instead of rebuilding and fanning
+  // out the whole windowed payload. Awaited per the handleSetPinned settle
+  // contract; a failed/vanished row build must not fail the dismissal (it
+  // is already done): the bump already landed, so the next listLogs
+  // re-attests full.
   registry.broadcast({ type: S2C.SESSIONS, sessions: registry.list() });
-  await coldLogsPayload(registry)
-    .then((logs) => registry.broadcast({ type: S2C.LOGS_LISTED, logs }))
+  const gen = bumpListMembership();
+  await coldLogRows(registry, sessionId)
+    .then((rows) => {
+      const row = rows[0];
+      if (row === undefined) {
+        logger.warn(
+          `[websocket] dismissSession ${sessionId}: no cold row to announce; gen ${gen} re-attests on the next listLogs`,
+        );
+        return;
+      }
+      registry.broadcast({ type: S2C.LOG_ROW_ADDED, row, gen });
+    })
     .catch((err: unknown) => {
-      logger.error(`[websocket] dismissSession logs refresh failed: ${formatError(err)}`);
+      logger.error(`[websocket] dismissSession row build failed: ${formatError(err)}`);
     });
 }
 
@@ -145,18 +167,16 @@ export async function handleSetPinned(ctx: RouteContext): Promise<void> {
     return;
   }
   setPinned(sessionId, pinned);
-  // The sidebar-refresh broadcast idiom (attach.ts): every tab rehydrates
-  // its pin marks from the payload flags. Live rows first (cheap and sync),
-  // then the cold half -- one directory scan whose payload is shared by all
-  // sockets, so a pin on a Recent Logs row lifts there in every tab too.
+  // The sidebar-refresh broadcast idiom (attach.ts): live rows rehydrate
+  // their pin marks from the SESSIONS payload flags first (cheap and sync).
   registry.broadcast({ type: S2C.SESSIONS, sessions: registry.list() });
-  // Awaited per the settle contract. A failed scan must not fail the pin
-  // (it is already persisted): note it and let the next listLogs recover.
-  await coldLogsPayload(registry)
-    .then((logs) => registry.broadcast({ type: S2C.LOGS_LISTED, logs }))
-    .catch((err: unknown) => {
-      logger.error(`[websocket] setPinned logs refresh failed: ${formatError(err)}`);
-    });
+  // Pins ride their own frame: the COMPLETE pin-store set (both
+  // sections; pins are few) reaches every tab, which re-derives its marks
+  // wholesale -- including rows no window would ever show. No directory
+  // scan, no windowed LOGS_LISTED fanout, no gen (pin flips are not
+  // membership changes), and nothing async left to fail: the store write
+  // above already landed.
+  registry.broadcast({ type: S2C.LOG_PINS, pinnedIds: [...getPinnedIds()] });
 }
 
 export function handleRenameSession(ctx: RouteContext): void {

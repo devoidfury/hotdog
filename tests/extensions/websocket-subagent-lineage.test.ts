@@ -267,7 +267,7 @@ describe("coldLogsPayload: cold-row lineage", () => {
   it("the cold manager row carries its nested lineage; rows without lineage carry no field", async () => {
     const registry = new SessionRegistry({ buildAgent: async () => makeWsMockAgent({}) });
     registry.setTaskManager(manager());
-    const rows = await coldLogsPayload(registry);
+    const rows = (await coldLogsPayload(registry)).logs;
 
     const mgr = rows.find((r) => r.id === "cold-mgr")!;
     const subs = mgr.subagents as Array<Record<string, unknown>>;
@@ -296,7 +296,7 @@ describe("coldLogsPayload: cold-row lineage", () => {
 
   it("without a TaskManager the payload keeps its exact old shape", async () => {
     const registry = new SessionRegistry({ buildAgent: async () => makeWsMockAgent({}) });
-    const rows = await coldLogsPayload(registry);
+    const rows = (await coldLogsPayload(registry)).logs;
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect("subagents" in row).toBe(false);
   });
@@ -333,7 +333,7 @@ describe("coldLogsPayload: cold-row lineage", () => {
           spawnLogPidAlive: () => false,
         }),
       );
-      const rows = await coldLogsPayload(registry);
+      const rows = (await coldLogsPayload(registry)).logs;
       const subs = rows.find((r) => r.id === "cold-mgr")!.subagents as Array<Record<string, unknown>>;
       expect(subs).toHaveLength(MAX_SUBAGENT_LINEAGE_ROWS);
       // Spawn order, oldest age out first: the five oldest are gone.

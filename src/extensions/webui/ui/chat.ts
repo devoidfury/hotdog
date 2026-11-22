@@ -24,6 +24,7 @@ import type {
   ListDirResultWire,
   ReadFileResultWire,
   FileOpResultWire,
+  LogListCursorWire,
 } from "@extensions/websocket/protocol.ts";
 
 export type { UploadFileWire };
@@ -289,9 +290,98 @@ interface SessionsMessage {
   }>;
 }
 
+/** Strict-decode of the wire's olderCursor ({ lastActivityAt: number, id:
+ *  string }); anything else is no cursor. Exported: the app re-normalizes
+ *  the cursor echoed on a loadOlderLogsResult page frame through here. */
+export function normalizeLogListCursor(value: unknown): LogListCursorWire | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const c = value as Record<string, unknown>;
+  if (typeof c.lastActivityAt !== "number" || !Number.isFinite(c.lastActivityAt) || typeof c.id !== "string") {
+    return null;
+  }
+  return { lastActivityAt: c.lastActivityAt, id: c.id };
+}
+
+/** What a base LOGS_LISTED frame attests about the RECENT LOGS seam (see
+ *  the server's coldLogsPayload): is there older unpinned history below
+ *  the shipped head, where the cursor sits, and the COMPLETE set of pinned
+ *  cold ids (pinnedLogs -- the client's held older pages reconcile their
+ *  stale pin flags against it). */
+export interface LogsListWindowMeta {
+  hasOlder: boolean;
+  olderCursor: LogListCursorWire | null;
+  pinnedIds: ReadonlySet<string>;
+}
+
+/** Reply to C2S loadOlderLogs (correlated by requestId, the searchLogs
+ *  precedent). Refusals carry requestId + error only (LIST_DIR_RESULT
+ *  posture); success carries the page's rows (same LOGS_LISTED row
+ *  grammar, pinned rows never ride pages) plus the re-attested seam.
+ *  Exported for the app's onOlderLogs handler. */
+export interface LoadOlderLogsPage {
+  requestId?: number;
+  logs?: LogInfo[];
+  hasOlder?: boolean;
+  olderCursor?: LogListCursorWire | null;
+  error?: string;
+}
+
+interface LoadOlderLogsResultMessage extends LoadOlderLogsPage {
+  type: "loadOlderLogsResult";
+}
+
 interface LogsListedMessage {
   type: "logsListed";
+  /** FULL frame: the NEWEST head of the cold list (server LOG_LIST_WINDOW
+   *  rows). DELTA frame (full:false): rows strictly NEWER than the `since`
+   *  cursor this socket asked with, same descending order. */
   logs: LogInfo[];
+  /** Delimiter of the two postures (see S2C.LOGS_LISTED in protocol.ts):
+   *  only a DELTA frame carries `full: false`; a FULL frame is unchanged
+   *  from the pre-delta wire apart from the additive gen stamp. */
+  full?: boolean;
+  /** Membership watermark ("<boot>-<counter>", server list-gen.ts). A
+   *  frame continues the client's held gen at +0 (a plain reply after all
+   *  transitions landed) or +1 (the frame IS the next transition); a gap
+   *  or boot change means the client missed something it cannot patch, so
+   *  it re-attests with a `since`-less listLogs. Absent on hand-fired/old
+   *  frames: never trusted for delta/push continuation. */
+  gen?: string;
+  /** Older unpinned rows live below the head (FULL frames only; always
+   *  present on a server-built frame, absent only on hand-fired test
+   *  frames, which close the seam honestly). DELTA frames ship NO
+   *  hasOlder/olderCursor: the doctrine is that the client PREPENDS and
+   *  keeps its held paging seam. */
+  hasOlder?: boolean;
+  olderCursor?: { lastActivityAt: number; id: string } | null;
+  /** EVERY pinned cold row, in or out of the head/new set -- a pinned head
+   *  row rides both fields; the merge below dedupes by id (first copy
+   *  wins). Present on delta frames too: the complete pin truth. */
+  pinnedLogs?: LogInfo[];
+}
+
+/** Targeted membership push: ONE row entered the cold list (dismiss
+ *  demote). `gen` is the post-bump watermark (continuation +1). */
+interface LogRowAddedMessage {
+  type: "logRowAdded";
+  row: LogInfo;
+  gen?: string;
+}
+
+/** Targeted membership push: the row left the cold list (cold Continue /
+ *  adoption made the id live). `gen` is +1; the client prunes the id from
+ *  its list AND its held older pages, seam untouched. */
+interface LogRowRemovedMessage {
+  type: "logRowRemoved";
+  sessionId: string;
+  gen?: string;
+}
+
+/** Pin attestation (setPinned broadcast): the COMPLETE pin-store id set,
+ *  live + cold. Not a membership frame: no gen, watermark untouched. */
+interface LogPinsMessage {
+  type: "logPins";
+  pinnedIds: string[];
 }
 
 interface SearchResultsMessage {
@@ -362,6 +452,9 @@ interface LoadOlderResultMessage {
 interface LogDeletedMessage {
   type: "logDeleted";
   logId: string;
+  /** Membership watermark carried like every removal push (absent on
+   *  hand-fired/old frames; never trusted for continuation then). */
+  gen?: string;
 }
 
 /**
@@ -614,6 +707,10 @@ type ServerMessage =
   | SessionDeletedMessage
   | SessionsMessage
   | LogsListedMessage
+  | LogRowAddedMessage
+  | LogRowRemovedMessage
+  | LogPinsMessage
+  | LoadOlderLogsResultMessage
   | LogViewedMessage
   | LogDeletedMessage
   | LoadOlderResultMessage
@@ -665,7 +762,27 @@ interface ChatConfig {
   getJumpHost?: () => HTMLElement | null;
   onSessionCreated?: (data: { sessionId: string; replayDelta?: boolean }) => void;
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
-  onLogsUpdate?: (logs: LogInfo[]) => void;
+  /** RECENT LOGS frame, both postures (head + pinnedLogs merged and
+   *  deduped by id here, in wire-arrival order). `delta` marks a full:false
+   *  frame: rows strictly newer than the held cursor, already gated by the
+   *  gen watermark above -- the app PREPENDS and keeps its paging seam.
+   *  On a delta the window carries only pinnedIds (the frame ships no
+   *  seam; the app's held one stands). */
+  onLogsUpdate?: (logs: LogInfo[], window: LogsListWindowMeta, delta: boolean) => void;
+  /** Reply to loadOlderLogs (the sidebar's older page); the app drops it
+   *  when the request id is stale (the searchLogs doctrine). */
+  onOlderLogs?: (requestId: number | undefined, page: LoadOlderLogsPage) => void;
+  /** Targeted membership add (logRowAdded push, watermark-checked): the app
+   *  inserts the row by the shared DESC comparator (mid-list for old-ts
+   *  demotes) and dedupes by id. */
+  onLogRowAdded?: (row: LogInfo) => void;
+  /** Targeted membership removal (logRowRemoved push, watermark-checked):
+   *  the app prunes the id from its list and its held older pages; the
+   *  paging seam stands (value-based cursor). */
+  onLogRowRemoved?: (sessionId: string) => void;
+  /** Complete pin-store attestation (logPins): the app replaces its pin
+   *  marks wholesale (off-screen marks included -- the set is the truth). */
+  onLogPins?: (pinnedIds: string[]) => void;
   onLogViewed?: (logId: string, entries: LogEntry[]) => void;
   onLogDeleted?: (logId: string) => void;
   /** Reply to searchLogs; the app drops it when the request id is stale. */
@@ -725,7 +842,12 @@ export interface ChatController {
   /** Flip a row's server-persisted pin (id may name a live session or a cold log). */
   setPinned: (sessionId: string, pinned: boolean) => void;
   listSessions: () => void;
-  listLogs: () => void;
+  /** Refresh the RECENT LOGS list. With a `since` cursor (the newest row
+   *  the pane holds) the request is DELTA-cost -- but only while this
+   *  socket holds a trusted gen watermark; without one (fresh socket, or a
+   *  re-attestation already in flight's wake) the `since` is dropped and
+   *  the reply is the FULL frame. */
+  listLogs: (since?: LogListCursorWire | null) => void;
   loadLog: (logId: string) => void;
   /** Read a durable log (cold OR live-by-id) into the pane: OBSERVING mode
    *  unless a peek is armed for this id. Optional seekText = land the view
@@ -747,6 +869,9 @@ export interface ChatController {
   deleteLog: (logId: string) => void;
   /** Full-text search across all session logs; results arrive via onSearchResults. */
   searchLogs: (query: string, requestId: number) => void;
+  /** Page the RECENT LOGS list older than a shipped cursor; arrives via
+   *  onOlderLogs with the same id (the app owns the in-flight guard). */
+  loadOlderLogs: (requestId: number, olderThan: LogListCursorWire) => void;
   /** Ask for a config snapshot (settings viewer); arrives via onConfigSnapshot. */
   requestConfigSnapshot: (requestId: number) => void;
   /** Persist one config value (settings editor; ALL the settings): scalars
@@ -870,6 +995,10 @@ export function createChat({
   onSessionCreated,
   onSessionsUpdate,
   onLogsUpdate,
+  onOlderLogs,
+  onLogRowAdded,
+  onLogRowRemoved,
+  onLogPins,
   onLogViewed,
   onLogDeleted,
   onSearchResults,
@@ -900,6 +1029,48 @@ export function createChat({
   let questionReadOnlyWanted = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let authFailed = false;
+
+  // ── RECENT LOGS membership watermark (server list-gen.ts) ──────────────
+  // "<bootToken>-<counter>". Full frames reset it to the server's value;
+  // delta frames and targeted pushes are trustworthy only while they
+  // CONTINUE the held value: +0 (a plain reply; the client already applied
+  // every transition it knows) or +1 (the frame IS the next transition).
+  // Anything else -- gap, backwards, other boot token, garbage, or nothing
+  // held yet -- is a hole the client cannot patch locally: the frame is
+  // dropped and the list re-attested with a `since`-less listLogs (ONE in
+  // flight; the next FULL frame settles it). Pins carry no gen by
+  // doctrine: a pin flip is not a membership change, so logPins never
+  // touches this.
+  let logsGen: string | null = null;
+  let logsFullReattestPending = false;
+
+  function splitLogsGen(gen: string): [string, number] | null {
+    const i = gen.lastIndexOf("-");
+    if (i <= 0) return null;
+    const n = Number(gen.slice(i + 1));
+    return Number.isSafeInteger(n) && n >= 0 ? [gen.slice(0, i), n] : null;
+  }
+
+  /** True when `gen` continues the held watermark by exactly `advances`
+   *  membership bumps; on true the held watermark moves to it. */
+  function acceptLogsGen(gen: unknown, advances: 0 | 1): boolean {
+    if (logsGen === null || typeof gen !== "string") return false;
+    const mine = splitLogsGen(logsGen);
+    const theirs = splitLogsGen(gen);
+    if (!mine || !theirs || mine[0] !== theirs[0] || theirs[1] !== mine[1] + advances) {
+      return false;
+    }
+    logsGen = gen;
+    return true;
+  }
+
+  /** A watermark mismatch was caught: hand back ONE full-frame request
+   *  (no `since`); it re-lands the whole held window and settles the gen. */
+  function reattestLogsFull(): void {
+    if (logsFullReattestPending) return;
+    logsFullReattestPending = true;
+    send({ type: "listLogs" });
+  }
 
   const sessionIdAtom = reactiveState<string | null>(null);
   const currentModelAtom = reactiveState<string>("");
@@ -1246,8 +1417,86 @@ export function createChat({
           if (viewedLogId === null) messageList?.addSystemMessage(switched);
         }
         return;
-      case "logsListed":
-        onLogsUpdate?.(data.logs);
+      case "logsListed": {
+        // Merge head + pinnedLogs into one row list (wire-arrival order,
+        // dedupe by id, first copy wins: the head copy of a pinned-in-head
+        // row comes first; the server never repeats an id inside either
+        // field). The window meta is the server's attestation, never a
+        // client guess; the older pages the app holds reconcile below.
+        // DELTA frames (full:false) share the merge but NOT the reset:
+        // they carry rows strictly newer than the held cursor and the
+        // doctrine is prepend-and-keep-the-seam, so no olderCursor/hasOlder
+        // rides them (the meta hands over the pin truth only).
+        const delta = data.full === false;
+        if (delta && !acceptLogsGen(data.gen, 0)) {
+          // Mismatch (or no held watermark yet): this delta cannot be
+          // trusted to be complete -- drop it and re-attest full; the
+          // frame's rows ride the full reply anyway.
+          reattestLogsFull();
+          return;
+        }
+        const rows: LogInfo[] = [];
+        const seen = new Set<string>();
+        for (const row of [...data.logs, ...(data.pinnedLogs ?? [])]) {
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+          rows.push(row);
+        }
+        if (delta) {
+          onLogsUpdate?.(rows, {
+            hasOlder: false,
+            olderCursor: null,
+            pinnedIds: new Set((data.pinnedLogs ?? []).map((r) => r.id)),
+          }, true);
+          return;
+        }
+        // FULL frame: the authoritative reset. Adopt the watermark as-is
+        // (absent/garbage gen -- hand-fired or old-shape frame -- leaves
+        // no watermark to continue, exactly like a fresh socket).
+        logsGen = typeof data.gen === "string" && splitLogsGen(data.gen) !== null
+          ? data.gen
+          : null;
+        logsFullReattestPending = false;
+        onLogsUpdate?.(rows, {
+          hasOlder: data.hasOlder === true,
+          olderCursor: normalizeLogListCursor(data.olderCursor),
+          pinnedIds: new Set((data.pinnedLogs ?? []).map((r) => r.id)),
+        }, false);
+        return;
+      }
+      case "logRowAdded": {
+        // Targeted demote push. No full frame landed on this socket yet:
+        // the row rides it; drop quietly. Watermark gap: drop the push and
+        // re-attest full (the single row cannot patch a hole).
+        if (logsGen === null) return;
+        if (!acceptLogsGen(data.gen, 1)) {
+          reattestLogsFull();
+          return;
+        }
+        onLogRowAdded?.(data.row);
+        return;
+      }
+      case "logRowRemoved": {
+        if (logsGen === null) return;
+        if (!acceptLogsGen(data.gen, 1)) {
+          reattestLogsFull();
+          return;
+        }
+        onLogRowRemoved?.(data.sessionId);
+        return;
+      }
+      case "logPins": {
+        // Complete pin-store set; no gen involvement (pins ride their own
+        // frame). Non-string entries are garbage, not marks: filter plain.
+        if (Array.isArray(data.pinnedIds)) {
+          onLogPins?.(data.pinnedIds.filter((id): id is string => typeof id === "string"));
+        }
+        return;
+      }
+      case "loadOlderLogsResult":
+        // Older-page reply, correlated by requestId (the searchLogs
+        // doctrine): the app owns the in-flight id and drops stale frames.
+        onOlderLogs?.(data.requestId, data);
         return;
       case "logViewed":
         // Enter log-view mode: from here, live-session transcript events are
@@ -1365,6 +1614,19 @@ export function createChat({
             workerView: sessionViewAtom().workerView,
             note: null,
           });
+        }
+        // The prune is right regardless of the watermark (the log is dead
+        // everywhere), but a STAMPED frame whose gen does not continue the
+        // held one still owes a full re-attest for whatever else moved
+        // inside the gap. The requester receives BOTH the direct send and
+        // the broadcast stamped identically: an already-applied gen claims
+        // nothing, so it is a no-op -- the guard's `!==` keeps a TRUE gap
+        // (or a backwards step) re-attesting. An unstamped frame (hand-fired
+        // or old-shape) carries no watermark claim: no adopt, no mismatch,
+        // no request.
+        if (typeof data.gen === "string" && logsGen !== null && data.gen !== logsGen
+          && !acceptLogsGen(data.gen, 1)) {
+          reattestLogsFull();
         }
         onLogDeleted?.(data.logId);
         return;
@@ -1662,6 +1924,11 @@ export function createChat({
       ws = null;
     }
     authFailed = false;
+    // A fresh socket re-attests the list from scratch: the watermark dies
+    // with the old one (missed pushes during the gap are exactly what the
+    // mismatch rule exists for, and the authOk listLogs below is bare).
+    logsGen = null;
+    logsFullReattestPending = false;
     // The next handshake re-attests the skew; a banner must not ride a
     // socket that has not spoken to this daemon yet.
     versionSkewAtom(false);
@@ -1983,8 +2250,13 @@ export function createChat({
 
   connect();
 
-  function listLogs(): void {
-    send({ type: "listLogs" });
+  function listLogs(since?: LogListCursorWire | null): void {
+    // Delta-cost refresh, gated by the watermark: `since` rides only while
+    // this socket holds a trusted gen (a FULL frame landed on it); with no
+    // watermark the request stays bare and the reply is the FULL frame.
+    // (A mismatch caught later on the reply triggers the bare
+    // re-attest -- see the logsListed case.)
+    send(since && logsGen !== null ? { type: "listLogs", since } : { type: "listLogs" });
   }
 
   function loadLog(logId: string): void {
@@ -2120,6 +2392,13 @@ export function createChat({
     send({ type: "searchLogs", query: q, requestId });
   }
 
+  /** Page the RECENT LOGS list strictly older than the shipped cursor.
+   *  The caller owns the request id and the in-flight guard (the searchLogs
+   *  doctrine); the size rides the server's window default. */
+  function loadOlderLogs(requestId: number, olderThan: LogListCursorWire): void {
+    send({ type: "loadOlderLogs", requestId, olderThan });
+  }
+
   /** Ask the server for a live config snapshot (settings viewer). The reply
    *  rides onConfigSnapshot with the same id; stale replies drop client-side. */
   function requestConfigSnapshot(requestId: number): void {
@@ -2231,6 +2510,7 @@ export function createChat({
     clearView,
     deleteLog,
     searchLogs,
+    loadOlderLogs,
     requestConfigSnapshot,
     setConfigKey,
     editConfigList,

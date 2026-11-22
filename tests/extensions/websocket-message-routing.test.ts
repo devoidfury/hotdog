@@ -292,8 +292,15 @@ describe("routeMessage: async error closures", () => {
     const broadcasted: unknown[] = [];
     reg.broadcast = (m: unknown) => { broadcasted.push(m); };
     const { messages } = await send({ type: C2S.DELETE_LOG, logId: "delete-me" }, reg);
-    expect(messages).toEqual([{ type: S2C.LOG_DELETED, logId: "delete-me" }]);
-    expect(broadcasted).toEqual([{ type: S2C.LOG_DELETED, logId: "delete-me" }]);
+    // Additive membership watermark (list-gen): the delete is a cold-list
+    // transition, so the notice stamps gen -- and BOTH sends carry the
+    // identical stamp (one bump, one truth).
+    expect(messages.length).toBe(1);
+    const del = messages[0] as Record<string, unknown>;
+    expect(del.type).toBe(S2C.LOG_DELETED);
+    expect(del.logId).toBe("delete-me");
+    expect(del.gen).toMatch(/^[\da-z]+-\d+$/);
+    expect(broadcasted).toEqual([del]);
   });
 });
 

@@ -14,14 +14,18 @@ export const C2S = {
   // Sidebar "Dismiss" on an IDLE session row: tear the live session down
   // but keep its log and its pin -- the row demotes to the cold Recent
   // Logs list. The server refuses a running session (busy guard) and
-  // answers with the refreshed SESSIONS + LOGS_LISTED payloads so every
-  // tab demotes the row without a manual refresh.
+  // answers with the refreshed SESSIONS payload plus a targeted
+  // logRowAdded frame carrying the single demoted row (never a rebuilt
+  // LOGS_LISTED window), so every tab demotes the row without a manual
+  // refresh.
   DISMISS_SESSION: "dismissSession",
   RENAME_SESSION: "renameSession",
   // Sidebar pin flip: { type, sessionId, pinned: boolean }. The id may name
   // a live session OR a cold log (pins span both sidebar sections). The
-  // server persists it (pin-store.ts), then broadcasts refreshed SESSIONS
-  // and LOGS_LISTED payloads so every tab's sidebar updates.
+  // server persists it (pin-store.ts), then broadcasts the refreshed
+  // SESSIONS payload plus a logPins frame carrying the COMPLETE current
+  // pinned-id set (pins ride their own frame; no list payload, no scan),
+  // so every tab's marks re-derive.
   SET_PINNED: "setPinned",
   LIST_SESSIONS: "listSessions",
   SWITCH_SESSION: "switchSession",
@@ -33,10 +37,31 @@ export const C2S = {
   // Voice transcription (push-to-talk / dictation)
   TRANSCRIBE: "transcribe",
   // Cold session log management
+  // { type, since? { lastActivityAt, id } }. Absent `since`: the windowed
+  // FULL head frame (the re-attestation posture). Present
+  // (validated like loadOlderLogs' olderCursor; garbage refuses on an error
+  // frame to this socket only): the reply is a DELTA LOGS_LISTED frame --
+  // rows strictly NEWER than the cursor in the same descending order,
+  // `full: false`, pinnedLogs as always, and NO olderCursor/hasOlder (the
+  // client keeps its held paging seam). If more than LOG_LIST_WINDOW rows
+  // are newer, the reply falls back to the full head frame (a partial
+  // merge would lie about covering the gap).
   LIST_LOGS: "listLogs",
   LOAD_LOG: "loadLog",
   VIEW_LOG: "viewLog",
   DELETE_LOG: "deleteLog",
+  // Older RECENT LOGS rows (the cold sidebar list, not the transcript):
+  // { type, requestId, olderThan: { lastActivityAt, id }, size? }. The
+  // cursor is the `olderCursor` a LOGS_LISTED / loadOlderLogsResult frame
+  // shipped; the server answers the page of unpinned cold rows STRICTLY
+  // older than it in the list's DESCENDING order (strictly: older ts, or
+  // equal ts with id < cursor id), re-applying the live/worker exclusion
+  // before the cut. `size` is a row count, clamped server-side
+  // (MAX_LOG_LIST_PAGE; default = the LOG_LIST_WINDOW the head shipped).
+  // Correlated back with LOAD_OLDER_LOGS_RESULT by requestId (the
+  // searchLogs precedent); a garbage cursor refuses on the reply's `error`
+  // field, still correlated -- never an uncorrelated guess.
+  LOAD_OLDER_LOGS: "loadOlderLogs",
   // Full-text search across all session logs (live + cold):
   // { type, requestId, query }. Case-insensitive substring match on the
   // human-readable entry text (never base64 image payloads). Correlated
@@ -186,7 +211,51 @@ export const S2C = {
   AUTH_ERROR: "authError",
 
   // Cold session log management
+  // The RECENT LOGS frame, in two postures sharing one type (see
+  // handlers-logs.ts coldLogsPayload / handleListLogs). FULL (no `full`
+  // flag; the reply to a `since`-less listLogs, and the reply a delta
+  // request falls back to when >LOG_LIST_WINDOW rows are newer): `logs` is
+  // the NEWEST head of the filtered+sorted cold list (history-window.ts
+  // LOG_LIST_WINDOW; DESCENDING lastActivityAt, id DESC tie-break -- NOT
+  // the whole store) plus the seam attestation `hasOlder` (bool, always
+  // present) and `olderCursor` ({ lastActivityAt, id } of the head's last
+  // row; present ONLY while hasOlder) -- hand both to C2S loadOlderLogs to
+  // page toward the bottom. DELTA (`full: false`; the reply to listLogs
+  // WITH `since`): `logs` carries the rows strictly NEWER than the client's
+  // cursor in the same descending order, at most LOG_LIST_WINDOW (more new
+  // rows -> the full head frame instead, never a silent partial merge).
+  // Doctrine: on a full:false frame the client PREPENDS and keeps its
+  // paging seam, so a delta ships NO olderCursor/hasOlder (the held seam
+  // stands; a stale one re-attests through gen). Both postures carry
+  // `pinnedLogs` (present when non-empty): EVERY pinned cold row, in or
+  // out of the head/new set -- row flags are per-row truth; the client
+  // merges by id and dedupes. Both postures stamp `gen`: the membership
+  // watermark (boot token + counter, list-gen.ts) the client compares
+  // against its last-applied gen -- any frame continuing it at +0 (a plain
+  // reply) or +1 (the frame IS the transition) is trustworthy; a gap means
+  // the client missed a membership change it cannot patch locally, and it
+  // re-attests with a `since`-less listLogs. Per-row fields are unchanged
+  // from the pre-window wire.
   LOGS_LISTED: "logsListed",
+  // Targeted RECENT LOGS membership push: ONE demoted row entered the cold
+  // list (dismissSession). `row` is the exact LOGS_LISTED row grammar
+  // (same coldLogRows path, single-row); `gen` is the post-bump watermark
+  // (this frame IS the transition: +1). The client INSERTS by the shared
+  // descending comparator (an idle session's last activity lands mid-list,
+  // never assumed at the head) and dedupes by id.
+  LOG_ROW_ADDED: "logRowAdded",
+  // Targeted RECENT LOGS membership push: a row left the cold list (a cold
+  // Continue/adoption makes the id live). `gen` again rides +1; the client
+  // prunes the id from its list AND its held older pages, seam untouched
+  // (olderCursor is value-based, so a removed row inside the seam cannot
+  // strand the walk).
+  LOG_ROW_REMOVED: "logRowRemoved",
+  // Pin attestation broadcast (setPinned): `pinnedIds` is the COMPLETE
+  // current pin-store set (live + cold ids). Pins are not a membership
+  // change: no gen, no watermark movement. The client re-derives every
+  // mark from the set wholesale (marks for rows it cannot see -- held
+  // older pages, un-paged history -- drop with it).
+  LOG_PINS: "logPins",
   // Windowed by default (history-window.ts): the reply carries the TRAILING
   // window of conversation messages; image payloads ride honest STUBS
   // ({ omitted, mimeType, bytes, entryIndex, imageIndex }), never
@@ -200,6 +269,13 @@ export const S2C = {
   // NONE of these fields; text fields are byte-identical to the
   // pre-windowing wire (image entries ship as stubs).
   LOG_VIEWED: "logViewed",
+  // Notice that a cold log was deleted (and every client's row must prune):
+  // the pre-existing targeted removal frame -- logRowRemoved carries rows
+  // that merely LEFT the list; this one names a DEAD log (the client also
+  // drops the pin and tears down a view of it). Stamps `gen` like every
+  // membership transition (+1); the client's prune is idempotent, so it
+  // applies regardless, and a watermark mismatch on this frame still
+  // triggers the full re-attest.
   LOG_DELETED: "logDeleted",
   // Reply to C2S SEARCH_LOGS (requesting socket only), correlated by requestId.
   SEARCH_RESULTS: "searchResults",
@@ -213,6 +289,15 @@ export const S2C = {
   // seam on (a mid-socket RESET moved the epoch; the held index means a
   // different entry). See handlers-logs.ts / history-window.ts.
   LOAD_OLDER_RESULT: "loadOlderResult",
+  // Reply to C2S LOAD_OLDER_LOGS (requesting socket only), correlated by
+  // requestId. `logs` are rows in the exact LOGS_LISTED row grammar (same
+  // enrichment seam), DESCENDING, strictly older than the echoed cursor;
+  // pinned rows NEVER ride pages (they ship on the base frame's pinnedLogs
+  // and the client dedupes by id). `hasOlder` (bool) + `olderCursor`
+  // (present while hasOlder) re-attest the seam for the next page.
+  // Refusals (garbage cursor, dead store) carry requestId + `error` and
+  // nothing else (the LIST_DIR_RESULT posture).
+  LOAD_OLDER_LOGS_RESULT: "loadOlderLogsResult",
   // Reply to C2S FETCH_IMAGE (requesting socket only), correlated by
   // requestId. Success: `image` is the ONE WireImage re-read from the entry
   // (inline data, or the skipped+note posture over the cap). Refusals carry
@@ -398,6 +483,43 @@ export interface SearchHitWire {
 /** Caps on a single search reply (see searchLogs in ./handlers-logs.ts). */
 export const MAX_SEARCH_HITS = 50;
 export const MAX_SEARCH_SNIPPETS_PER_LOG = 3;
+
+// ── RECENT LOGS list window (S2C logsListed / loadOlderLogsResult) ─────────
+
+/**
+ * The exclusive walk cursor over the DESCENDING cold-log list: the
+ * [lastActivityAt, id] of the oldest row a frame shipped. The id is the
+ * total-order tie-break (rows with equal lastActivityAt order by id
+ * DESCENDING after the timestamp), so "strictly older than this cursor"
+ * means `ts < cursor.ts || (ts == cursor.ts && id < cursor.id)` and a page
+ * walk can never skip or repeat a row. Echoed back verbatim on C2S
+ * loadOlderLogs. The SAME shape answers C2S listLogs' `since` (a newest-
+ * held cursor): "strictly newer" is the negation riding the same total
+ * order -- compareLogRowsDesc(row, cursor) < 0.
+ */
+export interface LogListCursorWire {
+  lastActivityAt: number;
+  id: string;
+}
+
+/**
+ * The RECENT LOGS walk order: newest lastActivityAt first; equal
+ * timestamps order by id DESCENDING, so an exclusive cursor selects
+ * exactly the rows that come AFTER it in this order (and strictly-newer
+ * selects exactly those BEFORE). id is never equal between two rows, so
+ * the order is total and a page walk (or a client-side insert of a pushed
+ * row) cannot skip or repeat a row across rebuilds. ONE definition for
+ * server and client (the webui inserts logRowAdded pushes through here):
+ * the delta order and the client order are literally the same comparator,
+ * no drift. handlers-logs re-exports it for server-side consumers.
+ */
+export function compareLogRowsDesc(
+  a: { lastActivityAt: number; id: string },
+  b: { lastActivityAt: number; id: string },
+): number {
+  return b.lastActivityAt - a.lastActivityAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+}
+
 /** Characters of context kept on each side of a match in a snippet. */
 export const SEARCH_SNIPPET_CONTEXT = 48;
 

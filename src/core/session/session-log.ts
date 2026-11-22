@@ -3,7 +3,7 @@
 
 import { homedir } from "node:os";
 import { join, resolve as resolveAbs, sep } from "node:path";
-import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
+import { readFile, access, stat, unlink } from "node:fs/promises";
 import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type MessageSource } from "../context/message.ts";
 import { repairToolCalls, INTERRUPTED_OUTCOME_UNKNOWN, INTERRUPTED_NOT_STARTED } from "../context/repair.ts";
 import { AgentError, CliError, formatError } from "../error.ts";
@@ -11,6 +11,9 @@ import { HOOKS } from "../hooks.ts";
 import { parseJsonLines } from "@utils/json-lines.ts";
 import { logger } from "@utils/logger.ts";
 import { spoofSafe } from "@utils/spoof.ts";
+// The cycle with session-index (it imports this module too) is call-time
+// only -- neither side touches the other's bindings during module evaluation.
+import { listSessionLogsFromIndex } from "./session-index.ts";
 
 export const LOG_SOURCE = {
   SYSTEM_PROMPT: "system_prompt",
@@ -226,6 +229,34 @@ export function countSessionLogEntries(entries: LogEntry[]): number {
 }
 
 /**
+ * The sidebar row metrics derived from a FULL log read: ts min/max over
+ * EVERY entry (RESET and bookkeeping included, not just the epoch view),
+ * mtime fallback when the log attests no valid ts, and the
+ * countSessionLogEntries sum. One rule shared by the index sync (rows) and
+ * scanSessionLogFile (raw fallback), so the list cannot drift from itself.
+ */
+export function deriveSessionListMetrics(
+  entries: LogEntry[],
+  mtimeMs: number,
+): { createdAt: number; lastActivityAt: number; messageCount: number } {
+  let createdAt = 0;
+  let lastActivityAt = 0;
+  for (const entry of entries) {
+    const ts = entry.ts ? new Date(entry.ts).getTime() : 0;
+    if (ts > 0) {
+      if (createdAt === 0 || ts < createdAt) createdAt = ts;
+      if (ts > lastActivityAt) lastActivityAt = ts;
+    }
+  }
+  // Date truncates sub-ms mtimes; keep the fallback integer like a Date read.
+  return {
+    createdAt: createdAt || Math.floor(mtimeMs),
+    lastActivityAt: lastActivityAt || Math.floor(mtimeMs),
+    messageCount: countSessionLogEntries(entries),
+  };
+}
+
+/**
  * Read a session's log. Default is the EPOCH view (entries after the last
  * RESET): the replay/context semantics. `full: true` returns the whole log:
  * audit facts (the cap's consecutive counter, the resume count) must survive
@@ -294,55 +325,39 @@ export interface SessionLogInfo {
   messageCount: number;
 }
 
-/** Most recent activity first; only sessions with at least one real message. */
-export async function listSessionLogs(): Promise<SessionLogInfo[]> {
-  const dir = sessionsDir();
+/**
+ * One-file cold scan: whole-file parse + deriveSessionListMetrics. The list
+ * fallback for files the index cannot serve, and the parity reference for
+ * the indexed derivation.
+ */
+export async function scanSessionLogFile(dir: string, file: string): Promise<SessionLogInfo | null> {
+  const sessionId = file.slice(0, -".jsonl".length);
+  const filePath = join(dir, file);
   try {
-    await access(dir);
+    const metadata = await stat(filePath);
+    const content = await readFile(filePath, "utf-8");
+    const entries = parseJsonLines<unknown>(content, "skip").filter(isLogEntry);
+    if (entries.length === 0) return null;
+    const m = deriveSessionListMetrics(entries, metadata.mtimeMs);
+    if (m.messageCount === 0) return null;
+    return { id: sessionId, createdAt: m.createdAt, lastActivityAt: m.lastActivityAt, messageCount: m.messageCount };
   } catch {
-    return [];
+    // skip unreadable files
+    return null;
   }
+}
 
-  const files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
-  const results: Array<SessionLogInfo & { mtime: number }> = [];
-
-  for (const file of files) {
-    const sessionId = file.replace(".jsonl", "");
-    const filePath = join(dir, file);
-    try {
-      const metadata = await stat(filePath);
-      const content = await readFile(filePath, "utf-8");
-      const entries = parseJsonLines<unknown>(content, "skip").filter(isLogEntry);
-      if (entries.length === 0) continue;
-
-      let createdAt = 0;
-      let lastActivityAt = 0;
-
-      for (const entry of entries) {
-        const ts = (entry.ts as string) ? new Date(entry.ts as string).getTime() : 0;
-        if (ts > 0) {
-          if (createdAt === 0 || ts < createdAt) createdAt = ts;
-          if (ts > lastActivityAt) lastActivityAt = ts;
-        }
-      }
-      const messageCount = countSessionLogEntries(entries);
-
-      if (messageCount > 0) {
-        results.push({
-          id: sessionId,
-          createdAt: createdAt || metadata.mtime.getTime(),
-          lastActivityAt: lastActivityAt || metadata.mtime.getTime(),
-          messageCount,
-          mtime: metadata.mtime.getTime(),
-        });
-      }
-    } catch {
-      // skip unreadable files
-    }
-  }
-
-  results.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-  return results.map(({ mtime, ...rest }) => rest);
+/**
+ * Most recent activity first; only sessions with at least one real message.
+ * Membership is disk-driven (readdir: no log enters or leaves the list
+ * because the index lacks it); values are index-driven -- an indexed,
+ * position-fresh row answers with zero log reads, and anything the index
+ * cannot serve (missing/stale row, pre-list-columns row, unsafe id,
+ * unusable index) rides scanSessionLogFile. The list never writes a row:
+ * adoption is boot reconcile's and the writer commit points' job.
+ */
+export async function listSessionLogs(): Promise<SessionLogInfo[]> {
+  return listSessionLogsFromIndex(scanSessionLogFile);
 }
 
 /** Returns true if the file was deleted, false if it didn't exist. */

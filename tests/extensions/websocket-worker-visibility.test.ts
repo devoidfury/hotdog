@@ -241,7 +241,7 @@ describe("coldLogsPayload: attested worker logs leave the list", () => {
   });
 
   it("the attested worker row is absent; unattested logs ride plain; nesting stays under the manager", async () => {
-    const rows = await coldLogsPayload(registry);
+    const rows = (await coldLogsPayload(registry)).logs;
     const ids = rows.map((r) => r.id);
     expect(ids).toContain("vis-mgr");
     expect(ids).toContain("vis-plain");
@@ -364,7 +364,7 @@ describe("coldLogsPayload: attested worker logs leave the list", () => {
 
   it("no TaskManager: every log rides the list (existing suites' world, byte-identical)", async () => {
     const bare = registryFor(null);
-    const rows = await coldLogsPayload(bare);
+    const rows = (await coldLogsPayload(bare)).logs;
     expect(rows.map((r) => r.id)).toContain("vis-worker");
     const hits = await searchSessionLogs("quantumvis needle", bare);
     for (const h of hits) expect("subagentOf" in h).toBe(false);
@@ -400,7 +400,7 @@ describe("coldLogsPayload: current-process spawn (the boot-cache gap)", () => {
     try {
       // Warm the boot cache (this is the state a running server is in: the
       // lineage/lineageTasks reads happened long before this spawn).
-      const before = await coldLogsPayload(registry);
+      const before = (await coldLogsPayload(registry)).logs;
       expect(before.map((r) => r.id)).toContain("vis2-worker");
       expect((await tm.lineageTasks()).some((r) => r.taskId === "t-vis-live")).toBe(false);
 
@@ -412,7 +412,7 @@ describe("coldLogsPayload: current-process spawn (the boot-cache gap)", () => {
       // The boot-cache gap, stated: the cached lineage view stays stale...
       expect((await tm.lineageTasks()).some((r) => r.taskId === "t-vis-live")).toBe(false);
       // ...yet the list answer flips with NO restart.
-      const after = await coldLogsPayload(registry);
+      const after = (await coldLogsPayload(registry)).logs;
       expect(after.map((r) => r.id)).not.toContain("vis2-worker");
       expect(after.map((r) => r.id)).toContain("vis2-mgr");
     } finally {
@@ -461,7 +461,7 @@ describe("promotion: manual Continue adopts, pins, and survives cold + restart",
   });
 
   it("the promoted round trip: Continue -> interactive live row -> pinnable -> plain cold row, surviving restart", async () => {
-    expect((await coldLogsPayload(registry)).map((r) => r.id)).not.toContain(PROMOTED);
+    expect((await coldLogsPayload(registry)).logs.map((r) => r.id)).not.toContain(PROMOTED);
 
     // Manual Continue (handleLoadLog, auto=false -- this route IS manual).
     const { ctx, ws } = ctxFor(registry, { type: C2S.LOAD_LOG, logId: PROMOTED });
@@ -487,7 +487,7 @@ describe("promotion: manual Continue adopts, pins, and survives cold + restart",
 
     // Goes cold again -> REAPPEARS as a plain Recent Logs row.
     expect(registry.delete(PROMOTED)).toBe(true);
-    const rows = await coldLogsPayload(registry);
+    const rows = (await coldLogsPayload(registry)).logs;
     const row = rows.find((r) => r.id === PROMOTED);
     expect(row).toBeDefined();
     expect("subagents" in row!).toBe(false); // plain row, not nested anywhere
@@ -499,7 +499,7 @@ describe("promotion: manual Continue adopts, pins, and survives cold + restart",
     const registry2 = registryFor(tm2);
     closePinStore();
     try {
-      const rows2 = await coldLogsPayload(registry2);
+      const rows2 = (await coldLogsPayload(registry2)).logs;
       const row2 = rows2.find((r) => r.id === PROMOTED);
       expect(row2).toBeDefined();
       expect(row2!.pinned).toBe(true);
@@ -515,7 +515,7 @@ describe("promotion: manual Continue adopts, pins, and survives cold + restart",
     await attachResumedSession(ws, registry, bridgeStub, AUTO, 0, true);
     expect(registry.get(AUTO)).toBeTruthy();
     expect(registry.delete(AUTO)).toBe(true);
-    const rows = await coldLogsPayload(registry);
+    const rows = (await coldLogsPayload(registry)).logs;
     expect(rows.map((r) => r.id)).not.toContain(AUTO);
     // The sidecar holds exactly ONE promote line -- the manual one.
     const text = readFileSync(path, "utf8");
@@ -523,7 +523,7 @@ describe("promotion: manual Continue adopts, pins, and survives cold + restart",
     // ...and a fresh lifetime agrees.
     const tm2 = manager(path);
     try {
-      const rows2 = await coldLogsPayload(registryFor(tm2));
+      const rows2 = (await coldLogsPayload(registryFor(tm2))).logs;
       expect(rows2.map((r) => r.id)).not.toContain(AUTO);
     } finally {
       tm2.stop();

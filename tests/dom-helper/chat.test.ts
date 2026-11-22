@@ -27,6 +27,9 @@ function makeChat(overrides: Partial<Parameters<typeof createChat>[0]> = {}) {
     onSessionCreated: track("sessionCreated"),
     onSessionsUpdate: track("sessionsUpdate"),
     onLogsUpdate: track("logsUpdate"),
+    onLogRowAdded: track("logRowAdded"),
+    onLogRowRemoved: track("logRowRemoved"),
+    onLogPins: track("logPins"),
     onLogViewed: track("logViewed"),
     onLogDeleted: track("logDeleted"),
     onAuthFailure: track("authFailure"),
@@ -263,6 +266,254 @@ describe("session management messages", () => {
     expect(callbacks.logsUpdate).toHaveLength(1);
     expect(callbacks.logViewed).toHaveLength(1);
     expect(callbacks.logDeleted).toHaveLength(1);
+  });
+});
+
+// ── RECENT LOGS list window (LOGS_LISTED meta + older pages) ───────────────
+
+describe("RECENT LOGS list window", () => {
+  const row = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    createdAt: 1,
+    lastActivityAt: 2,
+    messageCount: 3,
+    ...extra,
+  });
+
+  it("merges head + pinnedLogs by id (first copy wins) and hands over the window attestation", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [row("a"), row("b", { pinned: true })],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 2, id: "b" },
+      pinnedLogs: [row("b", { pinned: true }), row("c", { pinned: true })],
+    });
+    const [rows, meta] = callbacks.logsUpdate![0] as [Array<{ id: string }>, Record<string, unknown>];
+    expect(rows.map((r) => r.id)).toEqual(["a", "b", "c"]); // head order, pinned tail, dup dropped
+    expect(meta.hasOlder).toBe(true);
+    expect(meta.olderCursor).toEqual({ lastActivityAt: 2, id: "b" });
+    expect([...(meta.pinnedIds as Set<string>)]).toEqual(["b", "c"]);
+  });
+
+  it("a frame without the window fields closes the seam honestly (hand-fired/old-shape frame)", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({ type: "logsListed", logs: [row("a")] });
+    const [, meta] = callbacks.logsUpdate![0] as [unknown, Record<string, unknown>];
+    expect(meta.hasOlder).toBe(false);
+    expect(meta.olderCursor).toBeNull();
+    expect((meta.pinnedIds as Set<string>).size).toBe(0);
+  });
+
+  it("a garbage olderCursor decodes to NO cursor (strict decode, never a guess)", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [row("a")],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: "yesterday", id: 42 },
+    });
+    const [, meta] = callbacks.logsUpdate![0] as [unknown, Record<string, unknown>];
+    expect(meta.olderCursor).toBeNull();
+  });
+
+  it("loadOlderLogsResult forwards requestId + payload to onOlderLogs (the app gates staleness)", () => {
+    const pages: Array<[number | undefined, Record<string, unknown>]> = [];
+    const { ws } = makeChat({
+      onOlderLogs: (requestId, page) => pages.push([requestId, page as unknown as Record<string, unknown>]),
+    });
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: 7,
+      logs: [row("d")],
+      hasOlder: false,
+    });
+    expect(pages).toHaveLength(1);
+    expect(pages[0]![0]).toBe(7);
+    expect((pages[0]![1].logs as Array<{ id: string }>).map((r) => r.id)).toEqual(["d"]);
+  });
+
+  it("loadOlderLogs sends the correlated C2S frame with the echoed cursor", () => {
+    const { chat, ws } = makeChat();
+    chat.loadOlderLogs(9, { lastActivityAt: 123, id: "x" });
+    const frame = JSON.parse(ws.sent[ws.sent.length - 1]!) as Record<string, unknown>;
+    expect(frame).toEqual({
+      type: "loadOlderLogs",
+      requestId: 9,
+      olderThan: { lastActivityAt: 123, id: "x" },
+    });
+  });
+});
+
+// ── Delta refreshes: the gen watermark + targeted membership pushes ────────
+
+describe("RECENT LOGS gen watermark and targeted pushes", () => {
+  const row = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    createdAt: 1,
+    lastActivityAt: 2,
+    messageCount: 3,
+    ...extra,
+  });
+
+  it("a delta frame continues the full frame's gen (+0): prepended rows, delta flag, pin truth only", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({ type: "logsListed", logs: [row("a")], hasOlder: true, olderCursor: { lastActivityAt: 2, id: "a" }, gen: "b-1" });
+    ws.fireMessage({ type: "logsListed", full: false, logs: [row("new")], pinnedLogs: [row("p", { pinned: true })], gen: "b-1" });
+    expect(callbacks.logsUpdate).toHaveLength(2);
+    const [rows, meta, delta] = callbacks.logsUpdate![1] as [Array<{ id: string }>, Record<string, unknown>, boolean];
+    expect(delta).toBe(true);
+    expect(rows.map((r) => r.id)).toEqual(["new", "p"]);
+    // Doctrine: the client keeps its held seam -- the delta meta carries
+    // the complete pin truth and nothing of a (non-existent) seam.
+    expect([...(meta.pinnedIds as Set<string>)]).toEqual(["p"]);
+    expect(meta.hasOlder).toBe(false);
+    expect(meta.olderCursor).toBeNull();
+  });
+
+  it("a mismatched delta is dropped and re-attests full -- exactly one bare listLogs", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({ type: "logsListed", logs: [row("a")], gen: "b-3" });
+    ws.fireMessage({ type: "logsListed", full: false, logs: [row("ghost")], gen: "b-9" });
+    expect(callbacks.logsUpdate).toHaveLength(1); // the delta never landed
+    const sentReqs = JSON.parse(ws.sent[ws.sent.length - 1]!) as Record<string, unknown>;
+    expect(sentReqs).toEqual({ type: "listLogs" }); // no since: full re-attest
+    // A pinnedLogs-carrying mismatch drops WHOLE too: the pin copy never
+    // reaches the app, and the pending re-attest does not double-send.
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [row("ghost2")],
+      pinnedLogs: [row("ghostpin", { pinned: true })],
+      gen: "b-9",
+    });
+    expect(callbacks.logsUpdate).toHaveLength(1);
+    expect(ws.sent.filter((s) => JSON.parse(s).type === "listLogs")).toHaveLength(1);
+    // Another mismatch while the re-attest is pending does NOT spam.
+    ws.fireMessage({ type: "logRowAdded", row: row("x"), gen: "b-9" });
+    expect(ws.sent.filter((s) => JSON.parse(s).type === "listLogs")).toHaveLength(1);
+    expect(callbacks.logRowAdded).toBeUndefined();
+  });
+
+  it("a full frame without (or with garbage) gen holds no watermark: the next delta re-attests", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({ type: "logsListed", logs: [row("a")] }); // hand-fired frame
+    ws.fireMessage({ type: "logsListed", full: false, logs: [row("b")], gen: "b-1" });
+    expect(callbacks.logsUpdate).toHaveLength(1);
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({ type: "listLogs" });
+    // The same frame WITH the complete pinnedLogs: pins cannot vouch for an
+    // unattested watermark -- dropped whole, no second request.
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [row("b2")],
+      pinnedLogs: [row("bp", { pinned: true })],
+      gen: "b-1",
+    });
+    expect(callbacks.logsUpdate).toHaveLength(1);
+    expect(ws.sent.filter((s) => JSON.parse(s).type === "listLogs")).toHaveLength(1);
+  });
+
+  it("listLogs carries `since` only while the watermark is held", () => {
+    const { chat, ws } = makeChat();
+    const cursor = { lastActivityAt: 9, id: "top" };
+    chat.listLogs(cursor); // fresh socket: no watermark -> bare (FULL frame)
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({ type: "listLogs" });
+    ws.fireMessage({ type: "logsListed", logs: [row("a")], gen: "b-1" });
+    chat.listLogs(cursor);
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({ type: "listLogs", since: cursor });
+    chat.listLogs(); // no cursor: bare regardless
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({ type: "listLogs" });
+  });
+
+  it("logRowAdded: +1 continues, a gap re-attests, a pre-attestation push is dropped quietly", () => {
+    const { ws, callbacks } = makeChat();
+    // Before any full frame: the row rides the full reply anyway.
+    ws.fireMessage({ type: "logRowAdded", row: row("early"), gen: "b-1" });
+    expect(callbacks.logRowAdded).toBeUndefined();
+    expect(ws.sent.filter((s) => JSON.parse(s).type === "listLogs")).toHaveLength(0);
+    ws.fireMessage({ type: "logsListed", logs: [row("a")], gen: "b-4" });
+    ws.fireMessage({ type: "logRowAdded", row: row("fresh"), gen: "b-5" });
+    expect((callbacks.logRowAdded![0] as [Record<string, unknown>])[0]!.id).toBe("fresh");
+    // The push adopted b-5: a delta on b-5 continues cleanly.
+    ws.fireMessage({ type: "logsListed", full: false, logs: [row("d")], gen: "b-5" });
+    expect(callbacks.logsUpdate).toHaveLength(2);
+    // The same posture WITH the complete pinnedLogs: the pin copy rides the
+    // merged rows, and the held gen still continues at +0.
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [row("d2")],
+      pinnedLogs: [row("dp", { pinned: true })],
+      gen: "b-5",
+    });
+    expect(callbacks.logsUpdate).toHaveLength(3);
+    expect((callbacks.logsUpdate![2] as [Array<{ id: string }>])[0].map((r) => r.id)).toEqual(["d2", "dp"]);
+    // A gap on the next push: drop + one full re-attest.
+    ws.fireMessage({ type: "logRowAdded", row: row("skip"), gen: "b-8" });
+    expect(callbacks.logRowAdded).toHaveLength(1);
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({ type: "listLogs" });
+  });
+
+  it("logRowRemoved: +1 prunes via callback, a gap re-attests instead", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({ type: "logsListed", logs: [row("a")], gen: "r-1" });
+    ws.fireMessage({ type: "logRowRemoved", sessionId: "a", gen: "r-2" });
+    expect(callbacks.logRowRemoved).toEqual([["a"]]);
+    ws.fireMessage({ type: "logRowRemoved", sessionId: "z", gen: "r-9" });
+    expect(callbacks.logRowRemoved).toHaveLength(1);
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({ type: "listLogs" });
+  });
+
+  it("logDeleted carries the watermark too: applied either way, a mismatch still re-attests", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({ type: "logsListed", logs: [row("a")], gen: "d-1" });
+    ws.fireMessage({ type: "logDeleted", logId: "a", gen: "d-2" });
+    expect(callbacks.logDeleted).toHaveLength(1);
+    expect(ws.sent.filter((s) => JSON.parse(s).type === "listLogs")).toHaveLength(0);
+    ws.fireMessage({ type: "logDeleted", logId: "b", gen: "d-9" });
+    expect(callbacks.logDeleted).toHaveLength(2); // the prune is right regardless
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({ type: "listLogs" });
+    // An unstamped frame (old-shape/hand-fired) carries no claim: applied,
+    // and it never manufactures a re-attest request.
+    ws.fireMessage({ type: "logDeleted", logId: "c" });
+    expect(callbacks.logDeleted).toHaveLength(3);
+    expect(ws.sent.filter((s) => JSON.parse(s).type === "listLogs")).toHaveLength(1);
+    // The deleting tab's double send (handleDeleteLog answers the requester
+    // AND broadcasts, both stamped with ONE gen): the second copy announces a
+    // transition this tab already applied, so it claims nothing -- applied,
+    // not a gap, and ZERO since-less re-attests.
+    const reattests = (): number => ws.sent.filter((s) => JSON.parse(s).type === "listLogs").length;
+    ws.fireMessage({ type: "logsListed", logs: [row("x")], gen: "d-5" });
+    const before = reattests();
+    ws.fireMessage({ type: "logDeleted", logId: "x", gen: "d-6" }); // the requester's own send
+    expect(callbacks.logDeleted).toHaveLength(4);
+    ws.fireMessage({ type: "logDeleted", logId: "x", gen: "d-6" }); // the broadcast copy, same gen
+    expect(callbacks.logDeleted).toHaveLength(5);
+    expect(reattests()).toBe(before);
+    // A true gap still re-attests: only the ALREADY-APPLIED gen claims nothing.
+    ws.fireMessage({ type: "logDeleted", logId: "y", gen: "d-9" });
+    expect(reattests()).toBe(before + 1);
+  });
+
+  it("logPins routes the complete id set, garbage entries filtered -- and never touches the watermark", () => {
+    const { ws, callbacks } = makeChat();
+    ws.fireMessage({ type: "logsListed", logs: [row("a")], gen: "g-1" });
+    ws.fireMessage({ type: "logPins", pinnedIds: ["a", "b", 42, null] });
+    expect(callbacks.logPins).toEqual([[["a", "b"]]]);
+    // Pins are not membership: a delta on the SAME gen still continues.
+    ws.fireMessage({ type: "logsListed", full: false, logs: [row("d")], gen: "g-1" });
+    expect(callbacks.logsUpdate).toHaveLength(2);
+    // A delta that RE-SHIPS the pinned rows rides that same gen too: the
+    // copies land, the watermark does not move.
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [],
+      pinnedLogs: [row("a", { pinned: true })],
+      gen: "g-1",
+    });
+    expect(callbacks.logsUpdate).toHaveLength(3);
   });
 });
 

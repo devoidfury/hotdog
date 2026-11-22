@@ -18,7 +18,7 @@ import {
 } from "./icons.tsx";
 import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH, WORKBENCH_TREE_PIN_MIN_WIDTH, WORKBENCH_VIEWER_MIN_WIDTH, CHAT_DOCK_MIN_WIDTH, EDITOR_DOCK_DEFAULT_WIDTH, EDITOR_DOCK_MIN_WIDTH, EDITOR_DOCK_MAX_WIDTH, TREE_COL_MIN_WIDTH, TREE_COL_MAX_WIDTH, TREE_COL_DEFAULT_WIDTH } from "./utils.ts";
 import { createPanelResize, decodeCollapsed, encodeCollapsed } from "./panel-resize.ts";
-import { createChat, composerForView, ATTACHED_VIEW, type ChatController, type CompletionItem } from "./chat.ts";
+import { createChat, composerForView, ATTACHED_VIEW, normalizeLogListCursor, type ChatController, type CompletionItem, type LogsListWindowMeta } from "./chat.ts";
 import {
   LoginScreen,
   focusLoginInput,
@@ -36,10 +36,17 @@ import {
   saveThemeId,
 } from "./theme-pref.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
-import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
+import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, logsListNearBottom, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import { Combobox, ComboboxPopup, comboboxAtom } from "./combobox.tsx";
 import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire, FileOpResultWire } from "./chat.ts";
-import type { ConfigKeyEditWire, EditConfigListResultWire, TaskInfoWire, TaskControlWire } from "@extensions/websocket/protocol.ts";
+import {
+  compareLogRowsDesc,
+  type ConfigKeyEditWire,
+  type EditConfigListResultWire,
+  type LogListCursorWire,
+  type TaskInfoWire,
+  type TaskControlWire,
+} from "@extensions/websocket/protocol.ts";
 import { chipLabel, openTargetFor } from "./subagents.tsx";
 import {
   persistWorkbenchTabs,
@@ -128,6 +135,57 @@ type Screen = "login" | "main";
 const screenAtom = reactiveState<Screen>("login");
 const sessionsAtom = reactiveState<SessionInfo[]>([]);
 const logsAtom = reactiveState<LogInfo[]>([]);
+
+// RECENT LOGS lazy window (server seam: handlers-logs.ts coldLogsPayload /
+// handleLoadOlderLogs). The newest LOGS_LISTED frame attests the seam
+// (hasOlder + the exclusive cursor); older pages this pane pulled ride
+// below the head in arrival order, deduped by id. ONE page in flight --
+// the reply's requestId settles the slot (the searchLogs doctrine), a base
+// frame (reconnect, setPinned/dismiss broadcast) re-attests and frees it.
+// Plain lets, not atoms: every mutation lands together with a logsAtom()
+// write, and the render reads only logsAtom.
+let logsOlderWindow: LogsListWindowMeta = { hasOlder: false, olderCursor: null, pinnedIds: new Set() };
+let logsOlderRows: LogInfo[] = [];
+let logsOlderInFlight: number | null = null;
+let logsOlderReqSeq = 0;
+
+/** Forget every held older row (auth teardown / window re-attestation from
+ *  scratch). */
+function resetLogsOlderState(): void {
+  logsOlderWindow = { hasOlder: false, olderCursor: null, pinnedIds: new Set() };
+  logsOlderRows = [];
+  logsOlderInFlight = null;
+}
+
+/** The newest row the pane holds = the `since` position for a delta-cost
+ *  listLogs refresh (rows strictly newer than this are exactly the ones
+ *  the client cannot already have; the pinned tail copies and held pages
+ *  are older by construction, and the walk order is the shared
+ *  compareLogRowsDesc). Empty list -> no cursor -> chat.ts keeps the bare
+ *  full-frame request. */
+function heldLogsCursor(): LogListCursorWire | null {
+  let newest: LogInfo | null = null;
+  for (const r of logsAtom()) {
+    if (newest === null || compareLogRowsDesc(r, newest) < 0) newest = r;
+  }
+  return newest === null ? null : { lastActivityAt: newest.lastActivityAt, id: newest.id };
+}
+
+/** The cold list's ONE merge rule (every write to logsAtom walks it): a
+ *  re-shipped id REPLACES its held row in place -- the fresh copy owns it, ts
+ *  included -- and a genuinely-new row enters at its compareLogRowsDesc
+ *  position, never re-anchored at the head (a delta's `pinnedLogs` copy of an
+ *  old pinned tail row has no business above rows newer than it). Map insertion
+ *  order holds the slots, the stable sort re-derives every position from the
+ *  fresh data, and the result is total DESC -- the order the targeted demote
+ *  INSERT reads. The paging seam survives the re-sort because it is not an
+ *  index: logsOlderRows keeps the pages and olderCursor is a value
+ *  {lastActivityAt, id}, so a page still asks for rows strictly older than it. */
+function mergeLogRows(held: LogInfo[], incoming: LogInfo[]): LogInfo[] {
+  const byId = new Map(held.map((r) => [r.id, r]));
+  for (const r of incoming) byId.set(r.id, r);
+  return [...byId.values()].sort(compareLogRowsDesc);
+}
 const activeLogIdAtom = reactiveState<string | null>(null);
 const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
 
@@ -906,6 +964,7 @@ function handleAuthFailure(): void {
   if (messageListEl) messageListEl.innerHTML = "";
   sessionsAtom([]);
   logsAtom([]);
+  resetLogsOlderState();
   activeLogIdAtom(null);
   contextMenuAtom(null);
   // Pins are server truth rehydrated from list payloads: start the next
@@ -951,7 +1010,7 @@ function clearLogView(): void {
   // the re-attach re-attests everything.
   chat?.clearView();
   // Remove the active-log highlight.
-  chat?.listLogs();
+  chat?.listLogs(heldLogsCursor());
 }
 
 function onCloseLogView(): void {
@@ -1090,6 +1149,28 @@ function applyPinnedFlags(rows: Array<{ id: string; pinned?: boolean }>): void {
     else next.delete(row.id);
   }
   if (next.size !== current.size || [...next].some((id) => !current.has(id))) {
+    pinnedIdsAtom(next);
+  }
+}
+
+/** A LOGS_LISTED frame (full or delta) ships the COMPLETE cold-pin truth
+ *  (`pinnedLogs`), so a mark this frame cannot account for was unpinned
+ *  (here or in another tab) -- sweep ALL marks, not just the visible rows:
+ *  the row that lost its pin also left the head, and a mark left behind
+ *  would badge the row the next page ships. A row's own flag counts (the
+ *  head copy of an attested pin), and live ids never get swept -- their
+ *  marks ride the SESSIONS payload, which may land after this frame.
+ *  (The logPins push is the cheaper wholesale re-derive; this is the
+ *  base/delta-frame path over a partial row set.) */
+function sweepPinMarks(frameRows: LogInfo[], attestedColdPins: ReadonlySet<string>): void {
+  const liveIds = new Set(sessionsAtom().map((s) => s.id));
+  const attested = new Set(attestedColdPins);
+  for (const r of frameRows) if (r.pinned === true) attested.add(r.id);
+  const pinMarks = pinnedIdsAtom();
+  const stale = [...pinMarks].filter((id) => !attested.has(id) && !liveIds.has(id));
+  if (stale.length > 0) {
+    const next = new Set(pinMarks);
+    for (const id of stale) next.delete(id);
     pinnedIdsAtom(next);
   }
 }
@@ -1560,6 +1641,24 @@ const logsPanel = createPanelResize({
 
 function onToggleLogs(): void {
   logsPanel.toggle(); // persists and bumps the atom; the render does the rest
+}
+
+/** The RECENT LOGS pane scrolled: the cold list is DESCENDING, so its
+ *  BOTTOM edge is "older history". Near the bottom, with the seam open and
+ *  no page in flight, ship the ONE loadOlderLogs request the pane may have
+ *  (the correlated reply settles the slot; a refusal frees it and the next
+ *  bottom edge is the retry -- no invented retry loop). A closed seam is
+ *  silence: this pane has no "no more" or loading idiom, and inventing one
+ *  chrome line per collapsed list is out of scope. */
+function onLogsListScroll(): void {
+  const el = document.getElementById("log-list");
+  if (el === null || !logsListNearBottom(el)) return;
+  if (logsOlderInFlight !== null) return;
+  const cursor = logsOlderWindow.olderCursor;
+  if (!logsOlderWindow.hasOlder || cursor === null) return;
+  logsOlderReqSeq++;
+  logsOlderInFlight = logsOlderReqSeq;
+  chat?.loadOlderLogs(logsOlderReqSeq, cursor);
 }
 
 // ── Workbench pane (right dock) ─────────────────────────────────────────────
@@ -2520,14 +2619,100 @@ function startChat(): void {
       sessionsAtom(sessions);
       applyPinnedFlags(sessions);
     },
-    onLogsUpdate: (logs) => {
-      logsAtom(logs);
+    onLogsUpdate: (logs, win, delta) => {
+      // Both postures merge through mergeLogRows (head + pinnedLogs arrive
+      // deduped from chat.ts): re-shipped ids replace in place, genuinely-new
+      // rows -- head, pinnedLogs, or a delta's strictly-newer set -- enter at
+      // their comparator position. Rows the frame re-ships leave the held
+      // older pages (its copy owns them now) and a held row whose id is now
+      // LIVE drops outright (the server lists it under SESSIONS, not here).
+      const frameIds = new Set(logs.map((r) => r.id));
+      const liveIds = new Set(sessionsAtom().map((s) => s.id));
+      logsOlderRows = logsOlderRows.filter((r) => !frameIds.has(r.id) && !liveIds.has(r.id));
+      if (delta) {
+        // Delta frame (watermark-verified by chat.ts): rows strictly newer
+        // than the held cursor plus the COMPLETE pinnedLogs. The pane's paging
+        // seam is UNDISTURBED (delta frames ship no olderCursor/hasOlder by
+        // doctrine; logsOlderWindow and the in-flight page slot stand), and
+        // the merged re-sort cannot move it: the cursor is a value, not a slot.
+        logsAtom(mergeLogRows(logsAtom(), logs));
+        applyPinnedFlags(logs);
+        sweepPinMarks(logs, win.pinnedIds);
+        return;
+      }
+      // Full frame: the authoritative reset -- the frame's rows lead their
+      // comparator places, the pages it did not re-ship ride below.
+      logsAtom(mergeLogRows(logsOlderRows, logs));
       applyPinnedFlags(logs);
+      sweepPinMarks(logs, win.pinnedIds);
+      // The frame re-attests the seam and frees the in-flight slot (its
+      // broadcast or reply may have been the very page outstanding).
+      logsOlderWindow = win;
+      logsOlderInFlight = null;
+    },
+    onLogRowAdded: (row) => {
+      // Targeted demote (dismissSession): the same mergeLogRows rule -- via
+      // the shipped comparator (protocol.ts compareLogRowsDesc, the one
+      // definition both sides walk by) an idle session's old-ts row enters
+      // mid-list at its DESC position and a stale overlapping copy rides
+      // exactly once, the fresh copy winning. The pinned float above the day
+      // rows stays the renderer's job (sortPinned).
+      logsOlderRows = logsOlderRows.filter((r) => r.id !== row.id);
+      logsAtom(mergeLogRows(logsAtom(), [row]));
+      // A dismissed row KEEPS its pin (server-side truth): the fresh flag
+      // re-attests the mark the client-side sessionDeleted notice dropped.
+      if (row.pinned === true) applyPinnedFlags([row]);
+    },
+    onLogRowRemoved: (sessionId) => {
+      // Row left the cold list (Continue/adoption): prune the rendered list
+      // AND the held older pages. The paging seam stands untouched ON
+      // PURPOSE: olderCursor is value-based ({ lastActivityAt, id }, not an
+      // index), so a removed row -- even the row the cursor names, or one
+      // inside the held pages -- cannot strand the walk. The next page
+      // still asks for rows strictly older than the held value, and the
+      // total order keeps that walk free of skips and repeats.
+      logsAtom(logsAtom().filter((r) => r.id !== sessionId));
+      logsOlderRows = logsOlderRows.filter((r) => r.id !== sessionId);
+    },
+    onLogPins: (pinnedIds) => {
+      // The COMPLETE pin-store set (both sections): marks re-derive
+      // wholesale, so a mark whose row sits off-screen (held page, un-paged
+      // history) dies with the frame too -- the same sweep the base-frame
+      // path runs, with no row payload.
+      pinnedIdsAtom(new Set(pinnedIds));
+    },
+    onOlderLogs: (requestId, page) => {
+      // Correlated reply (the searchLogs doctrine): any other id is a
+      // stale frame from a superseded page request -- drop it.
+      if (requestId === undefined || requestId !== logsOlderInFlight) return;
+      logsOlderInFlight = null;
+      const rows = page.logs;
+      if (page.error !== undefined || !Array.isArray(rows)) {
+        // Honest refusal: nothing appended, the seam stands, the next
+        // bottom-edge scroll is the retry (no invented retry loop).
+        console.warn("[app] loadOlderLogs refused:", page.error ?? "malformed reply");
+        return;
+      }
+      const held = new Set(logsAtom().map((r) => r.id));
+      const fresh = rows.filter((r) => !held.has(r.id));
+      if (fresh.length > 0) {
+        logsOlderRows = [...logsOlderRows, ...fresh];
+        // Same merge rule as the frames: a page row lands at its comparator
+        // place, which is the tail unless a pinned tail row sits older still.
+        logsAtom(mergeLogRows(logsAtom(), fresh));
+      }
+      // The page re-attests the seam; pinnedIds keeps the base frame's
+      // attestation (pages carry no pins at all).
+      logsOlderWindow = {
+        ...logsOlderWindow,
+        hasOlder: page.hasOlder === true,
+        olderCursor: normalizeLogListCursor(page.olderCursor),
+      };
     },
     onLogViewed: (logId, entries) => {
       activeLogIdAtom(logId);
       // Re-render both lists so the active log is highlighted.
-      chat?.listLogs();
+      chat?.listLogs(heldLogsCursor());
       chat?.listSessions();
       const messageList = chat?.messageListAtom();
       if (messageList) {
@@ -2543,13 +2728,17 @@ function startChat(): void {
     },
     onLogDeleted: (logId) => {
       dropPinnedId(logId);
+      // A held older-page row for the dead log must not resurrect on the
+      // next base-frame merge (the server stopped listing it; only the
+      // client's page memory still has it).
+      logsOlderRows = logsOlderRows.filter((r) => r.id !== logId);
       if (activeLogIdAtom() === logId) {        // The viewed log died: restore the live transcript the same way
         // closing the log view does (re-attach replays it), so a deleted
         // log's entries can never sit on screen while live events
         // un-suppress beneath them.
         onCloseLogView();
       } else {
-        chat?.listLogs();
+        chat?.listLogs(heldLogsCursor());
       }
     },
     onSessionDeleted: (sessionId) => {
@@ -3474,6 +3663,7 @@ function App() {
           logsMin={LOGS_MIN_HEIGHT}
           logsMax={logsPanel.maxSize()}
           onToggleLogs={onToggleLogs}
+          onLogsScroll={onLogsListScroll}
           onLogsResizeStart={logsPanel.onPointerDown}
           onLogsResizeMove={logsPanel.onPointerMove}
           onLogsResizeEnd={logsPanel.onPointerUp}

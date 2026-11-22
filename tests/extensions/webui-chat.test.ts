@@ -250,8 +250,9 @@ describe("createChat.dismissSession", () => {
     const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
     chat.dismissSession("sid-7");
     // The dismiss frame is the only thing on the wire: the handler's
-    // SESSIONS/LOGS_LISTED broadcast is the sidebar reconcile, so unlike
-    // deleteSession no optimistic re-list rides out.
+    // SESSIONS broadcast + targeted logRowAdded push (server side) are the
+    // sidebar reconcile, so unlike deleteSession no optimistic re-list
+    // rides out.
     expect(ws.sent).toEqual([{ type: "dismissSession", sessionId: "sid-7" }]);
   });
 });

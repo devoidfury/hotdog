@@ -40,12 +40,14 @@ import {
   LOG_SOURCE,
   MAX_CONSECUTIVE_AUTO_RESUMES,
   collectDurabilityFacts,
+  deriveSessionListMetrics,
   epochEntries,
   readSessionEntries,
   searchableEntryText,
   sessionPath,
   sessionsDir,
   type LogEntry,
+  type SessionLogInfo,
 } from "./session-log.ts";
 
 export const SESSION_STATE = {
@@ -89,6 +91,17 @@ export interface SessionRow {
    * marker: a search only trusts it when the row is fresh for the file.
    */
   search_text: string | null;
+  /**
+   * Sidebar list columns (served by listSessionLogs): created_at /
+   * last_activity_at are the min/max entry ts over the FULL log (RESET
+   * included; the file mtime when the log attests no valid ts -- the
+   * freshness check pins that mtime), message_count the
+   * countSessionLogEntries sum. Null only on pre-column rows: stale-by-
+   * definition until the next reconcile/sync backfills them.
+   */
+  created_at: number | null;
+  last_activity_at: number | null;
+  message_count: number | null;
 }
 
 const SCHEMA = `
@@ -106,7 +119,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   model        TEXT,
   ctx_used     INTEGER,
   ctx_total    INTEGER,
-  search_text  TEXT
+  search_text  TEXT,
+  created_at   INTEGER,
+  last_activity_at INTEGER,
+  message_count INTEGER
 );
 CREATE TABLE IF NOT EXISTS open_calls (
   session_id   TEXT NOT NULL,
@@ -161,6 +177,18 @@ function openPrepared(path: string): Database {
     if (!cols.has("ctx_used")) next.exec("ALTER TABLE sessions ADD COLUMN ctx_used INTEGER");
     if (!cols.has("ctx_total")) next.exec("ALTER TABLE sessions ADD COLUMN ctx_total INTEGER");
     if (!cols.has("search_text")) next.exec("ALTER TABLE sessions ADD COLUMN search_text TEXT");
+    if (!cols.has("created_at")) next.exec("ALTER TABLE sessions ADD COLUMN created_at INTEGER");
+    if (!cols.has("last_activity_at")) next.exec("ALTER TABLE sessions ADD COLUMN last_activity_at INTEGER");
+    if (!cols.has("message_count")) next.exec("ALTER TABLE sessions ADD COLUMN message_count INTEGER");
+    // Covering index for the list path (getSessionListRow). SQLite spills
+    // the whole RECORD once any column overflows a page, and the list
+    // columns sit AFTER search_text in column order -- reading them from the
+    // row walks search_text's overflow chain. The index holds only the six
+    // small values, and the planner will not pick it unprompted for a PK
+    // seek, so the list query pins it with INDEXED BY.
+    next.exec(
+      "CREATE INDEX IF NOT EXISTS sessions_list ON sessions(session_id, size, mtime, created_at, last_activity_at, message_count)",
+    );
   } catch (err) {
     try { next.close(); } catch {}
     throw err;
@@ -633,12 +661,15 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
   // the undone text from the mirror (a stale hit for deleted history would be
   // worse than a re-read).
   const searchText = deriveSearchText(full);
+  // Sidebar list columns (see deriveSessionListMetrics): the list serves
+  // these instead of re-reading the log.
+  const listMetrics = deriveSessionListMetrics(full, st.mtimeMs);
 
   withIndex((d) => {
     const write = d.transaction(() => {
       d.run(
-        `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model, ctx_used, ctx_total, search_text)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model, ctx_used, ctx_total, search_text, created_at, last_activity_at, message_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET
          path = excluded.path,
          updated_at = excluded.updated_at,
@@ -652,7 +683,10 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
          model = COALESCE(sessions.model, excluded.model),
          ctx_used = excluded.ctx_used,
          ctx_total = excluded.ctx_total,
-         search_text = excluded.search_text`,
+         search_text = excluded.search_text,
+         created_at = excluded.created_at,
+         last_activity_at = excluded.last_activity_at,
+         message_count = excluded.message_count`,
         [
           sessionId,
           path,
@@ -668,6 +702,9 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
           ctx.ctxUsed,
           ctx.ctxTotal,
           searchText,
+          listMetrics.createdAt,
+          listMetrics.lastActivityAt,
+          listMetrics.messageCount,
         ],
       );
       d.run("DELETE FROM open_calls WHERE session_id = ?", [sessionId]);
@@ -692,6 +729,137 @@ export function getSessionRow(sessionId: string): SessionRow | null {
   );
 }
 
+/** List-path projection of a row: the freshness marker plus the list
+ *  columns, nothing else. A fat log's search_text spills the whole record
+ *  into overflow pages, so the list read rides the sessions_list covering
+ *  index and never enters that chain (see getSessionListRow). The full
+ *  SessionRow satisfies this shape structurally (reconcile passes it to the
+ *  helpers). */
+interface SessionListRow {
+  session_id: string;
+  size: number;
+  mtime: number;
+  created_at: number | null;
+  last_activity_at: number | null;
+  message_count: number | null;
+}
+
+/** Row read for the list path: only what needsListColumns, rowToListInfo,
+ *  and the size/mtime freshness check consume. Never search_text -- and via
+ *  the covering index, never its overflow chain either (see the sessions_list
+ *  note in openPrepared). A missing index throws into the list's per-file
+ *  catch, which rides the file fallback: correct, just slow. */
+function getSessionListRow(sessionId: string): SessionListRow | null {
+  return withIndex((d) =>
+    d.query<SessionListRow, [string]>(
+      "SELECT session_id, size, mtime, created_at, last_activity_at, message_count FROM sessions INDEXED BY sessions_list WHERE session_id = ?",
+    ).get(sessionId),
+  );
+}
+
+/** The cold-log row enrichment: the columns the sidebar row grammar
+ *  surfaces. Like SessionListRow this never touches search_text -- these six
+ *  all ride the record's local prefix ahead of the spill, so no index is
+ *  needed -- and search/view paths want the full row, keeping getSessionRow. */
+export interface SessionEnrichRow {
+  state: SessionState;
+  model: string | null;
+  profile: string | null;
+  title: string | null;
+  ctx_used: number | null;
+  ctx_total: number | null;
+}
+
+/** Enrichment read for the websocket row builders (coldLogRows). */
+export function getSessionEnrichRow(sessionId: string): SessionEnrichRow | null {
+  return withIndex((d) =>
+    d.query<SessionEnrichRow, [string]>(
+      "SELECT state, model, profile, title, ctx_used, ctx_total FROM sessions WHERE session_id = ?",
+    ).get(sessionId),
+  );
+}
+
+/**
+ * True when a row has NULL list columns (the ALTER added them empty and no
+ * sync has re-derived it since). Such a row is stale-by-definition even when
+ * size/mtime match the file: both the boot reconcile fast path and the list
+ * treat it as needing a resync, which backfills them (sync always writes all
+ * three columns concrete).
+ */
+function needsListColumns(row: Pick<SessionListRow, "created_at" | "last_activity_at" | "message_count">): boolean {
+  return row.created_at === null || row.last_activity_at === null || row.message_count === null;
+}
+
+/** A row's list columns as a sidebar record; null when it holds nothing
+ *  listable (no counted message). Requires a needsListColumns-free row. */
+function rowToListInfo(row: SessionListRow): SessionLogInfo | null {
+  if (row.message_count === null || row.message_count <= 0) return null;
+  if (row.created_at === null || row.last_activity_at === null) return null;
+  return {
+    id: row.session_id,
+    createdAt: row.created_at,
+    lastActivityAt: row.last_activity_at,
+    messageCount: row.message_count,
+  };
+}
+
+/**
+ * Fallback the list calls for one file it cannot answer from the index
+ * (missing/stale row, pre-list-columns row, unsafe id, unusable index).
+ * Read-only: row creation is reconcile's/commit points' job. Injectable so
+ * tests can pass a throwing scanner to prove the indexed path never reads a
+ * log body.
+ */
+export type SessionFileFallback = (dir: string, file: string) => Promise<SessionLogInfo | null>;
+
+/**
+ * The sidebar list served from the index: readdir + one slim row read plus a
+ * staleness stat per file, zero log-body reads for position-fresh rows --
+ * the slim read skips search_text, so even a fat log costs no more than the
+ * tiny ones. Membership stays disk-driven -- every .jsonl on disk
+ * is answered (indexed, or through `fallback`), never dropped because the
+ * index lacks it. Same sort and same messageCount>0 filter as the file
+ * scan; values come from the shared deriveSessionListMetrics rule.
+ */
+export async function listSessionLogsFromIndex(fallback: SessionFileFallback): Promise<SessionLogInfo[]> {
+  const dir = sessionsDir();
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch (err) {
+    // No sessions dir yet: empty list. Any other failure (ENOTDIR, EACCES)
+    // propagates for callers to surface.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+
+  const results: SessionLogInfo[] = [];
+  for (const file of files) {
+    if (!file.endsWith(".jsonl")) continue;
+    const sessionId = file.slice(0, -".jsonl".length);
+    let served = false;
+    try {
+      const st = statSync(join(dir, file));
+      const row = getSessionListRow(sessionId);
+      if (row && row.size === st.size && row.mtime === st.mtimeMs && !needsListColumns(row)) {
+        served = true; // the row answers for these exact bytes, empty included
+        const info = rowToListInfo(row);
+        if (info) results.push(info);
+      }
+    } catch {
+      // File vanished (skip) or the index is unavailable (BUSY/CANTOPEN):
+      // fall through to the fallback scan.
+    }
+    if (!served) {
+      const info = await fallback(dir, file);
+      if (info) results.push(info);
+    }
+  }
+
+  results.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  return results;
+}
+
 /** One search match: the fresh searchable text of a session plus the columns
  *  the sidebar row grammar needs. Snippet/match-count formatting is a display
  *  concern and stays with the caller. */
@@ -709,9 +877,9 @@ export interface SessionSearchMatch {
  * Full-text search over every session log (live + cold), newest-activity
  * first, using the disposable index as a text mirror:
  *
- *  - Enumeration is readdir + stat only (never a per-file read like
- *    listSessionLogs), so a session that has only exchanged user/assistant
- *    turns -- and so has no commit-point mirror row yet -- is still found.
+ *  - Enumeration is readdir + stat only (never a per-file log read), so a
+ *    session that has only exchanged user/assistant turns -- and so has no
+ *    commit-point mirror row yet -- is still found.
  *  - A row's `search_text` is trusted only when its size/mtime match the
  *    file (the same staleness marker the whole index uses). On any
  *    disagreement the log is re-read via syncSessionFromLog, which refreshes
@@ -795,9 +963,10 @@ export interface ReconcileStats {
 
 /**
  * Boot reconcile: readdir + stat only. A log is read only when its size or
- * mtime disagrees with the row's stored position (or `full` -- the --reindex
- * repair mode). Rows whose file vanished are quarantined: warned and dropped
- * (the file is the system of record; a row for a missing log is undeletable
+ * mtime disagrees with the row's stored position, the row has NULL list
+ * columns (the backfill read), or `full` -- the --reindex repair
+ * mode. Rows whose file vanished are quarantined: warned and dropped (the
+ * file is the system of record; a row for a missing log is undeletable
  * truth, and the warn is the audit trail).
  */
 export async function reconcileSessionIndex(
@@ -846,7 +1015,7 @@ export async function reconcileSessionIndex(
     // self-healing: recovery closes the handle, and a cached statement from
     // the dead connection would throw on its next use.
     const row = getSessionRow(sessionId);
-    if (!opts.full && row && row.size === st.size && row.mtime === st.mtimeMs) {
+    if (!opts.full && row && !needsListColumns(row) && row.size === st.size && row.mtime === st.mtimeMs) {
       stats.unchanged++;
       continue; // the stat-only fast path: fresh row, no read
     }

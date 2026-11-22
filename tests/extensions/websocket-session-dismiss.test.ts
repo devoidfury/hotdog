@@ -1,11 +1,13 @@
 // Dismissing an idle live webui session: same teardown as Delete (registry.
 // delete machinery) but the log FILE and the row's pin survive, and the id
 // demotes into the cold Recent Logs list on the wire immediately (the
-// requester gets SESSION_DELETED + refreshed SESSIONS/LOGS_LISTED broadcasts
-// like every other attached tab). Harness idioms follow
-// websocket-pin-store.test.ts (routeMessage over a real SessionRegistry,
-// temp HOTDOG_SESSIONS_DIR) and websocket-session-delete-tasks.test.ts
-// (createWsServer for the delegated-task interrupt leg).
+// requester gets SESSION_DELETED + a refreshed SESSIONS broadcast + ONE
+// targeted logRowAdded frame carrying the demoted row -- never a rebuilt
+// LOGS_LISTED window, in the requester's tab or any peer's). Harness
+// idioms follow websocket-pin-store.test.ts (routeMessage over a real
+// SessionRegistry, temp HOTDOG_SESSIONS_DIR) and
+// websocket-session-delete-tasks.test.ts (createWsServer for the
+// delegated-task interrupt leg).
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -15,6 +17,7 @@ import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
 import { createWsServer } from "@extensions/websocket/server.ts";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
+import { coldLogRows } from "@extensions/websocket/handlers-logs.ts";
 import { closePinStore, getPinnedIds, isPinned, setPinned } from "@extensions/websocket/pin-store.ts";
 import { closeSessionIndex, getSessionRow, syncSessionFromLog } from "@core/session/session-index.ts";
 import { TASK_STATUS } from "@core/session/task-types.ts";
@@ -80,6 +83,9 @@ function parseMessages(ws: { messages: string[] }): Array<Record<string, unknown
     .filter((m): m is Record<string, unknown> => m !== null);
 }
 
+/** Membership watermark shape (list-gen.ts: boot token + counter). */
+const GEN_RE = /^[\da-z]+-\d+$/;
+
 async function dismiss(
   registry: SessionRegistry,
   sessionId: unknown,
@@ -101,7 +107,7 @@ async function dismiss(
 }
 
 describe("dismissSession: demote an idle session to Recent Logs", () => {
-  it("removes the live row, keeps the log file, and re-lands the id via LOGS_LISTED in every tab", async () => {
+  it("removes the live row, keeps the log file, and re-lands the id via logRowAdded in every tab", async () => {
     const registry = makeRegistry(makeWsMockAgent({ sessionId: "dismiss-live" }));
     await registry.create({ profile: "manager" });
     writeLog("dismiss-live");
@@ -117,27 +123,37 @@ describe("dismissSession: demote an idle session to Recent Logs", () => {
     // The log survives (this is not Delete).
     expect(existsSync(join(TMP, "dismiss-live.jsonl"))).toBe(true);
     // Demotion on the wire, in order: the refreshed SESSIONS no longer lists
-    // the id, and the LOGS_LISTED payload carries it as a cold row.
+    // the id, and ONE targeted logRowAdded frame carries it as a cold row --
+    // with no full-payload LOGS_LISTED fanout anywhere on this route.
     const sessionsFrames = messages.filter((m) => m.type === S2C.SESSIONS);
     expect(sessionsFrames.length).toBeGreaterThan(0);
     const liveIds = (sessionsFrames[sessionsFrames.length - 1]!.sessions as Array<{ id: string }>).map((r) => r.id);
     expect(liveIds).not.toContain("dismiss-live");
-    const logsFrames = messages.filter((m) => m.type === S2C.LOGS_LISTED);
-    expect(logsFrames.length).toBeGreaterThan(0);
-    const cold = (logsFrames[logsFrames.length - 1]!.logs as Array<Record<string, unknown>>).find(
-      (l) => l.id === "dismiss-live",
-    );
-    expect(cold).toBeDefined();
-    expect(cold!.messageCount).toBe(1);
+    const addFrames = messages.filter((m) => m.type === S2C.LOG_ROW_ADDED);
+    expect(addFrames).toHaveLength(1);
+    const row = addFrames[0]!.row as Record<string, unknown>;
+    expect(row.id).toBe("dismiss-live");
+    expect(row.messageCount).toBe(1);
+    expect(addFrames[0]!.gen).toMatch(GEN_RE);
+    // Same enrichment grammar as the list itself: the pushed row is the
+    // coldLogRows single-row path's output for this id, byte-for-byte.
+    const built = (await coldLogRows(registry)).find((r) => r.id === "dismiss-live");
+    if (!built) throw new Error("coldLogRows built no row for dismiss-live");
+    expect(row).toEqual(built);
+    expect(messages.some((m) => m.type === S2C.LOGS_LISTED)).toBe(false);
     const deletedAt = messages.findIndex((m) => m.type === S2C.SESSION_DELETED);
-    const listedAt = messages.findIndex((m) => m.type === S2C.LOGS_LISTED);
-    expect(deletedAt).toBeLessThan(listedAt);
+    const addedAt = messages.findIndex((m) => m.type === S2C.LOG_ROW_ADDED);
+    expect(deletedAt).toBeLessThan(addedAt);
 
-    // The peer tab sees the same demotion without asking (broadcasts).
+    // The peer tab sees the same demotion without asking (broadcasts), and
+    // the same zero LOGS_LISTED guarantee holds there too.
     const peerMsgs = parseMessages(peer);
     expect(peerMsgs.some((m) => m.type === S2C.SESSION_DELETED && m.sessionId === "dismiss-live")).toBe(true);
-    const peerLogs = peerMsgs.filter((m) => m.type === S2C.LOGS_LISTED).pop()!;
-    expect((peerLogs.logs as Array<Record<string, unknown>>).some((l) => l.id === "dismiss-live")).toBe(true);
+    const peerAdds = peerMsgs.filter((m) => m.type === S2C.LOG_ROW_ADDED);
+    expect(peerAdds).toHaveLength(1);
+    expect((peerAdds[0]!.row as Record<string, unknown>).id).toBe("dismiss-live");
+    expect(peerAdds[0]!.gen).toMatch(GEN_RE);
+    expect(peerMsgs.some((m) => m.type === S2C.LOGS_LISTED)).toBe(false);
   });
 
   it("the pin on the dismissed id survives; Delete prunes it (the contrast)", async () => {
@@ -151,12 +167,12 @@ describe("dismissSession: demote an idle session to Recent Logs", () => {
     expect(isPinned("dismiss-pinned")).toBe(true);
     closePinStore();
     expect(getPinnedIds().has("dismiss-pinned")).toBe(true);
-    // The demoted cold row arrives already pin-marked.
-    const logsFrames = messages.filter((m) => m.type === S2C.LOGS_LISTED);
-    const cold = (logsFrames[logsFrames.length - 1]!.logs as Array<Record<string, unknown>>).find(
-      (l) => l.id === "dismiss-pinned",
-    );
-    expect(cold!.pinned).toBe(true);
+    // The demoted cold row arrives already pin-marked (the single-row push
+    // carries the per-row truth, same as a list frame would).
+    const addFrames = messages.filter((m) => m.type === S2C.LOG_ROW_ADDED);
+    const row = addFrames[addFrames.length - 1]!.row as Record<string, unknown>;
+    expect(row.id).toBe("dismiss-pinned");
+    expect(row.pinned).toBe(true);
 
     // Contrast: the sibling Delete prunes the same kind of pin.
     const reg2 = makeRegistry(makeWsMockAgent({ sessionId: "delete-pinned" }));
@@ -189,11 +205,10 @@ describe("dismissSession: demote an idle session to Recent Logs", () => {
     const rowAfter = getSessionRow("dismiss-indexed");
     expect(rowAfter).not.toBeNull();
     expect(rowAfter!.state).toBe(rowBefore!.state);
-    const logsFrames = messages.filter((m) => m.type === S2C.LOGS_LISTED);
-    const cold = (logsFrames[logsFrames.length - 1]!.logs as Array<Record<string, unknown>>).find(
-      (l) => l.id === "dismiss-indexed",
-    );
-    expect(cold!.state).toBe(rowBefore!.state);
+    const addFrames = messages.filter((m) => m.type === S2C.LOG_ROW_ADDED);
+    const row = addFrames[addFrames.length - 1]!.row as Record<string, unknown>;
+    expect(row.id).toBe("dismiss-indexed");
+    expect(row.state).toBe(rowBefore!.state);
   });
 
   it("malformed ids are dropped: no frames, no teardown", async () => {

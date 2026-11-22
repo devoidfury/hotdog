@@ -187,6 +187,11 @@ interface SidebarProps {
   onResizeReset: (e: MouseEvent) => void;
   /** The chevron at the right of the Recent Logs titlebar. */
   onToggleLogs: () => void;
+  /** The #log-list scroll edge: the app watches it for the BOTTOM (the list
+   *  is DESCENDING, so older history lives below the fold) and pages
+   *  loadOlderLogs from there. The geometry test is the pure
+   *  logsListNearBottom seam below; the handler just wires it. */
+  onLogsScroll?: (e: Event) => void;
   /** The same five gestures for the Recent Logs section, bound to its
    *  titlebar (drag anywhere on it but the collapse button; double-click
    *  resets the height; arrows resize it while it has keyboard focus). */
@@ -308,6 +313,24 @@ export function logSections(logs: LogInfo[], pinnedIds: Set<string>, now: number
 export function logsHeaderDate(logs: LogInfo[], pinnedIds: Set<string>, now: number): string | null {
   const first = sortPinned(logs, pinnedIds)[0];
   return first ? daySectionLabel(first.createdAt, now) : null;
+}
+
+/** Trigger band for the RECENT LOGS older-page request (the transcript
+ *  pane's TOP_TRIGGER_PX mirrored on the list's BOTTOM -- the cold list is
+ *  DESCENDING, so its "older" is the bottom edge). A list that does not
+ *  overflow its box never triggers: there is nothing below the fold. */
+export const LOGS_BOTTOM_TRIGGER_PX = 150;
+
+/** Pure geometry: is this scrollable element within LOGS_BOTTOM_TRIGGER_PX
+ *  of its bottom? Layout-free like clampMenuAnchor: it reads the scroll
+ *  metrics directly, so every direction stays testable without layout. */
+export function logsListNearBottom(el: {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+}): boolean {
+  if (el.scrollHeight <= el.clientHeight) return false;
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - LOGS_BOTTOM_TRIGGER_PX;
 }
 
 /**
@@ -753,7 +776,7 @@ export function Sidebar(p: SidebarProps) {
           />
         </button>
       </div>
-      <div id="log-list" role={p.logs.length > 0 ? "list" : undefined}>
+      <div id="log-list" role={p.logs.length > 0 ? "list" : undefined} onScroll={p.onLogsScroll}>
         {p.logs.length === 0 ? (
           <div
             className="log-empty"

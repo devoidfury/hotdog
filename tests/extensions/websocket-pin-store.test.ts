@@ -4,7 +4,8 @@
 // SESSIONS_DIR relocation repoints the store, an unwritable store home
 // fails loudly without crashing or leaving debris, delete handlers prune
 // pins, the pinned flag rides the SESSIONS and LOGS_LISTED wires, and a
-// setPinned broadcast reaches a second attached socket. Harness idioms
+// setPinned broadcast (SESSIONS + the complete-set logPins frame, no
+// LOGS_LISTED fanout) reaches a second attached socket. Harness idioms
 // follow websocket-sidebar-rows.test.ts.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -317,7 +318,7 @@ describe("pin store: wire surface", () => {
     registry.delete("pin-flag-holder");
   });
 
-  it("setPinned broadcasts SESSIONS + LOGS_LISTED to every attached socket", async () => {
+  it("setPinned broadcasts SESSIONS + logPins (no full-payload fanout) to every socket", async () => {
     const registry = makeRegistry(makeWsMockAgent({ sessionId: "pin-bcast-live" }));
     await registry.create({ profile: "manager" });
     writeColdLog("pin-bcast-cold");
@@ -337,17 +338,21 @@ describe("pin store: wire surface", () => {
     );
     await flush();
 
-    // The second tab's sidebar updates without asking: same refreshed
-    // payloads as the requesting socket got.
+    // The second tab's sidebar updates without asking: the live half rides
+    // SESSIONS, and the pin lands as a logPins frame -- the COMPLETE store
+    // set, marks re-derivable without any row payload. And crucially: zero
+    // LOGS_LISTED frames on either socket (a pin flip never rebuilds/fans
+    // the windowed payload).
     const bTypes = parseMessages(wsB);
     const sessionsMsg = bTypes.find((m) => m.type === S2C.SESSIONS)!;
     expect(sessionsMsg).toBeTruthy();
-    const logsMsg = bTypes.find((m) => m.type === S2C.LOGS_LISTED)!;
-    expect(logsMsg).toBeTruthy();
-    const cold = (logsMsg.logs as Array<Record<string, unknown>>).find((l) => l.id === "pin-bcast-cold")!;
-    expect(cold.pinned).toBe(true);
+    const pinsMsg = bTypes.find((m) => m.type === S2C.LOG_PINS)!;
+    expect(pinsMsg).toBeTruthy();
+    expect(pinsMsg.pinnedIds).toContain("pin-bcast-cold");
+    expect(parseMessages(wsA).some((m) => m.type === S2C.LOGS_LISTED)).toBe(false);
+    expect(bTypes.some((m) => m.type === S2C.LOGS_LISTED)).toBe(false);
 
-    // Unpin broadcast carries the flip back to false.
+    // Unpin broadcast drops the id from the complete set.
     await routeMessage(
       wsA,
       { type: C2S.SET_PINNED, sessionId: "pin-bcast-cold", pinned: false } as never,
@@ -357,9 +362,8 @@ describe("pin store: wire surface", () => {
       coreStub,
     );
     await flush();
-    const logsMsg2 = parseMessages(wsB).filter((m) => m.type === S2C.LOGS_LISTED).pop()!;
-    const cold2 = (logsMsg2.logs as Array<Record<string, unknown>>).find((l) => l.id === "pin-bcast-cold")!;
-    expect(cold2.pinned).toBe(false);
+    const pinsMsg2 = parseMessages(wsB).filter((m) => m.type === S2C.LOG_PINS).pop()!;
+    expect(pinsMsg2.pinnedIds).not.toContain("pin-bcast-cold");
 
     registry.unregisterConnection(wsA);
     registry.unregisterConnection(wsB);

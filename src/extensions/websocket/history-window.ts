@@ -39,6 +39,21 @@ export const HISTORY_WINDOW_MESSAGES = 5;
  *  carries an untrusted number; a huge page must not flood the socket. */
 export const MAX_HISTORY_PAGE_MESSAGES = 25;
 
+/** The cold RECENT LOGS list window, in ROWS (handlers-logs.ts
+ *  coldLogsPayload): every LOGS_LISTED frame ships the NEWEST head of the
+ *  filtered+sorted cold list (the list sorts DESCENDING by lastActivityAt,
+ *  the opposite direction of the transcript window above), and older
+ *  history pages in through C2S loadOlderLogs when the sidebar scrolls to
+ *  its bottom. A module constant, NOT a config key (same rule as
+ *  HISTORY_WINDOW_MESSAGES: one number, no speculative setting). */
+export const LOG_LIST_WINDOW = 50;
+
+/** Ceiling on a client-requested loadOlderLogs page size (rows). ONE
+ *  decided ceiling: 100 = two windows deep. The client pages at the window
+ *  size by default; the cap only bounds an untrusted `size` on the frame,
+ *  so a hostile request costs at most two pages of wire. */
+export const MAX_LOG_LIST_PAGE = 100;
+
 export interface HistoryPage {
   /** Inclusive start index within `entries` (the epoch view). */
   start: number;

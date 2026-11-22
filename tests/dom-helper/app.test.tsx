@@ -1569,6 +1569,643 @@ describe("Recent Logs section", () => {
   });
 });
 
+// ── RECENT LOGS lazy window (older pages on the bottom edge) ───────────────
+
+describe("Recent Logs lazy window: older pages on the bottom edge", () => {
+  const winRow = (id: string, ts: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    createdAt: ts,
+    lastActivityAt: ts,
+    messageCount: 1,
+    ...extra,
+  });
+  const logIds = (): string[] => els("#log-list .log-item").map((r) => r.getAttribute("data-sid") ?? "");
+  const setScroll = (scrollTop: number): void => {
+    const list = el("#log-list") as unknown as { scrollTop: number; clientHeight: number; scrollHeight: number };
+    list.scrollTop = scrollTop;
+    list.clientHeight = 240;
+    list.scrollHeight = 1000; // 150px band starts at scrollTop 610
+  };
+  const fireScroll = (): void => {
+    el("#log-list").dispatchEvent(new Event("scroll"));
+  };
+
+  async function baseFrame(): Promise<void> {
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [winRow("lw-1", 300), winRow("lw-2", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "lw-2" },
+      pinnedLogs: [winRow("lw-9", 50, { pinned: true })],
+    });
+    await tick();
+  }
+
+  it("the base frame renders head + pinnedLogs (deduped, pinned floats up)", async () => {
+    await attach();
+    await baseFrame();
+    expect(logIds()).toEqual(["lw-9", "lw-1", "lw-2"]);
+    // The pinned tail row carries the real pin mark and floats above the
+    // day rows (sortPinned): proof pinnedLogs merged into the list, not
+    // just rendered from a side channel.
+    const pinnedRow = els("#log-list .log-item").find((r) => r.getAttribute("data-sid") === "lw-9")!;
+    expect(pinnedRow.querySelector(".row-pin")).toBeTruthy();
+  });
+
+  it("mid-list scroll fires nothing; bottom edge fires ONE loadOlderLogs; a second edge while in flight is inert", async () => {
+    clearSent();
+    setScroll(0);
+    fireScroll();
+    expect(sent("loadOlderLogs")).toHaveLength(0);
+    setScroll(900);
+    fireScroll();
+    const reqs = sent<{ requestId: number; olderThan: unknown }>("loadOlderLogs");
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]!.olderThan).toEqual({ lastActivityAt: 200, id: "lw-2" });
+    fireScroll(); // in flight: the once-per-gap guard holds
+    expect(sent("loadOlderLogs")).toHaveLength(1);
+  });
+
+  it("a stale requestId drops; the matching page appends and dedupes; the cursor re-attests; a refusal frees the slot", async () => {
+    const rid = sent<{ requestId: number }>("loadOlderLogs")[0]!.requestId;
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: rid + 50, // a frame from a superseded request
+      logs: [winRow("lw-ghost", 99)],
+      hasOlder: true,
+    });
+    await tick();
+    expect(logIds()).not.toContain("lw-ghost");
+    fireScroll(); // still the same request in flight (stale reply changed nothing)
+    expect(sent("loadOlderLogs")).toHaveLength(1);
+
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: rid,
+      logs: [winRow("lw-3", 150), winRow("lw-1", 300)], // lw-1 repeats the head
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 150, id: "lw-3" },
+    });
+    await tick();
+    expect(logIds()).toEqual(["lw-9", "lw-1", "lw-2", "lw-3"]); // dup dropped, server order kept
+
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const req2 = sent<{ requestId: number; olderThan: unknown }>("loadOlderLogs")[0]!;
+    expect(req2.olderThan).toEqual({ lastActivityAt: 150, id: "lw-3" }); // the PAGE's cursor, not the base one
+    // Honest refusal: no rows, slot freed -- the next bottom edge retries.
+    ws.fireMessage({ type: "loadOlderLogsResult", requestId: req2.requestId, error: "boom" });
+    await tick();
+    expect(logIds()).toEqual(["lw-9", "lw-1", "lw-2", "lw-3"]);
+    fireScroll();
+    expect(sent("loadOlderLogs")).toHaveLength(2);
+    // Settle this one with a real last page (held rows: lw-3, lw-4).
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: sent<{ requestId: number }>("loadOlderLogs")[1]!.requestId,
+      logs: [winRow("lw-4", 100)],
+      hasOlder: false,
+    });
+    await tick();
+    expect(logIds()).toEqual(["lw-9", "lw-1", "lw-2", "lw-3", "lw-4"]);
+  });
+
+  it("the base frame reconciles the held pages: fresh copies win, LIVE ids drop, deleted ids never resurrect", async () => {
+    // lw-4 went LIVE (another tab hit Continue): the cold list must not
+    // keep its held page copy.
+    ws.fireMessage({
+      type: "sessions",
+      sessions: [sessionRow, { id: "lw-4", createdAt: 100, lastActivityAt: 100, connectedClients: 1 }],
+    });
+    await baseFrame();
+    expect(logIds()).toEqual(["lw-9", "lw-1", "lw-2", "lw-3"]); // live id gone, unpinned held row kept
+    ws.fireMessage({ type: "sessions", sessions: [sessionRow] });
+    // lw-3 (a held page row) dies: logDeleted prunes the hold, so the next
+    // base frame cannot resurrect it from memory.
+    clearSent();
+    ws.fireMessage({ type: "logDeleted", logId: "lw-3" });
+    await tick();
+    await baseFrame();
+    expect(logIds()).toEqual(["lw-9", "lw-1", "lw-2"]);
+    expect(sent("listLogs").length).toBeGreaterThan(0); // the existing refresh idiom still runs
+  });
+
+  it("a cold pin unpinned elsewhere loses its seat AND its mark: pinnedLogs is the complete attestation", async () => {
+    await baseFrame(); // pins lw-9 via pinnedLogs
+    expect(logIds()).toContain("lw-9");
+    // Another tab unpinned it: the frame ships no pinnedLogs and lw-9 sits
+    // past the head -- silence means gone: a windowed attestation carries no
+    // unpinned flag for rows it omits.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [winRow("lw-1", 300), winRow("lw-2", 200)],
+      hasOlder: false,
+    });
+    await tick();
+    expect(logIds()).not.toContain("lw-9");
+    // And the mark itself: ship the row back INSIDE the head unpinned -- a
+    // lingering pinnedIdsAtom entry would badge it and float it up.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [winRow("lw-1", 300), winRow("lw-9", 50, { pinned: false }), winRow("lw-2", 200)],
+      hasOlder: false,
+    });
+    await tick();
+    const row9 = els("#log-list .log-item").find((r) => r.getAttribute("data-sid") === "lw-9")!;
+    expect(row9).toBeTruthy();
+    expect(row9.querySelector(".row-pin")).toBeNull();
+  });
+
+  it("an unattested mark dies while its row is OFF-screen, so a later page row rides plain", async () => {
+    await baseFrame(); // lw-9 pinned via pinnedLogs; cursor at lw-2
+    expect(logIds()).toContain("lw-9");
+    // Unpinned elsewhere: the frame neither ships lw-9 nor attests it, and
+    // the row is gone from the list -- a sweep over VISIBLE rows would leave
+    // the mark orphaned, so the sweep runs over all marks.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [winRow("lw-1", 300), winRow("lw-2", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "lw-2" },
+    });
+    await tick();
+    expect(logIds()).not.toContain("lw-9");
+    // The page now ships lw-9 unpinned (its ts sits below the cursor): plain
+    // row at the tail, no badge, no float above the day rows.
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const rid = sent<{ requestId: number }>("loadOlderLogs")[0]!.requestId;
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: rid,
+      logs: [winRow("lw-9", 50, { pinned: false })],
+      hasOlder: false,
+    });
+    await tick();
+    const ids = logIds();
+    expect(ids[0]).not.toBe("lw-9");
+    const row9 = els("#log-list .log-item").find((r) => r.getAttribute("data-sid") === "lw-9")!;
+    expect(row9).toBeTruthy();
+    expect(row9.querySelector(".row-pin")).toBeNull();
+    ws.fireMessage({ type: "logDeleted", logId: "lw-9" }); // clear the held row for the suites below
+    await tick();
+  });
+
+  it("an older page lands at its comparator place, not the tail: an older pinned row keeps its seat", async () => {
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [winRow("lp-1", 300)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 300, id: "lp-1" },
+      pinnedLogs: [winRow("lp-p", 170, { pinned: true })],
+    });
+    await tick();
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const rid = sent<{ requestId: number }>("loadOlderLogs")[0]!.requestId;
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: rid,
+      logs: [winRow("lp-2", 200), winRow("lp-3", 150)],
+      hasOlder: false,
+    });
+    await tick();
+    expect(logIds()).toEqual(["lp-p", "lp-1", "lp-2", "lp-3"]); // the float hides the merge
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    await tick();
+    // Raw order: the page row NEWER than the pinned row slots above its seat;
+    // a tail append (or a head re-anchor) buries it under rows older still.
+    expect(logIds()).toEqual(["lp-1", "lp-2", "lp-p", "lp-3"]);
+    // No held rows leak into the suites below.
+    ws.fireMessage({ type: "logDeleted", logId: "lp-2" });
+    ws.fireMessage({ type: "logDeleted", logId: "lp-3" });
+    await tick();
+  });
+
+  it("a search hit OUTSIDE the window still opens (viewLog by id); the absent row no-ops and focus falls to the chip", async () => {
+    clearSent();
+    el("#search-btn").click();
+    await tick();
+    const input = el("#search-input");
+    (input as unknown as { value: string }).value = "needle";
+    input.dispatchEvent({ type: "input", currentTarget: input } as unknown as Event);
+    await sleep(300); // the search debounce
+    const [req] = sent<{ requestId: number }>("searchLogs");
+    ws.fireMessage({
+      type: "searchResults",
+      requestId: req!.requestId,
+      query: "needle",
+      results: [{ logId: "lw-remote", lastActivityAt: 2, matchCount: 1, live: false, snippets: ["a needle line"] }],
+    });
+    await tick();
+    el(".search-hit").click();
+    await tick();
+    // The read opens regardless of the window (the list hides, the log
+    // stays addressable), and the missing sidebar row is a silent no-op
+    // (scrollHitIntoView) -- focus falls back to the chip, nothing throws.
+    expect(sent<{ logId: string }>("viewLog").some((m) => m.logId === "lw-remote")).toBe(true);
+    expect(document.activeElement).toBe(el("#search-btn") as unknown as Element);
+    expect(logIds()).not.toContain("lw-remote");
+
+    // Leave the lists as the suites below expect.
+    ws.fireMessage({ type: "logDeleted", logId: "lw-9" }); // drops its pin mark too
+    await tick();
+    ws.fireMessage({ type: "logsListed", logs: [logRow] });
+    await tick();
+    expect(logIds()).toEqual([L1]);
+  });
+});
+
+// ── RECENT LOGS delta refreshes: gen watermark + targeted pushes ────────────
+// The server posts two LOGS_LISTED postures (full / full:false) stamped with
+// a "<boot>-<counter>" membership gen, plus the targeted logRowAdded /
+// logRowRemoved pushes (+1 each) and the complete-set logPins frame. This
+// section pins the client half: the watermark-gated delta PREPEND (seam held
+// intact), the traceable full re-attest on a mismatch (exactly ONE bare
+// listLogs, no `since`), the mid-list insert of an old-ts demote, the
+// prune-through-held-pages with the value-based seam still walking, and the
+// wholesale pin re-derive (off-screen marks included). Every delta posture
+// also fires WITH the complete pinnedLogs: a re-shipped pinned row replaces
+// its held row IN PLACE and never re-anchors at the head, because the merged
+// total DESC order is what the mid-list INSERT reads. The pinned float hides
+// that order in the render, so the raw-order assertions lift the mark with an
+// empty logPins frame first.
+
+describe("Recent Logs delta refreshes: gen watermark and targeted pushes", () => {
+  const dRow = (id: string, ts: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    createdAt: ts,
+    lastActivityAt: ts,
+    messageCount: 1,
+    ...extra,
+  });
+  const logIds = (): string[] => els("#log-list .log-item").map((r) => r.getAttribute("data-sid") ?? "");
+  const setScroll = (scrollTop: number): void => {
+    const list = el("#log-list") as unknown as { scrollTop: number; clientHeight: number; scrollHeight: number };
+    list.scrollTop = scrollTop;
+    list.clientHeight = 240;
+    list.scrollHeight = 1000; // 150px band starts at scrollTop 610
+  };
+  const fireScroll = (): void => {
+    el("#log-list").dispatchEvent(new Event("scroll"));
+  };
+
+  it("a delta PREPENDS with the seam held; a gen mismatch re-attests full, exactly once", async () => {
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("dl-1", 300), dRow("dl-2", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "dl-2" },
+      gen: "b-1",
+    });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-2"]);
+
+    // Delta (gen continues at +0): strictly-newer rows PREPEND; the held
+    // paging seam is untouched (the frame ships none) -- proof: the bottom
+    // edge still pages from the BASE frame's cursor.
+    ws.fireMessage({ type: "logsListed", full: false, logs: [dRow("dl-3", 400)], gen: "b-1" });
+    await tick();
+    expect(logIds()).toEqual(["dl-3", "dl-1", "dl-2"]);
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const reqs = sent<{ requestId: number; olderThan: unknown }>("loadOlderLogs");
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]!.olderThan).toEqual({ lastActivityAt: 200, id: "dl-2" });
+    ws.fireMessage({ type: "loadOlderLogsResult", requestId: reqs[0]!.requestId, logs: [], hasOlder: false });
+    await tick();
+
+    // Mismatched delta (gen jumped): dropped -- and it triggers ONE bare
+    // listLogs (no `since`): the traceable re-attest.
+    clearSent();
+    ws.fireMessage({ type: "logsListed", full: false, logs: [dRow("dl-4", 500)], gen: "b-9" });
+    await tick();
+    expect(logIds()).not.toContain("dl-4");
+    let bare = sent("listLogs");
+    expect(bare).toHaveLength(1);
+    expect(bare[0]).toEqual({ type: "listLogs" }); // no since: full frame demanded
+    // A second mismatch while the re-attest is pending does NOT spam.
+    ws.fireMessage({ type: "logRowAdded", row: dRow("dl-5", 600), gen: "b-9" });
+    await tick();
+    expect(sent("listLogs")).toHaveLength(1);
+    expect(logIds()).not.toContain("dl-5");
+
+    // The full frame settles it (watermark adopted, pending freed), and a
+    // later delta continues from the new gen.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("dl-4", 500), dRow("dl-3", 400), dRow("dl-1", 300), dRow("dl-2", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "dl-2" },
+      gen: "b-9",
+    });
+    await tick();
+    expect(logIds()).toEqual(["dl-4", "dl-3", "dl-1", "dl-2"]);
+    ws.fireMessage({ type: "logsListed", full: false, logs: [dRow("dl-6", 700)], gen: "b-9" });
+    await tick();
+    expect(logIds()).toEqual(["dl-6", "dl-4", "dl-3", "dl-1", "dl-2"]);
+
+    // With a held watermark the app's refresh idiom carries `since` (the
+    // newest held row) -- delta cost on a quiet store.
+    clearSent();
+    ws.fireMessage({ type: "logDeleted", logId: "dl-gone" });
+    await tick();
+    const refresh = sent<{ type: string; since?: unknown }>("listLogs");
+    expect(refresh).toHaveLength(1);
+    expect(refresh[0]!.since).toEqual({ lastActivityAt: 700, id: "dl-6" });
+  });
+
+  it("a delta re-shipping an OLDER pinned tail row keeps the merged list total DESC; the next push inserts mid-list", async () => {
+    // Base [a(300), b(200)] with a pinned tail p(50): a pin below the head is
+    // what pins are for, and the delta contract ships EVERY pinned cold row
+    // with every frame, older-than-cursor included.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("jd-a", 300), dRow("jd-b", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "jd-b" },
+      pinnedLogs: [dRow("jd-p", 50, { pinned: true })],
+      gen: "jd-1",
+    });
+    await tick();
+    expect(logIds()).toEqual(["jd-p", "jd-a", "jd-b"]); // the float, not the merge order
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [dRow("jd-d", 400)],
+      pinnedLogs: [dRow("jd-p", 50, { pinned: true })],
+      gen: "jd-1",
+    });
+    await tick();
+    expect(logIds()).toEqual(["jd-p", "jd-d", "jd-a", "jd-b"]);
+    // The merged order the push walks, stated raw: lift the mark and the rows
+    // read the comparator's order -- d, a, b, p, never d, p, a, b.
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    await tick();
+    expect(logIds()).toEqual(["jd-d", "jd-a", "jd-b", "jd-p"]);
+    // The targeted demote on top of that list: r(250) INSERTS between
+    // a(300) and b(200) -- the insert walks the merged comparator order,
+    // so the pinned float above must not pull it to the head.
+    ws.fireMessage({ type: "logPins", pinnedIds: ["jd-p"] });
+    ws.fireMessage({ type: "logRowAdded", row: dRow("jd-r", 250), gen: "jd-2" });
+    await tick();
+    expect(logIds()).toEqual(["jd-p", "jd-d", "jd-a", "jd-r", "jd-b"]);
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    await tick();
+    expect(logIds()).toEqual(["jd-d", "jd-a", "jd-r", "jd-b", "jd-p"]);
+  });
+
+  it("a re-shipped held row replaces IN PLACE: one slot, the fresh copy's data and position", async () => {
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("jp-a", 300), dRow("jp-b", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "jp-b" },
+      pinnedLogs: [dRow("jp-p", 50, { pinned: true })],
+      gen: "jp-1",
+    });
+    await tick();
+    // A ZERO-row delta (the quiet refresh a log view sends when nothing is
+    // newer) still carries the complete pinnedLogs -- and p's attested ts has
+    // moved to 250, so the position re-derives from the fresh data.
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [],
+      pinnedLogs: [dRow("jp-p", 250, { pinned: true, messageCount: 7 })],
+      gen: "jp-1",
+    });
+    await tick();
+    expect(logIds().filter((id) => id === "jp-p")).toHaveLength(1); // re-attested, never duplicated
+    const rowP = els("#log-list .log-item").find((r) => r.getAttribute("data-sid") === "jp-p")!;
+    expect(rowP.querySelector(".row-metric")!.textContent).toBe("7 msgs"); // the fresh copy won
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    await tick();
+    expect(logIds()).toEqual(["jp-a", "jp-p", "jp-b"]); // its seat came from the fresh ts
+  });
+
+  it("every delta posture with the complete pinnedLogs: prepend, whole-frame drop, settle, quiet re-attest", async () => {
+    // Head + pinned tail + a HELD page: the pin's seat sits below the seam,
+    // exactly where a real old pin lives.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("jq-1", 300), dRow("jq-2", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "jq-2" },
+      pinnedLogs: [dRow("jq-p", 50, { pinned: true })],
+      gen: "q-1",
+    });
+    await tick();
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const rid = sent<{ requestId: number }>("loadOlderLogs")[0]!.requestId;
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: rid,
+      logs: [dRow("jq-old", 120)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 120, id: "jq-old" },
+    });
+    await tick();
+    expect(logIds()).toEqual(["jq-p", "jq-1", "jq-2", "jq-old"]);
+    // (1) strictly-newer delta WITH pinnedLogs: prepend; the pin keeps its
+    // tail seat and the value-based seam still walks from the held page.
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [dRow("jq-new", 400)],
+      pinnedLogs: [dRow("jq-p", 50, { pinned: true })],
+      gen: "q-1",
+    });
+    await tick();
+    expect(logIds()).toEqual(["jq-p", "jq-new", "jq-1", "jq-2", "jq-old"]);
+    // Raw order (the float hides the pin's seat): the re-shipped copy stayed
+    // at the tail instead of re-anchoring behind the new head.
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    await tick();
+    expect(logIds()).toEqual(["jq-new", "jq-1", "jq-2", "jq-old", "jq-p"]);
+    ws.fireMessage({ type: "logPins", pinnedIds: ["jq-p"] });
+    await tick();
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    expect(sent<{ olderThan: unknown }>("loadOlderLogs")[0]!.olderThan).toEqual({ lastActivityAt: 120, id: "jq-old" });
+    // (2) mismatched delta WITH pinnedLogs: dropped WHOLE -- no row, no pin
+    // copy -- and exactly one bare re-attest.
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [dRow("jq-ghost", 500)],
+      pinnedLogs: [dRow("jq-ghostpin", 60, { pinned: true })],
+      gen: "q-7",
+    });
+    await tick();
+    expect(logIds()).not.toContain("jq-ghost");
+    expect(logIds()).not.toContain("jq-ghostpin");
+    expect(sent("listLogs")).toHaveLength(1);
+    expect(sent("listLogs")[0]).toEqual({ type: "listLogs" });
+    // (3) the settling full frame re-ships the pin: seat holds, held page rides
+    // below, the frame re-attests the seam.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("jq-new", 400), dRow("jq-1", 300), dRow("jq-2", 200)],
+      pinnedLogs: [dRow("jq-p", 50, { pinned: true })],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "jq-2" },
+      gen: "q-7",
+    });
+    await tick();
+    expect(logIds()).toEqual(["jq-p", "jq-new", "jq-1", "jq-2", "jq-old"]);
+    // (4) quiet zero-row delta WITH pinnedLogs: nothing moves -- raw order
+    // included, not just the floated render -- and no request.
+    clearSent();
+    ws.fireMessage({
+      type: "logsListed",
+      full: false,
+      logs: [],
+      pinnedLogs: [dRow("jq-p", 50, { pinned: true })],
+      gen: "q-7",
+    });
+    await tick();
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    await tick();
+    expect(logIds()).toEqual(["jq-new", "jq-1", "jq-2", "jq-old", "jq-p"]);
+    expect(sent("listLogs")).toHaveLength(0);
+    // The held page must not leak into the suites below.
+    ws.fireMessage({ type: "logDeleted", logId: "jq-old" });
+    await tick();
+  });
+
+  it("logRowAdded INSERTS by the DESC comparator (mid-list), dedupes re-adds, floats a pinned demote", async () => {
+    ws.fireMessage({ type: "logsListed", logs: [dRow("dl-1", 300), dRow("dl-2", 200)], hasOlder: false, gen: "m-1" });
+    await tick();
+    // An old-ts demote lands between the 300 and the 200 row -- not at the
+    // head, not at the tail.
+    ws.fireMessage({ type: "logRowAdded", row: dRow("dl-mid", 250), gen: "m-2" });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-mid", "dl-2"]);
+    // Re-added after a stale overlap: the fresh copy wins and the row rides
+    // exactly once.
+    ws.fireMessage({ type: "logRowAdded", row: dRow("dl-mid", 250, { messageCount: 2 }), gen: "m-3" });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-mid", "dl-2"]);
+    // A dismissed row keeps its pin: the fresh flag re-attests the mark the
+    // sessionDeleted notice dropped, and it floats above the day rows.
+    ws.fireMessage({ type: "logRowAdded", row: dRow("dl-pin", 10, { pinned: true }), gen: "m-4" });
+    await tick();
+    expect(logIds()).toEqual(["dl-pin", "dl-1", "dl-mid", "dl-2"]);
+    const pinnedRow = els("#log-list .log-item").find((r) => r.getAttribute("data-sid") === "dl-pin")!;
+    expect(pinnedRow.querySelector(".row-pin")).toBeTruthy();
+  });
+
+  it("logRowRemoved prunes the list AND held pages; the value-based seam keeps walking", async () => {
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("dl-1", 300), dRow("dl-2", 200)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 200, id: "dl-2" },
+      gen: "r-1",
+    });
+    await tick();
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const rid = sent<{ requestId: number }>("loadOlderLogs")[0]!.requestId;
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: rid,
+      logs: [dRow("dl-a", 150), dRow("dl-b", 100)],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 100, id: "dl-b" },
+    });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-2", "dl-a", "dl-b"]);
+    // Removal inside the HELD pages: the row is gone from the render, and
+    // the held copy cannot resurrect it on the next base frame.
+    ws.fireMessage({ type: "logRowRemoved", sessionId: "dl-a", gen: "r-2" });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-2", "dl-b"]);
+    // Seam untouched by the removal: the bottom edge still pages from the
+    // held VALUE cursor.
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const reqs = sent<{ requestId: number; olderThan: unknown }>("loadOlderLogs");
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]!.olderThan).toEqual({ lastActivityAt: 100, id: "dl-b" });
+    // Even removing the row the cursor NAMES cannot strand the walk: the
+    // cursor is a value, not an index -- the in-flight page still lands.
+    ws.fireMessage({ type: "logRowRemoved", sessionId: "dl-b", gen: "r-3" });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-2"]);
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: reqs[0]!.requestId,
+      logs: [dRow("dl-c", 50)],
+      hasOlder: false,
+    });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-2", "dl-c"]);
+    // Clean the held row out for the suites below.
+    ws.fireMessage({ type: "logRowRemoved", sessionId: "dl-c", gen: "r-4" });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-2"]);
+  });
+
+  it("the logPins frame re-derives marks WHOLESALE, off-screen ids included", async () => {
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [dRow("dl-1", 300)],
+      pinnedLogs: [dRow("dl-pin9", 50, { pinned: true })],
+      hasOlder: true,
+      olderCursor: { lastActivityAt: 300, id: "dl-1" },
+      gen: "p-1",
+    });
+    await tick();
+    expect(logIds()).toEqual(["dl-pin9", "dl-1"]);
+    // Unpinned elsewhere: the complete set drops the id, so the mark dies
+    // -- the row keeps its seat (rows are not the pins frame's business),
+    // plain and un-floated.
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-pin9"]);
+    const demoted = els("#log-list .log-item").find((r) => r.getAttribute("data-sid") === "dl-pin9")!;
+    expect(demoted.querySelector(".row-pin")).toBeNull();
+    // Pinned elsewhere an id this tab does NOT hold: no row to mark yet,
+    // but the mark set gains it -- when a later page ships the row, it
+    // floats and badges from the mark, not from the page frame.
+    ws.fireMessage({ type: "logPins", pinnedIds: ["dl-off9"] });
+    await tick();
+    expect(logIds()).toEqual(["dl-1", "dl-pin9"]);
+    clearSent();
+    setScroll(900);
+    fireScroll();
+    const rid = sent<{ requestId: number }>("loadOlderLogs")[0]!.requestId;
+    ws.fireMessage({
+      type: "loadOlderLogsResult",
+      requestId: rid,
+      logs: [dRow("dl-off9", 50)],
+      hasOlder: false,
+    });
+    await tick();
+    expect(logIds()).toEqual(["dl-off9", "dl-1", "dl-pin9"]);
+    const offRow = els("#log-list .log-item").find((r) => r.getAttribute("data-sid") === "dl-off9")!;
+    expect(offRow.querySelector(".row-pin")).toBeTruthy();
+    // Leave the lists as the suites below expect.
+    ws.fireMessage({ type: "logPins", pinnedIds: [] });
+    ws.fireMessage({ type: "logDeleted", logId: "dl-off9" }); // drops the held copy too
+    await tick();
+    ws.fireMessage({ type: "logsListed", logs: [logRow] });
+    await tick();
+    expect(logIds()).toEqual([L1]);
+  });
+});
+
 // ── Context menus ───────────────────────────────────────────────────────────
 
 describe("context menus", () => {
@@ -3426,7 +4063,14 @@ const LV_SID = "s-live-0001";
 const LV_L1 = "l-log-0001";
 const LV_L2 = "l-log-0002";
 
-const lvLogRow = (id: string) => ({ id, createdAt: 1, lastActivityAt: 2, messageCount: 5 });
+// Distinct lastActivityAt (LV_L1 newest): a LOGS_LISTED head arrives in the
+// shipped DESC order, and the tests below read a row's identity off its index.
+const lvLogRow = (id: string, lastActivityAt = id === LV_L1 ? 3 : 2) => ({
+  id,
+  createdAt: 1,
+  lastActivityAt,
+  messageCount: 5,
+});
 const lvSessionRow = {
   id: LV_SID,
   profile: "manager",

@@ -17,6 +17,7 @@ import type { Agent } from "@core/agent.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
 import { S2C, wireImageStubs } from "./protocol.ts";
+import { bumpListMembership } from "./list-gen.ts";
 import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { replayLogSlice, replayPendingQuestion } from "./replay.ts";
@@ -259,6 +260,17 @@ export async function attachResumedSession(
     auto,
     fullEntries,
   );
+  if (adopted) {
+    // Row vanish: the cold row left Recent Logs the moment the log became
+    // a live session (Continue or reconnect-adoption). Targeted removal +
+    // one watermark bump instead of a list rebuild -- EVERY tab including
+    // this socket (its own sidebar held the row; the prune is idempotent
+    // where none was held, e.g. a worker log no list ever showed). Lands
+    // right at the fact, BEFORE the replay burst (and survives an attach
+    // that later rejects: the session IS live either way).
+    const rowGen = bumpListMembership();
+    registry.broadcast({ type: S2C.LOG_ROW_REMOVED, sessionId, gen: rowGen });
+  }
   // Replay the PRE-adoption full log: the log now also holds the adoption's
   // session_start/resume_attempt records (bookkeeping, never sent), and the
   // client's cursor indexes the pre-adoption positions.
@@ -282,7 +294,9 @@ export async function attachResumedSession(
     // Logs as a SIDEBAR REFRESH, not a sessionCreated -- that event is an
     // attach command on the client (re-targets the socket, clears the
     // transcript), so broadcasting it would yank tabs working on other
-    // sessions. The adopting socket is excluded (it refreshed itself).
+    // sessions. The adopting socket is excluded (it refreshed itself). The
+    // cold row's own removal (logRowRemoved) already landed at the
+    // adoption fact above.
     registry.broadcastExcept(ws, { type: S2C.SESSIONS, sessions: registry.list() });
   }
 

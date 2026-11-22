@@ -26,6 +26,7 @@ import {
   formatDateTime,
   logSections,
   logsHeaderDate,
+  logsListNearBottom,
   scrollHitIntoView,
   sortPinned,
   PINNED_LOGS_LABEL,
@@ -1277,6 +1278,36 @@ describe("scrollHitIntoView", () => {
     const root = render({ sessions: [liveSession()] });
     expect(() => scrollHitIntoView(root, true, "gone")).not.toThrow();
     expect(() => scrollHitIntoView(root, false, "gone")).not.toThrow();
+  });
+});
+
+// ── RECENT LOGS older-page scroll edge ──────────────────────────────────────
+
+describe("logsListNearBottom", () => {
+  // Pure geometry (same seam philosophy as clampMenuAnchor): the app's
+  // trigger fires loadOlderLogs when this says true, so every direction is
+  // pinned here -- the cold list is DESCENDING, so its "older" is the
+  // BOTTOM edge (mirrors the transcript pane's TOP_TRIGGER_PX).
+  const geo = (scrollTop: number, clientHeight: number, scrollHeight: number) => ({
+    scrollTop,
+    clientHeight,
+    scrollHeight,
+  });
+
+  it("fires inside the 150px bottom band and exactly at its edge", () => {
+    expect(logsListNearBottom(geo(760, 240, 1000))).toBe(true); // at the bottom
+    expect(logsListNearBottom(geo(610, 240, 1000))).toBe(true); // the exact edge
+    expect(logsListNearBottom(geo(700, 240, 1000))).toBe(true); // inside the band
+  });
+
+  it("stays false mid-list: no page request while rows remain unseen above", () => {
+    expect(logsListNearBottom(geo(600, 240, 1000))).toBe(false);
+    expect(logsListNearBottom(geo(0, 240, 1000))).toBe(false);
+  });
+
+  it("a list that does not overflow its box never fires (nothing below the fold)", () => {
+    expect(logsListNearBottom(geo(0, 240, 240))).toBe(false);
+    expect(logsListNearBottom(geo(0, 240, 120))).toBe(false);
   });
 });
 

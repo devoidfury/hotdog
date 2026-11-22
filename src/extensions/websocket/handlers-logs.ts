@@ -1,7 +1,7 @@
 // Cold session log frames: list, load (resume), view, delete.
 
 import { access } from "node:fs/promises";
-import { getSessionRow, searchSessionCorpora } from "@core/session/session-index.ts";
+import { getSessionEnrichRow, searchSessionCorpora } from "@core/session/session-index.ts";
 import { deleteSessionLog, listSessionLogs, readSessionEntries, trySessionPath } from "@core/session/session-log.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
@@ -10,12 +10,21 @@ import {
   errorFrame,
   wireImages,
   wireImageStubs,
+  compareLogRowsDesc,
   MAX_SEARCH_HITS,
   MAX_SEARCH_SNIPPETS_PER_LOG,
   SEARCH_SNIPPET_CONTEXT,
+  type LogListCursorWire,
   type SearchHitWire,
 } from "./protocol.ts";
-import { HISTORY_WINDOW_MESSAGES, MAX_HISTORY_PAGE_MESSAGES, windowOlderThan } from "./history-window.ts";
+import { bumpListMembership, listGen } from "./list-gen.ts";
+import {
+  HISTORY_WINDOW_MESSAGES,
+  MAX_HISTORY_PAGE_MESSAGES,
+  LOG_LIST_WINDOW,
+  MAX_LOG_LIST_PAGE,
+  windowOlderThan,
+} from "./history-window.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { registryArgDisplay, registryDisplay, registryHeaderKeys } from "./replay.ts";
 import { taskLineageWire, wireToolDisplay } from "./wire-messages.ts";
@@ -29,10 +38,16 @@ import { dropPinned, getPinnedIds, isPinned } from "./pin-store.ts";
 import { epochStartIndex } from "@core/session/session-log.ts";
 import type { RouteContext } from "./route-types.ts";
 
-/** Build the LOGS_LISTED payload: cold logs only (live ids filtered out),
- *  enriched with the index row, the absolute log path, and the server-side
- *  pin flag. Shared between the listLogs reply and the setPinned sidebar
- *  broadcast so both wires speak the exact same grammar.
+/** Build the full filtered+enriched cold-log row list, DESCENDING by
+ *  lastActivityAt (id DESC as the tie-break; see compareLogRowsDesc): the
+ *  cold logs only (live and worker ids filtered out), enriched with the
+ *  index row, the absolute log path, and the server-side pin flag.
+ *  coldLogsPayload cuts its window from this; handleLoadOlderLogs re-runs
+ *  the SAME builder, so the live/worker exclusion and the enrichment
+ *  grammar are re-applied upstream of every page cut.
+ *  `onlyId` is the SINGLE-ROW path (the dismissSession demote push): the
+ *  identical pipeline restricted to one log id -- same exclusions, same
+ *  enrichment, one implementation. A vanished id yields no row.
  *
  *  Additive nested lineage: a cold manager row whose delegations the restart
  *  sidecar still attests carries `subagents` (taskLineageWire rows, same
@@ -49,7 +64,10 @@ import type { RouteContext } from "./route-types.ts";
  *  refusal table on an id this list excludes drops here (dropPinned persists
  *  only on a hit; the promote set is subtracted up front, so a promoted
  *  session's pin survives). */
-export async function coldLogsPayload(registry: SessionRegistry): Promise<Array<Record<string, unknown>>> {
+export async function coldLogRows(
+  registry: SessionRegistry,
+  onlyId?: string,
+): Promise<Array<Record<string, unknown>>> {
   // Awaited so the reply has settled when routeMessage resolves (the
   // directory read is real I/O; fire-and-forget raced the caller).
   const logs = await listSessionLogs();
@@ -76,14 +94,20 @@ export async function coldLogsPayload(registry: SessionRegistry): Promise<Array<
   // out of `joined`, so a promoted session's pin is never touched.
   for (const id of getPinnedIds()) if (joined.has(id)) dropPinned(id);
   return logs
-    .filter((log) => !activeIds.has(log.id) && !joined.has(log.id))
+    .filter(
+      (log) =>
+        (onlyId === undefined || log.id === onlyId)
+        && !activeIds.has(log.id)
+        && !joined.has(log.id),
+    )
     .map((log) => {
-      // The index row carries the session's derived state (parked,
-      // interrupted, ...) plus the model/profile/ctx the log attests,
-      // so the sidebar row grammar needs no log scan; missing row
-      // (fresh log, unreconciled) simply has no state, and legacy
-      // logs attest no model/profile/ctx (segments omitted).
-      const row = getSessionRow(log.id);
+      // The slim enrichment row carries the session's derived state
+      // (parked, interrupted, ...) plus the model/profile/ctx the log
+      // attests -- exactly the fields this grammar surfaces, and never
+      // search_text, so enrichment per cold row costs no log body. A
+      // missing row (fresh log, unreconciled) simply has no state, and
+      // legacy logs attest no model/profile/ctx (segments omitted).
+      const row = getSessionEnrichRow(log.id);
       // Absolute log path for the sidebar's "Copy log file path" row
       // action; omitted when the id fails the core path helper's gate.
       const logPath = trySessionPath(log.id);
@@ -112,16 +136,230 @@ export async function coldLogsPayload(registry: SessionRegistry): Promise<Array<
         ...enriched,
         subagents: group.slice(-MAX_SUBAGENT_LINEAGE_ROWS).map(taskLineageWire),
       };
+    })
+    // The cursor's total order (see compareLogRowsDesc): listSessionLogs
+    // sorts ts-desc with no tie-break, so the window/cursor seam re-sorts
+    // the filtered rows. Cheap, and it makes the page walk exact.
+    .sort(compareLogRowsDesc);
+}
+
+/** The RECENT LOGS walk order (newest ts, id DESC on ties) lives in
+ *  protocol.ts beside the cursor it defines, so the webui inserts pushed
+ *  rows through the SAME definition; re-exported here for server-side
+ *  consumers. */
+export { compareLogRowsDesc } from "./protocol.ts";
+
+/** True when `row` sits STRICTLY older than `cursor` in compareLogRowsDesc
+ *  order: older timestamp, or the equal-timestamp tie where the id sorts
+ *  after the cursor's. The cursor is [lastActivityAt, id] of the last row
+ *  shipped, so consecutive pages partition the list. */
+export function isOlderThanCursor(
+  row: { lastActivityAt: number; id: string },
+  cursor: LogListCursorWire,
+): boolean {
+  return (
+    row.lastActivityAt < cursor.lastActivityAt
+    || (row.lastActivityAt === cursor.lastActivityAt && row.id < cursor.id)
+  );
+}
+
+function cursorOf(row: Record<string, unknown>): LogListCursorWire {
+  return { lastActivityAt: row.lastActivityAt as number, id: row.id as string };
+}
+
+/** The LOGS_LISTED frame body builder's shape (see coldLogsPayload): a
+ *  whole-message payload alias, not an interface (protocol.ts rule). */
+export type ColdLogsFrame = {
+  logs: Array<Record<string, unknown>>;
+  hasOlder: boolean;
+  /** Present ONLY while hasOlder (the absent-not-null idiom). */
+  olderCursor?: LogListCursorWire;
+  /** Present when non-empty: EVERY pinned cold row, in or out of the head. */
+  pinnedLogs?: Array<Record<string, unknown>>;
+};
+
+/** The FULL-frame tail of the LOGS_LISTED grammar, cut from an already
+ *  built row list: the NEWEST LOG_LIST_WINDOW rows plus the cursor seam.
+ *  Additive fields:
+ *  - hasOlder: older UNPINNED rows live below the head (always present).
+ *  - olderCursor: [lastActivityAt, id] of the head's last row; present ONLY
+ *    while hasOlder (the absent-not-null idiom). Echo on loadOlderLogs.
+ *  - pinnedLogs: EVERY pinned cold row regardless of window (pins are few;
+ *    the window arithmetic stays over the unpinned walk). A pinned row
+ *    inside the head therefore rides BOTH `logs` and `pinnedLogs` -- the
+ *    client merges by id and dedupes, the row flags are per-row truth.
+ *  The FULL frame is only ever a listLogs reply (and the >window delta
+ *  fallback); dismiss/setPinned changes ride the targeted
+ *  logRowAdded/logRowRemoved/logPins pushes. */
+export function fullFrameFromRows(rows: Array<Record<string, unknown>>): ColdLogsFrame {
+  const logs = rows.slice(0, LOG_LIST_WINDOW);
+  const pinnedLogs = rows.filter((r) => r.pinned === true);
+  // Paging only ever yields UNPINNED rows (every pin already rides
+  // pinnedLogs, so a page must not re-ship one), hence hasOlder asks about
+  // the tail's unpinned remainder.
+  const older = rows.slice(logs.length).some((r) => r.pinned !== true);
+  return {
+    logs,
+    hasOlder: older,
+    ...(older && logs.length > 0 ? { olderCursor: cursorOf(logs[logs.length - 1]!) } : {}),
+    ...(pinnedLogs.length > 0 ? { pinnedLogs } : {}),
+  };
+}
+
+/** The LOGS_LISTED FULL frame body over a fresh row-list build. */
+export async function coldLogsPayload(
+  registry: SessionRegistry,
+): Promise<ColdLogsFrame> {
+  return fullFrameFromRows(await coldLogRows(registry));
+}
+
+/**
+ * C2S loadOlderLogs: the page of RECENT LOGS rows immediately older than
+ * the `olderCursor` a LOGS_LISTED / loadOlderLogsResult frame shipped (the
+ * sidebar's bottom edge). Rebuilds the SAME filtered+enriched list the head
+ * was cut from (live/worker exclusion upstream of the cut, again), keeps
+ * only rows STRICTLY older than the cursor in the DESCENDING order, and
+ * drops pinned rows: they already shipped on the base frame's pinnedLogs
+ * and must never ride a page (the client dedupes by id anyway -- a page
+ * that re-shipped one would just be a moving row the sidebar re-sorts).
+ * `size` is a row count clamped to [1, MAX_LOG_LIST_PAGE]; the default is
+ * the head window. Refusals (garbage cursor, dead store) ride the
+ * correlated reply's `error` field -- the LIST_DIR_RESULT posture, never an
+ * uncorrelated guess. A cursor past the end honestly answers an empty page
+ * with hasOlder false (it is a position, not a lookup).
+ */
+export async function handleLoadOlderLogs(ctx: RouteContext): Promise<void> {
+  const { ws, msg, registry } = ctx;
+  const requestId = typeof msg.requestId === "number" ? msg.requestId : undefined;
+  const refuse = (message: string): void => {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.LOAD_OLDER_LOGS_RESULT,
+      requestId,
+      error: message,
+    });
+  };
+  const raw = msg.olderThan;
+  const c = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : undefined;
+  if (
+    c === undefined
+    || typeof c.lastActivityAt !== "number"
+    || !Number.isFinite(c.lastActivityAt)
+    || typeof c.id !== "string"
+  ) {
+    return refuse(
+      `loadOlderLogs olderThan must be { lastActivityAt: number, id: string }, got ${JSON.stringify(raw)}.`,
+    );
+  }
+  const cursor: LogListCursorWire = { lastActivityAt: c.lastActivityAt, id: c.id };
+  // Untrusted page size: sanitized here (windowOlderThan's sibling idiom).
+  const size =
+    typeof msg.size === "number" && Number.isInteger(msg.size) && msg.size > 0
+      ? Math.min(msg.size, MAX_LOG_LIST_PAGE)
+      : LOG_LIST_WINDOW;
+  // Awaited for the settle contract (real directory read).
+  await coldLogRows(registry)
+    .then((rows) => {
+      const candidates = rows.filter(
+        (r) => r.pinned !== true && isOlderThanCursor(r as { lastActivityAt: number; id: string }, cursor),
+      );
+      const logs = candidates.slice(0, size);
+      const hasOlder = candidates.length > logs.length;
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.LOAD_OLDER_LOGS_RESULT,
+        requestId,
+        logs,
+        hasOlder,
+        // hasOlder true implies a full page, so the cursor row exists.
+        ...(hasOlder ? { olderCursor: cursorOf(logs[logs.length - 1]!) } : {}),
+      });
+    })
+    .catch((err: unknown) => {
+      logger.warn(`[websocket] loadOlderLogs failed: ${formatError(err)}`);
+      refuse(formatError(err));
     });
 }
 
+/**
+ * C2S listLogs: the RECENT LOGS attestation reply, in the two postures
+ * documented on S2C.LOGS_LISTED (protocol.ts). Absent `since` -> the FULL
+ * head frame, the shipped window grammar untouched (the re-attestation
+ * path). Present -> the DELTA frame: rows strictly NEWER than the client's
+ * cursor in the SAME descending order (compareLogRowsDesc, the one shipped
+ * definition -- strictly-newer is simply "sorts before the cursor"),
+ * pinnedLogs as always, full:false, and NO olderCursor/hasOlder: the
+ * client prepends and keeps its held paging seam; a seam that went stale
+ * across a missed transition re-attests through the gen rule stamped here.
+ * `since` validates exactly like loadOlderLogs' olderCursor (same shape
+ * gate); garbage refuses on an error frame to the requesting socket --
+ * never an uncorrelated guess.
+ * Cap: a delta reply carries at most LOG_LIST_WINDOW rows. If MORE rows
+ * are newer (a client dark for hours), the reply is the FULL head frame
+ * instead of a partial merge -- a prepend that silently drops rows inside
+ * the window would lie about what the client holds, and the gen rule alone
+ * would not have caught a bounded reply.
+ */
 export async function handleListLogs(ctx: RouteContext): Promise<void> {
-  const { ws, registry } = ctx;
-  await coldLogsPayload(registry)
-    .then((coldLogs) => {
+  const { ws, msg, registry } = ctx;
+  if (msg.since === undefined) {
+    await coldLogsPayload(registry)
+      .then((payload) => {
+        SessionRegistry.sendSafe(ws, {
+          type: S2C.LOGS_LISTED,
+          ...payload,
+          gen: listGen(),
+        });
+      })
+      .catch((err: unknown) => {
+        SessionRegistry.sendSafe(ws, errorFrame(err));
+      });
+    return;
+  }
+  const raw = msg.since;
+  const c = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : undefined;
+  if (
+    c === undefined
+    || typeof c.lastActivityAt !== "number"
+    || !Number.isFinite(c.lastActivityAt)
+    || typeof c.id !== "string"
+  ) {
+    SessionRegistry.sendSafe(
+      ws,
+      errorFrame(new Error(
+        `listLogs since must be { lastActivityAt: number, id: string }, got ${JSON.stringify(raw)}.`,
+      )),
+    );
+    return;
+  }
+  const since = { lastActivityAt: c.lastActivityAt, id: c.id };
+  await coldLogRows(registry)
+    .then((rows) => {
+      // Rows arrive sorted DESC, so the newer-than-since filter preserves
+      // the shipped order; the cursor is a position, not a lookup, so a
+      // since naming a row that already vanished answers honestly too.
+      const newer = rows.filter(
+        (r) => compareLogRowsDesc(r as { lastActivityAt: number; id: string }, since) < 0,
+      );
+      if (newer.length > LOG_LIST_WINDOW) {
+        // More newer rows than the window: the full head re-attests
+        // (never a silent partial merge).
+        SessionRegistry.sendSafe(ws, {
+          type: S2C.LOGS_LISTED,
+          ...fullFrameFromRows(rows),
+          gen: listGen(),
+        });
+        return;
+      }
+      const pinnedLogs = rows.filter((r) => r.pinned === true);
       SessionRegistry.sendSafe(ws, {
         type: S2C.LOGS_LISTED,
-        logs: coldLogs,
+        logs: newer,
+        full: false,
+        ...(pinnedLogs.length > 0 ? { pinnedLogs } : {}),
+        gen: listGen(),
       });
     })
     .catch((err: unknown) => {
@@ -148,14 +386,23 @@ export async function handleLoadLog(ctx: RouteContext): Promise<void> {
   // list rebuilds the attach's own broadcasts trigger.
   const logId = msg.logId as string;
   const taskManager = registry.getTaskManager();
+  let promoted = false;
   if (taskManager && (await taskManager.joinedAgentSessionIds()).has(logId)) {
     taskManager.promoteAgentSession(logId);
+    promoted = true;
   }
   // Awaited for the settle contract: the attach reads the real log.
   await attachResumedSession(ws, registry, bridge, logId, 0, false).catch(
     (err: unknown) => {
       logger.error(`[websocket] loadLog failed: ${formatError(err)}`);
       SessionRegistry.sendSafe(ws, errorFrame(err));
+      // Promote-reversal WITHOUT adoption: the promote already landed, so
+      // the worker log now reads as a plain cold row -- a row no client
+      // holds (attested ids were hidden from their lists) and whose
+      // ts can sit anywhere BELOW the held cursors (no delta would ever
+      // surface it). No row push for an error path: bump the watermark and
+      // let every tab's next LOGS_LISTED mismatch re-attest full.
+      if (promoted) bumpListMembership();
     },
   );
 }
@@ -450,11 +697,16 @@ export async function handleDeleteLog(ctx: RouteContext): Promise<void> {
       if (deleted) {
         // Stale-prune server-side: a dead log's pin dies with it.
         dropPinned(msg.logId as string);
+        // Membership transition: the watermark bumps once and both sends
+        // carry it (logDeleted IS this row's targeted removal frame -- no
+        // logRowRemoved alongside; a client that mismatches re-attests).
+        const gen = bumpListMembership();
         SessionRegistry.sendSafe(ws, {
           type: S2C.LOG_DELETED,
           logId: msg.logId,
+          gen,
         });
-        registry.broadcast({ type: S2C.LOG_DELETED, logId: msg.logId });
+        registry.broadcast({ type: S2C.LOG_DELETED, logId: msg.logId, gen });
       } else {
         SessionRegistry.sendSafe(ws, {
           type: S2C.ERROR,

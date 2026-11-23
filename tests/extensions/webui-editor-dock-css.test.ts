@@ -12,7 +12,7 @@
 //    the rule that says so must be written on the COMPOUND selector:
 //    `.editor-mode #workspace-row` is a dead descendant selector (the class
 //    rides the row itself), which left the handle anchored to the viewport.
-// 3) The narrow dock keeps the send button on screen: #composer-actions
+// 3) The narrow dock keeps the send button on screen: .composer-actions
 //    wraps at the BASE rule (any column can get narrower than the pill row;
 //    the editor-mode dock floors the chat at 280px), so the phone block no
 //    longer needs its own wrap.
@@ -78,8 +78,8 @@ describe("editor dock closes as one block (styles.css)", () => {
 });
 
 describe("narrow columns keep the send button on screen (styles.css)", () => {
-  it("#composer-actions wraps at the base rule, and the base is the ONLY wrap", () => {
-    const bodies = [...CSS.matchAll(/#composer-actions\s*\{([^}]*)\}/g)].map((m) => m[1]!);
+  it(".composer-actions wraps at the base rule, and the base is the ONLY wrap", () => {
+    const bodies = [...CSS.matchAll(/\.composer-actions\s*\{([^}]*)\}/g)].map((m) => m[1]!);
     expect(bodies).toHaveLength(2); // base + phone block
     expect(bodies[0]).toContain("flex-wrap: wrap");
     // The phone block keeps only the tighter row-gap: one wrap rule owns the

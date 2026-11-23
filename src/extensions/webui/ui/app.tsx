@@ -1207,6 +1207,7 @@ function showCopyToast(text: string): void {
   if (!toast) {
     toast = document.createElement("div");
     toast.id = "copy-toast";
+    toast.className = "copy-toast";
     document.body.appendChild(toast);
   }
   toast.textContent = text;
@@ -3517,7 +3518,7 @@ function App() {
             dismissible for this page-load; re-attested on every handshake.
             Never renders when the two agree. */}
         {chat?.versionSkewAtom() && !versionSkewDismissedAtom() ? (
-          <div id="version-skew-banner" role="alert">
+          <div id="version-skew-banner" className="version-skew-banner" role="alert">
             <span>
               Web client was updated but the daemon is running an older build - restart the daemon.
             </span>
@@ -3540,7 +3541,7 @@ function App() {
             <button
               type="button"
               id="settings-btn"
-              className="header-btn toggleable"
+              className="icon-btn settings-open-btn toggleable"
               aria-label="Settings"
               aria-haspopup="dialog"
               aria-expanded={settingsAtom().open ? "true" : "false"}
@@ -3557,12 +3558,13 @@ function App() {
                 purple -> ...); a click persists and re-tags <html>.
                 Native button = Enter/Space work for free. The inline SVG
                 glyph is tinted by currentColor, so it recolors with
-                whatever palette is on screen (see #theme-btn in
+                whatever palette is on screen (see .theme-btn in
                 styles.css). Position rides after settings so the header
                 group's pinned children keep their slots. */}
             <button
               type="button"
               id="theme-btn"
+              className="icon-btn theme-btn"
               title={themeTitle}
               aria-label={themeTitle}
               onClick={cycleTheme}
@@ -3578,7 +3580,7 @@ function App() {
             <button
               type="button"
               id="editor-mode-toggle"
-              className="header-btn toggleable"
+              className="icon-btn editor-mode-toggle toggleable"
               aria-label="Toggle chat/editor mode"
               aria-pressed={editorMode ? "true" : "false"}
               title={
@@ -3603,7 +3605,7 @@ function App() {
             <button
               type="button"
               id="workbench-toggle"
-              className="header-btn toggleable"
+              className="icon-btn workbench-toggle toggleable"
               aria-label={editorMode ? "Toggle chat dock" : "Toggle workbench pane"}
               aria-expanded={dockCollapsed ? "false" : "true"}
               title={editorMode ? "Toggle Chat (right pane sidebar)" : "Toggle Workbench (right pane sidebar)"}
@@ -3710,7 +3712,7 @@ function App() {
               <button
                 type="button"
                 id="sidebar-toggle"
-                className="header-btn toggleable"
+                className="icon-btn sidebar-toggle toggleable"
                 aria-label="Toggle sessions sidebar"
                 aria-expanded={sidebarCollapsedAtom() ? "false" : "true"}
                 title="Toggle Sessions sidebar"
@@ -3726,12 +3728,12 @@ function App() {
                   while the pane is a cold record, so it must read as
                   not-the-subject; in a subagent view the badge IS the
                   subject, so it never dims. */}
-              <span id="session-label" style={view.mode !== "attached" ? { opacity: "0.5" } : undefined}>
+              <span id="session-label" className="session-label" style={view.mode !== "attached" ? { opacity: "0.5" } : undefined}>
                 {subagentView ? "Subagent:" : "Session:"}{" "}
                 <button
                   type="button"
                   id="current-session-id"
-                  className={copyFlashAtom() ? "copied" : undefined}
+                  className={copyFlashAtom() ? "current-session-id copied" : "current-session-id"}
                   title={badgeId ? "Copy full session id" : undefined}
                   aria-label={badgeId ? "Copy full session id" : undefined}
                   onClick={
@@ -3764,12 +3766,13 @@ function App() {
                   match says so in the banner instead of silently showing
                   the head. */}
               {view.mode === "observing" && view.subjectId !== null ? (
-                <span id="log-view-label">
-                  Observing log: <span id="current-log-id">{view.subjectId.slice(0, 8)}</span> -- read only
+                <span id="log-view-label" className="log-view-label">
+                  Observing log: <span id="current-log-id" className="current-log-id">{view.subjectId.slice(0, 8)}</span> -- read only
                   {view.note ? <span className="view-note">({view.note})</span> : null}{" "}
                   <button
                     type="button"
                     id="close-log-view-btn"
+                    className="close-view-btn"
                     title="Close log view"
                     aria-label="Close log view (back to the attached session)"
                     onClick={onCloseLogView}
@@ -3778,9 +3781,9 @@ function App() {
                   </button>
                 </span>
               ) : view.mode === "peeking" && view.subjectId !== null ? (
-                <span id="peek-view-label">
+                <span id="peek-view-label" className="peek-view-label">
                   Viewing session:{" "}
-                  <span id="current-peek-id" title={view.subjectId}>
+                  <span id="current-peek-id" className="current-peek-id" title={view.subjectId}>
                     {view.subjectId.slice(0, 8)}
                   </span>{" "}
                   -- read only
@@ -3788,6 +3791,7 @@ function App() {
                   <button
                     type="button"
                     id="peek-takeover-btn"
+                    className="peek-takeover-btn"
                     title={`Attach to ${view.subjectId} and write to it -- the peek ends and the session attaches`}
                     onClick={onTakeOverPeek}
                   >
@@ -3796,6 +3800,7 @@ function App() {
                   <button
                     type="button"
                     id="close-peek-view-btn"
+                    className="close-view-btn"
                     title="Close peek (back to the attached session)"
                     aria-label="Close peek (back to the attached session)"
                     onClick={onCloseLogView}
@@ -3823,6 +3828,7 @@ function App() {
                   <button
                     type="button"
                     id="close-subagent-view-btn"
+                    className="close-view-btn"
                     title="Close subagent view"
                     aria-label="Close subagent view"
                     onClick={onCloseSubagentView}
@@ -3845,7 +3851,7 @@ function App() {
               <button
                 type="button"
                 id="thinking-toggle"
-                className="header-btn toggleable"
+                className="icon-btn thinking-toggle toggleable"
                 // Same idiom as #search-btn next door: a pressed toggle chip.
                 // Pressed = the view deviation is engaged (reasoning hidden);
                 // the default "shown" state reads unpressed.
@@ -3869,7 +3875,8 @@ function App() {
                   type="button"
                   id="tool-exec-status"
                   className={[
-                    "header-btn",
+                    "icon-btn",
+                    "tool-exec-status",
                     toolExec.includes("degraded") ? "tool-exec-degraded" : "",
                     fenceClickable ? "toggleable" : "",
                   ]
@@ -3895,10 +3902,11 @@ function App() {
           <div
             id="input-area"
             ref={inputAreaRef}
-            className={composer.enabled ? undefined : "read-only"}
+            className={composer.enabled ? "input-area" : "input-area read-only"}
           >
             <form
               id="chat-form"
+              className="chat-form"
               onSubmit={onChatSubmit}
               onDragenter={onComposerDragenter}
               onDragover={onComposerDragover}
@@ -3907,7 +3915,7 @@ function App() {
               onDrop={onComposerDrop}
             >
               {completionMenu ? (
-                <div id="completion-menu">
+                <div id="completion-menu" className="completion-menu">
                   {completionMenu.options.map((o, i) => (
                     <div
                       key={o.value}
@@ -3924,7 +3932,7 @@ function App() {
                   ))}
                 </div>
               ) : null}
-              <div id="attachment-chips">
+              <div id="attachment-chips" className="attachment-chips">
                 {attachments.map((a) => (
                   <span key={a.id} className="attachment-chip" title={a.name}>
                     <span className="attachment-name">{a.name}</span>
@@ -3942,6 +3950,7 @@ function App() {
               </div>
               <textarea
                 id="chat-input"
+                className="chat-input"
                 placeholder={composer.placeholder}
                 autocomplete="off"
                 rows="1"
@@ -3968,7 +3977,7 @@ function App() {
                 onPaste={onComposerPaste}
                 onKeydown={onChatKeydown}
               />
-              <div id="composer-actions">
+              <div id="composer-actions" className="composer-actions">
                 <input
                   type="file"
                   id="file-input"
@@ -3985,6 +3994,7 @@ function App() {
                   <button
                     type="button"
                     id="attach-btn"
+                    className="attach-btn"
                     title="Attach files to the next message"
                     aria-label="Attach files to the next message"
                     onClick={() => fileInputEl?.click()}
@@ -3999,7 +4009,7 @@ function App() {
                   <button
                     type="button"
                     id="mic-btn"
-                    className={sttPhase === "recording" ? "recording" : undefined}
+                    className={sttPhase === "recording" ? "mic-btn recording" : "mic-btn"}
                     title="Hold to record; the transcript is inserted into the input"
                     aria-label="Hold to record; the transcript is inserted into the input"
                     // The mic only EDITS the box, so it keeps working in a
@@ -4030,7 +4040,7 @@ function App() {
                     ride the trigger button: same chips, CSS and test pins
                     on the button semantics. */}
                 {subagentView ? null : (
-                  <label id="profile-selector">
+                  <label id="profile-selector" className="profile-selector">
                     {/* Label text is screen-reader-only (house .visually-hidden
                         clip: keeps the accessible name, drops the visible
                         "Profile:" the owner hid 2026-11-14). */}
@@ -4045,7 +4055,7 @@ function App() {
                   </label>
                 )}
                 {subagentView ? null : (
-                  <label id="model-selector">
+                  <label id="model-selector" className="model-selector">
                     <span className="visually-hidden">Model</span>
                     <Combobox
                       id="model-select"
@@ -4068,7 +4078,7 @@ function App() {
                     plain span: no tab stop, no interference with the
                     focusable-ids ordering pins. */}
                 {connected ? null : (
-                  <span id="connection-status" className="status-disconnected">
+                  <span id="connection-status" className="connection-status status-disconnected">
                     Disconnected
                   </span>
                 )}
@@ -4087,6 +4097,7 @@ function App() {
                   <button
                     type="button"
                     id="cancel-btn"
+                    className="cancel-btn"
                     title={
                       subagentView
                         ? "Stop this subagent: it aborts the task agent's turn, and a task turn has no turn-only interrupt on the wire -- the task ends as cancelled (the sidebar row confirms it)"
@@ -4117,7 +4128,7 @@ function App() {
                     Stop
                   </button>
                 ) : null}
-                <button type="submit" id="send-btn">
+                <button type="submit" id="send-btn" className="send-btn">
                   Send
                 </button>
               </div>

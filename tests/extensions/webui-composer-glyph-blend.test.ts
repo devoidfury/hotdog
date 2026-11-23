@@ -1,7 +1,7 @@
 // Item-3 structural pin (run 20261113-0701): the floating composer's attach
 // and mic glyph buttons must BLEND into the field at rest -- the removed
 // slab's --bg-tertiary tint made them read as mini-slabs on the transparent
-// floating form (the same "slab is gone" doctrine #input-area/#chat-form
+// floating form (the same "slab is gone" doctrine .input-area/.chat-form
 // already follow: transparent fill, no box). Hover/focus return the
 // affordance per the composer-blend idiom (real fill + border on hover, the
 // --border-focus token on focus-visible), and the 1px border keeps its WIDTH
@@ -32,7 +32,7 @@ function ruleBody(sel: string): string {
 }
 
 describe("floating composer glyph buttons blend at rest (no mini-slabs)", () => {
-  for (const sel of ["#attach-btn", "#mic-btn"]) {
+  for (const sel of [".attach-btn", ".mic-btn"]) {
     it(`${sel} rests transparent (field-blend), keeps the 1px border width, and carries no slab tint`, () => {
       const body = ruleBody(sel);
       expect(body).toContain("background: transparent");
@@ -45,13 +45,13 @@ describe("floating composer glyph buttons blend at rest (no mini-slabs)", () => 
   }
 
   it("hover/focus return the affordance (composer-blend idiom)", () => {
-    expect(CSS).toMatch(/#attach-btn:hover:not\(:disabled\)[^{]*\{[^}]*--bg-active[^}]*\}/);
-    expect(CSS).toMatch(/#attach-btn:hover:not\(:disabled\)[^{]*\{[^}]*--border-light[^}]*\}/);
-    expect(CSS).toMatch(/#attach-btn:focus-visible[^{]*\{[^}]*--border-focus[^}]*\}/);
-    expect(CSS).toMatch(/#mic-btn:hover:not\(:disabled\)[^{]*\{[^}]*--bg-active[^}]*\}/);
-    expect(CSS).toMatch(/#mic-btn:hover:not\(:disabled\):not\(\.recording\)[^{]*\{[^}]*--border-light[^}]*\}/);
-    expect(CSS).toMatch(/#mic-btn:focus-visible:not\(\.recording\)[^{]*\{[^}]*--border-focus[^}]*\}/);
+    expect(CSS).toMatch(/\.attach-btn:hover:not\(:disabled\)[^{]*\{[^}]*--bg-active[^}]*\}/);
+    expect(CSS).toMatch(/\.attach-btn:hover:not\(:disabled\)[^{]*\{[^}]*--border-light[^}]*\}/);
+    expect(CSS).toMatch(/\.attach-btn:focus-visible[^{]*\{[^}]*--border-focus[^}]*\}/);
+    expect(CSS).toMatch(/\.mic-btn:hover:not\(:disabled\)[^{]*\{[^}]*--bg-active[^}]*\}/);
+    expect(CSS).toMatch(/\.mic-btn:hover:not\(:disabled\):not\(\.recording\)[^{]*\{[^}]*--border-light[^}]*\}/);
+    expect(CSS).toMatch(/\.mic-btn:focus-visible:not\(\.recording\)[^{]*\{[^}]*--border-focus[^}]*\}/);
     // The recording state keeps its RED border (the only live-recording cue).
-    expect(CSS).toMatch(/#mic-btn\.recording[^{]*\{[^}]*--error[^}]*\}/);
+    expect(CSS).toMatch(/\.mic-btn\.recording[^{]*\{[^}]*--error[^}]*\}/);
   });
 });

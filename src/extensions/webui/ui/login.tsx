@@ -113,6 +113,7 @@ export function LoginScreen({ hidden, onToken }: LoginProps) {
         <p className="subtitle">AI Agent Harness</p>
         <form
           id="login-form"
+          className="login-form"
           onSubmit={(e: Event) => {
             e.preventDefault();
             void submit();

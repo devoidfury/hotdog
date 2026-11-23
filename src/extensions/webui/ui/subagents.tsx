@@ -157,7 +157,7 @@ export function SubagentsSection(p: SectionProps) {
     <div className={`subagents-section${p.collapsed ? " collapsed" : ""}`} role="listitem">
       <div className="subagents-header">
         <span className="subagents-label">Subagents</span>
-        {/* Chevron idiom, #logs-toggle grammar: the flip rides a rotation
+        {/* Chevron idiom, the .logs-toggle grammar: the flip rides a rotation
             class on the same svg, the label names the next click. */}
         <button
           id={toggleId}

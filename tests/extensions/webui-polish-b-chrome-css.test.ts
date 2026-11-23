@@ -42,13 +42,13 @@ function declarations(sel: string): string {
 describe("read-only banner chips: visible keyboard focus", () => {
   it("the close controls carry the inset accent outline focus grammar", () => {
     expect(CSS).toMatch(
-      /#close-log-view-btn:focus-visible,\s*#close-peek-view-btn:focus-visible,\s*#close-subagent-view-btn:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--accent\)/,
+      /\.close-view-btn:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--accent\)/,
     );
   });
 
   it("the peek's Take over button carries the same focus grammar", () => {
     expect(CSS).toMatch(
-      /#peek-takeover-btn:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--accent\)/,
+      /\.peek-takeover-btn:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--accent\)/,
     );
   });
 });
@@ -116,38 +116,38 @@ describe("narrow widths: bars fold, they never pile", () => {
     const firstCollapse = CSS.indexOf("@container (max-width: 440px)");
     expect(firstCollapse).toBeGreaterThan(-1);
     // After every base rule they collapse.
-    for (const base of [".file-view-lang {", ".editor-goto-btn {", "#mic-btn {", "#profile-selector {"]) {
+    for (const base of [".file-view-lang {", ".editor-goto-btn {", ".mic-btn {", ".profile-selector {"]) {
       expect(CSS.indexOf(base)).toBeLessThan(firstCollapse);
     }
     // And the tier selectors are scoped, so the FIRST-MATCH helper (and the
     // sheet's readers) never mistake a collapse rule for a base rule.
     expect(declarations(".file-view-lang")).not.toContain("display: none");
-    expect(declarations("#profile-selector")).not.toContain("display: none");
+    expect(declarations(".profile-selector")).not.toContain("display: none");
   });
 
   it("the fixed composer segments keep their hit areas; the pills own the squeeze", () => {
     // Every rule seated at #composer-actions #connection-status (the group
     // ends there, and its own white-space rule follows).
-    const fixed = (CSS.match(/#composer-actions #connection-status \{[^}]*\}/g) ?? []).join("\n");
+    const fixed = (CSS.match(/\.composer-actions \.connection-status \{[^}]*\}/g) ?? []).join("\n");
     expect(fixed).toContain("flex-shrink: 0");
     expect(fixed).toContain("white-space: nowrap");
     // The group rule names every fixed segment; the pills are NOT in it.
     const group = CSS.slice(
-      CSS.indexOf("#composer-actions #attach-btn,"),
-      CSS.indexOf("#composer-actions #connection-status {"),
+      CSS.indexOf(".composer-actions .attach-btn,"),
+      CSS.indexOf(".composer-actions .connection-status {"),
     );
-    expect(group).toContain("#composer-actions #mic-btn");
-    expect(group).toContain("#composer-actions #send-btn");
-    expect(group).toContain("#composer-actions #cancel-btn");
-    expect(group).not.toContain("#model-selector");
-    expect(group).not.toContain("#profile-selector");
+    expect(group).toContain(".composer-actions .mic-btn");
+    expect(group).toContain(".composer-actions .send-btn");
+    expect(group).toContain(".composer-actions .cancel-btn");
+    expect(group).not.toContain(".model-selector");
+    expect(group).not.toContain(".profile-selector");
   });
 
   it("Send is never hidden at any tier", () => {
     // No collapse rule (media or container) may take the send button.
     for (const block of CSS.match(/@(container|media)[^{]*\{[\s\S]*?\n\}/g) ?? []) {
       if (!/display:\s*none/.test(block)) continue;
-      expect(block).not.toMatch(/#send-btn/);
+      expect(block).not.toMatch(/\.send-btn/);
     }
   });
 });

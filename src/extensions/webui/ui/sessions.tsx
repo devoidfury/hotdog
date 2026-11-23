@@ -580,11 +580,12 @@ function SearchPanel(p: {
     ));
   }
   return (
-    <div id="search-panel">
-      <div id="search-bar">
+    <div id="search-panel" className="search-panel">
+      <div id="search-bar" className="search-bar">
         <IconSearch size={14} className="search-bar-glyph" />
         <input
           id="search-input"
+          className="search-input"
           type="text"
           placeholder="Search logs…"
           autocomplete="off"
@@ -593,9 +594,9 @@ function SearchPanel(p: {
           onInput={(e: Event) => p.onQuery((e.currentTarget as HTMLInputElement).value)}
           onKeydown={p.onKeydown}
         />
-        <button id="search-clear" type="button" title="Close search (Esc)" aria-label="Close search" onClick={p.onClose}>✕</button>
+        <button id="search-clear" className="search-clear" type="button" title="Close search (Esc)" aria-label="Close search" onClick={p.onClose}>✕</button>
       </div>
-      <div id="search-results">{body}</div>
+      <div id="search-results" className="search-results">{body}</div>
     </div>
   );
 }
@@ -626,16 +627,16 @@ export function Sidebar(p: SidebarProps) {
         <div className="sidebar-header-actions">
           <button
             id="search-btn"
+            className={p.search.open ? "icon-btn search-btn active" : "icon-btn search-btn"}
             type="button"
             title={p.search.open ? "Close search" : "Search logs"}
             aria-label={p.search.open ? "Close search" : "Search all session logs"}
             aria-pressed={p.search.open}
-            className={p.search.open ? "active" : undefined}
             onClick={() => (p.search.open ? p.onCloseSearch() : p.onOpenSearch())}
           >
             <IconSearch />
           </button>
-          <button id="new-session-btn" title="New session" onClick={p.onCreate}>+</button>
+          <button id="new-session-btn" className="icon-btn new-session-btn" title="New session" onClick={p.onCreate}>+</button>
         </div>
       </div>
 
@@ -760,6 +761,7 @@ export function Sidebar(p: SidebarProps) {
             double-click on it is never a height reset. */}
         <button
           id="logs-toggle"
+          className="icon-btn logs-toggle"
           type="button"
           aria-expanded={p.logsCollapsed ? "false" : "true"}
           aria-controls="log-list"

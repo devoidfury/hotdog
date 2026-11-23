@@ -13,13 +13,10 @@
 }
 
 /* ── Webfonts: Reddit Sans / Reddit Mono ──────────────────────────────────
-   The webui's loaded faces (owner choice 2026-11-14). Served as bundler
-   assets through index.html's css import; swap display so text is never
-   invisible while they load. The zip's web/full woff2 builds, but only the
-   weights the ui uses (400/600/700; the vendor maps SemiBold=600, and a
-   requested 500 resolves to the 400 face per the CSS matching rules, so
-   Light/ExtraBold are dead weight). Sans ships real italics; the mono
-   family has none. */
+   Bundler assets via index.html's css import; swap display so text is never
+   invisible while loading. Only the weights the ui uses (400/600/700 -- a
+   requested 500 resolves to the 400 face, so Light/ExtraBold are dead
+   weight). Sans ships real italics; the mono family has none. */
 @font-face {
     font-family: "Reddit Sans";
     src: url("./fonts/RedditSans-Regular.woff2") format("woff2");
@@ -85,13 +82,8 @@
 }
 
 /* ── Design tokens ──────────────────────────────────────────────────────────
-   :root carries TWO kinds of values: theme-invariant ones (spacing,
-   typography, radii, shadows, layout, the semantic colors, the diff-ruler
-   family) and the DEFAULT palette of the per-theme color token set (bg
-   stack, text ramp, accent family, borders). Themes override only that
-   color set in `:root[data-theme="<id>"]` blocks further down this file
-   (see the recipe there); --border-focus and --shadow-glow are var-driven
-   and follow the active palette automatically. */
+   :root holds the theme-invariant values plus the DEFAULT palette of the
+   per-theme color set; themes override that set below (see the recipe). */
 
 :root {
     /* ── Per-theme color tokens (defaults = hotdog) ─────────────────────── */
@@ -121,9 +113,8 @@
     --accent-glow: rgba(224, 163, 46, 0.25);
 
     /* ── Theme-invariant colors ─────────────────────────────────────────────
-       Semantic and diff-ruler tokens stay SHARED across palettes:
-       green/red/yellow meaning and the gutter-alpha continuity belong to the
-       product, not to a palette. */
+       Semantic and diff-ruler tokens stay shared across palettes: meaning
+       and gutter continuity belong to the product, not a palette. */
 
     /* Semantic */
     --success: #34d399;
@@ -132,18 +123,13 @@
     --error-soft: rgba(248, 113, 113, 0.12);
     --warning: #fbbf24;
 
-    /* Diff body -- GitHub's reading, tuned to this theme's hues (every
-       shipped theme is dark; the ruler family stays shared, see above). The
-       row fill is a whisper of the semantic color and the two
-       number gutters ride it at a near-identical step (the columns must read
-       as one continuous ruler across ctx/add/del rows, never as bricks or alternating slabs; the gutter step
-       over the row stays <= ~0.07 alpha of the same hue), so the meaning
-       rides the sign + ink, not the fill. The line text stays near-default:
-       30 rows of green/red prose was unreadable, GitHub reads like code on a
-       tinted row. --diff-ctx-gutter is the hueless whisper that keeps the
-       ruler continuous on untinted context rows. --diff-num is the gutter
-       ink; --diff-info-* the hunk-header flavor for the per-side cap
-       placeholders (muted blue-ish, the one non-semantic hue here). */
+    /* Diff body -- GitHub's reading: whisper row fills, near-default line
+       text (30 rows of saturated green/red prose is unreadable); meaning
+       rides the sign + ink. The number gutters step <= ~0.07 alpha of the
+       same hue so the columns read as one continuous ruler across
+       ctx/add/del rows, never bricks. --diff-ctx-gutter keeps the ruler
+       continuous on untinted context rows; --diff-num the gutter ink;
+       --diff-info-* the hunk-header flavor for cap placeholders. */
     --diff-add-fill: rgba(52, 211, 153, 0.11);
     --diff-del-fill: rgba(248, 113, 113, 0.11);
     --diff-add-gutter: rgba(52, 211, 153, 0.07);
@@ -164,9 +150,8 @@
     --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
     --shadow-glow: 0 0 20px var(--accent-glow);
 
-    /* Typography -- both stacks lead with the loaded Reddit faces (owner
-       choice 2026-11-14; see the @font-face blocks above), then fonts
-       people install, then the generic. */
+    /* Typography -- both stacks lead with the loaded Reddit faces (see the
+       @font-face blocks above), then fonts people install, then generic. */
     --font-sans:
         "Reddit Sans", system-ui, -apple-system, BlinkMacSystemFont,
         "Segoe UI", Roboto, sans-serif;
@@ -191,15 +176,13 @@
     --radius-full: 9999px;
     --sidebar-width: 300px;
     /* The editor-mode tree rail (treeColPanel in app.tsx writes it on drag;
-       the stored width hydrates it on load). Its OWN number: in the editor
-       shape the sessions rail rides --sidebar-width beside the chat, and
-       one number cannot size two visible rails. */
+       the stored width hydrates on load). Its OWN number: in the editor
+       shape the sessions rail rides --sidebar-width beside the chat. */
     --tree-col-width: 260px;
-    /* The EDITOR-mode dock: the sessions rail + chat block on the viewer's
-       right (editorDockPanel in app.tsx writes it on drag; the stored width
-       hydrates it on load). It is D in the two-number story -- the chat
-       column renders calc(D - --sidebar-width), so the rail's own handle
-       resizes the rail without moving the block's outer edges. */
+    /* The EDITOR-mode dock: sessions rail + chat block on the viewer's
+       right (editorDockPanel writes it on drag; stored width hydrates on
+       load). The chat renders calc(D - --sidebar-width), so the rail's
+       handle resizes the rail without moving the block's outer edges. */
     --editor-dock-width: 720px;
     /* Recent Logs list cap (panel-resize.ts writes it on drag; the user's
        stored height hydrates it on load). */
@@ -214,32 +197,23 @@
 /* ── Theme palettes ─────────────────────────────────────────────────────────
    RECIPE. A theme is EXACTLY two things:
    1. one `:root[data-theme="<id>"]` block here defining the per-theme color
-      token set -- --bg-base/primary/secondary/tertiary/elevated/hover/active,
-      --text-primary/secondary/muted/inverse, --accent + --accent-hover/
-      --accent-active/--accent-soft/--accent-glow, --border/--border-light --
-      and nothing else (anything not overridden falls back to the bare
-      :root's default palette; --border-focus and --shadow-glow follow
-      --accent/--accent-glow by var, never restate them);
-   2. one {id, label} entry in THEME_REGISTRY in ui/theme-pref.ts (the first
-      entry is the default and renders from the bare :root with NO attribute;
-      the switcher, persistence and validation are all data-driven off that
-      list, so a new block + entry is the whole change -- true at RUNTIME,
-      but the shipped-palette cycle-enumeration expectations live in the
-      tests (the cycle-wrap row in tests/extensions/webui-theme-pref.test.ts
-      and the header-cycle pins in tests/dom-helper/app.test.tsx): a real
-      third theme must also update those expectation arrays).
-   ACCENT GUIDANCE: on a dark base a good accent sits around L50-70. A dark
-   accent fails as a line/border color -- #704920 measured ~2.4:1 against
-   the bg, invisible hairlines. A BRIGHT accent must flip --text-inverse to
-   a dark ink (hotdog uses #161312) so text on filled --accent buttons stays
-   readable; a darker accent keeps #ffffff.
-   THE DEFAULT: the zero-choice look is HOTDOG -- the bare :root, a fresh
-   boot carries NO attribute; the purple palette lives below as the
-   switcher's attribute-selected stop. */
+      set (--bg-base/primary/secondary/tertiary/elevated/hover/active,
+      --text-primary/secondary/muted/inverse, --accent + hover/active/soft/
+      glow, --border/--border-light) and nothing else: unlisted tokens fall
+      back to the bare :root; --border-focus/--shadow-glow follow the accent
+      vars, never restate them;
+   2. one {id, label} entry in THEME_REGISTRY in ui/theme-pref.ts (first =
+      default, rendered from the bare :root with NO attribute). The
+      switcher/validation are data-driven, but the shipped-palette cycle
+      expectations are pinned in tests (webui-theme-pref.test.ts cycle-wrap,
+      app.test.tsx header-cycle): a new theme updates those arrays too.
+   ACCENT: a good dark-base accent sits around L50-70. A dark accent fails
+   as a line/border color (#704920 measured ~2.4:1 vs the bg). A BRIGHT
+   accent must flip --text-inverse to dark ink (hotdog: #161312) so
+   filled-button text stays readable; darker keeps #ffffff. */
 
 :root[data-theme="purple"] {
-    /* Darker accent: keeps #ffffff ink on filled buttons (see the guidance
-       above). */
+    /* Darker accent: keeps #ffffff ink on filled buttons (guidance above). */
 
     /* Background layers */
     --bg-base: #0d0d0f;
@@ -325,7 +299,166 @@ body {
 }
 
 .hidden {
-    display: none !important;
+    display: none;
+}
+
+/* ── House ghost-glyph standard ─────────────────────────────────────────────
+   The header/toolbox icon buttons all wear ONE box: 28px, radius-sm, no
+   fill, muted ink, a 1px border merely transparent at rest (width kept so
+   hover/focus shift no layout), accent-soft pop on hover, and focus-visible
+   with the house inset outline (1px accent, offset -1px). Local deltas stay
+   with the components: .search-btn paints .active instead of a focus ring;
+   the fence chip keeps its degraded-ink hover. The sibling grammars below
+   spread the idiom: fill-less focus, disabled tell, row wash, wash+ink
+   lift, copy affordances, chevron flip, field-focus. Members (inline SVG
+   glyphs tinted by currentColor, icons.tsx): .search-btn .logs-toggle
+   (flip: .logs-toggle-glyph-up) .file-reload-btn (settings rider disables
+   mid-snapshot; .file-reload-glyph = identity hook) .theme-btn
+   .tool-exec-status (fence-* tints) .settings-open-btn .thinking-toggle
+   .workbench-toggle/.sidebar-toggle (mirrored columns; on phones the
+   sidebar one is the drawer's only opener) .editor-mode-toggle */
+.search-btn,
+.logs-toggle,
+.file-reload-btn,
+.theme-btn,
+.tool-exec-status,
+.settings-open-btn,
+.thinking-toggle,
+.workbench-toggle,
+.sidebar-toggle,
+.editor-mode-toggle {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.search-btn:hover,
+.logs-toggle:hover,
+.file-reload-btn:hover:not(:disabled),
+.theme-btn:hover,
+.tool-exec-status:hover:not(.tool-exec-degraded),
+.settings-open-btn:hover,
+.thinking-toggle:hover,
+.workbench-toggle:hover,
+.sidebar-toggle:hover,
+.editor-mode-toggle:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+/* .logs-toggle keeps its outline-only focus with the fill-less grammar
+   below; .search-btn shows its state through .active instead. */
+.file-reload-btn:focus-visible,
+.theme-btn:focus-visible,
+.tool-exec-status:focus-visible,
+.settings-open-btn:focus-visible,
+.thinking-toggle:focus-visible,
+.workbench-toggle:focus-visible,
+.sidebar-toggle:focus-visible,
+.editor-mode-toggle:focus-visible {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* House inset-outline focus WITHOUT the accent-soft fill, for controls whose
+   rest state already owns its surface (the sidebar chevron, tool part-heads
+   -- divs with role=button, the goto pair, the subagents disclosure). */
+.logs-toggle:focus-visible,
+.part-head-toggle:focus-visible,
+.editor-goto-btn:focus-visible,
+.editor-goto-input:focus-visible,
+.subagents-toggle:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* House disabled grammar: dimmed, cursor stops promising. Riders: the
+   read-only log view, the composer's attach/mic locks, the Reload trio (the
+   ghost hover must not fake an affordance disabled refuses) and dialog
+   buttons with no pending save. */
+.input-area.read-only .chat-input,
+.input-area.read-only .send-btn,
+.attach-btn:disabled,
+.mic-btn:disabled,
+.file-reload-btn:disabled,
+.settings-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Row hover wash: the list/tab/menu highlight (and the tab strip's blank
+   tail, which wears it permanently). */
+.session-item:hover,
+.sidebar-header-resize:hover,
+.log-item:hover,
+.combobox-option:hover,
+.md-content table.md-table tbody tr:hover,
+.workbench-tab-label:hover,
+.ws-trail,
+.context-menu-item:hover {
+    background: var(--bg-hover);
+}
+
+/* The same wash with an ink lift, for controls riding quiet chrome. */
+.workbench-empty-btn:hover,
+.ft-row-btn:hover,
+.file-view-lang:hover,
+.file-view-btn:hover,
+.settings-cat:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+/* Copy affordances (session-id chip, message footer, tool parts): quiet at
+   rest, full ink on hover, success for the confirmed tick. The check
+   glyphs' display rules ride their components. */
+.current-session-id:hover,
+.message-assistant-footer .footer-copy:hover,
+.part-copy:hover {
+    opacity: 1;
+    color: var(--text-primary);
+}
+
+.current-session-id.copied,
+.message-assistant-footer .footer-copy.copied,
+.part-copy.copied {
+    opacity: 1;
+    color: var(--success);
+}
+
+/* Chevron flip for the disclosure family (open == rotated). The flip
+   classes ride the SAME svgs, so the names the tests pin survive. */
+.logs-toggle-glyph-up,
+.subagents-toggle-glyph-up,
+.user-fold-toggle[aria-expanded="true"] .fold-chevron,
+.tool-box-summary:has(+ .tool-file-pre) .fold-chevron,
+.tool-box-summary:has(+ .tool-result-pre) .fold-chevron,
+.part-head-toggle:has(+ .tool-file-pre) .fold-chevron {
+    transform: rotate(180deg);
+}
+
+/* House field-focus grammar: text inputs and textareas drop the default
+   ring and answer with the accent border (the border exists at rest -- the
+   focus change is color only, so nothing shifts). */
+.search-input:focus,
+.message.question .q-text:focus,
+.settings-search:focus,
+.settings-edit-input:focus,
+.settings-list-add-input:focus,
+.settings-provider-add-input:focus {
+    outline: none;
+    border-color: var(--accent);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -340,7 +473,6 @@ body {
     overflow: hidden;
 }
 
-/* Subtle gradient orb background */
 #login-screen::before {
     content: "";
     position: absolute;
@@ -388,13 +520,13 @@ body {
     font-size: 1.025rem;
 }
 
-#login-form {
+.login-form {
     display: flex;
     flex-direction: column;
     gap: 14px;
 }
 
-#login-form input {
+.login-form input {
     padding: 14px 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -408,16 +540,16 @@ body {
     outline: none;
 }
 
-#login-form input:focus {
+.login-form input:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-#login-form input::placeholder {
+.login-form input::placeholder {
     color: var(--text-muted);
 }
 
-#login-form button {
+.login-form button {
     padding: 14px;
     border: none;
     border-radius: var(--radius);
@@ -433,12 +565,12 @@ body {
         box-shadow 0.2s;
 }
 
-#login-form button:hover {
+.login-form button:hover {
     background: var(--accent-hover);
     box-shadow: var(--shadow-glow);
 }
 
-#login-form button:active {
+.login-form button:active {
     transform: scale(0.98);
 }
 
@@ -455,12 +587,12 @@ body {
    MAIN UI LAYOUT
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Column layout: the full-width #session-info header band pins the top, and
-   #workspace-row takes the rest (sidebar / chat / workbench ride it as a
-   flex row). Opening or resizing the workbench therefore never pushes the
-   header; the band spans the whole viewport. */
+/* Column layout: the full-width #session-info header band pins the top and
+   #workspace-row takes the rest, so opening or resizing the workbench never
+   pushes the header. */
+/* display: flex rides .screen, so .hidden can toggle it at the same
+   specificity (the !important this rule once forced is gone). */
 #main-ui {
-    display: flex;
     flex-direction: column;
     height: 100vh;
     background: var(--bg-primary);
@@ -487,24 +619,21 @@ body {
     transition: transform 0.3s var(--ease-out);
 }
 
-/* The chat-header disclosure's collapsed state: display:none drops the
-   panel out of the #workspace-row flex row, so the chat column takes the
-   space (the resize handle rides inside #sidebar and disappears with it;
-   the seam's offsetParent guard no-ops a CSS-hidden one anyway). The
-   mobile drawer needs no twin rule -- there the panel's default is already
-   display:none, and the same preference simply stops rendering .open
-   (see app.tsx sidebarCollapsedAtom: one preference, honest per viewport). */
+/* display:none drops the panel out of the #workspace-row flex row so the
+   chat column takes the space (the resize handle rides inside and vanishes
+   with it; the seam's offsetParent guard no-ops a hidden one). No mobile
+   twin rule: there the default is already display:none (app.tsx
+   sidebarCollapsedAtom: one preference, honest per viewport). */
 #sidebar.sidebar-hidden {
     display: none;
 }
 
-/* Sidebar resize handle: a 6px strip starting AT the right border and
-   extending onto the (non-scrolling) chat side -- the session list's 6px
-   scrollbar track sits INSIDE the sidebar, so a straddling strip (the old
-   right:-3px) covered half the track and its ::after pad ate the rest: a
-   thumb press landed on the handle instead. The
-   ::after hit pad widens OUTWARD only (left:0), keeping a ~14px target off
-   the track. Keyboard-operable (see onSidebarResizeKey in app.tsx). */
+/* Sidebar resize handle: the 6px strip starts AT the right border and
+   extends onto the (non-scrolling) chat side -- a straddling strip would
+   cover the session list's 6px scrollbar track (which sits inside the
+   sidebar) and a thumb press would land on the handle instead. The ::after
+   hit pad widens OUTWARD only (left:0), keeping a ~14px target off the
+   track. Keyboard-operable (onSidebarResizeKey in app.tsx). */
 #sidebar-resize {
     position: absolute;
     top: 0;
@@ -526,10 +655,9 @@ body {
     right: -8px;
 }
 
-/* The highlight is a 2px line at the border edge, not a full-strip paint
-   (the 6px slab reads as a layout edge; the line names the
-   seam without pretending to be one). focus-visible paints the SAME line
-   at full strength -- no outline box around the invisible strip. */
+/* The highlight is a 2px line at the border edge (a full 6px slab reads as
+   a layout edge; the line names the seam without pretending to be one).
+   focus-visible paints the same line at full strength, no outline box. */
 #sidebar-resize:hover,
 body.sidebar-resizing #sidebar-resize {
     background: linear-gradient(var(--accent-soft), var(--accent-soft)) left/2px 100% no-repeat;
@@ -539,7 +667,6 @@ body.sidebar-resizing #sidebar-resize {
     background: linear-gradient(var(--accent), var(--accent)) left/2px 100% no-repeat;
 }
 
-/* While dragging: consistent cursor everywhere, no accidental selection. */
 body.sidebar-resizing {
     cursor: col-resize;
     user-select: none;
@@ -549,10 +676,9 @@ body.sidebar-resizing {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    /* Content-hugging (the fixed band-height token retired with the old
-       across-the-split alignment): the 28px action buttons set the height,
-       4px vertical padding each side over the 1px seam. The h2 centerline
-       rides the band's middle, level with the chat column's #chat-header. */
+    /* Content-hugging: the 28px action buttons set the height, 4px vertical
+       padding each side over the 1px seam; the h2 rides level with the chat
+       column's #chat-header centerline. */
     padding: 4px 6px 4px 12px;
     border-bottom: 1px solid var(--border);
 }
@@ -565,7 +691,7 @@ body.sidebar-resizing {
     color: var(--text-muted);
 }
 
-#new-session-btn {
+.new-session-btn {
     width: 28px;
     height: 28px;
     border-radius: var(--radius-sm);
@@ -581,57 +707,35 @@ body.sidebar-resizing {
     justify-content: center;
 }
 
-#new-session-btn:hover {
+.new-session-btn:hover {
     background: var(--accent);
     color: var(--text-inverse);
     border-color: var(--accent);
     box-shadow: var(--shadow-glow);
 }
 
-/* ── Sidebar search (header magnifier + panel) ───────────────────────────
-   The magnifier is an inline <svg> (icons.tsx IconSearch) tinted by
-   currentColor, like every glyph in the house idiom. */
+/* ── Sidebar search (header magnifier + panel) ─────────────────────────── */
 .sidebar-header-actions {
     display: flex;
     align-items: center;
     gap: 6px;
 }
 
-#search-btn {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#search-btn:hover {
-    color: var(--accent);
-    background: var(--accent-soft);
-}
-
-#search-btn.active {
+.search-btn.active {
     color: var(--accent);
     background: var(--accent-soft);
     border-color: var(--accent);
 }
 
-
 /* Panel occupies the scroll region the two lists vacate when search opens. */
-#search-panel {
+.search-panel {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
 }
 
-#search-bar {
+.search-bar {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -643,8 +747,7 @@ body.sidebar-resizing {
     color: var(--text-muted);
 }
 
-
-#search-input {
+.search-input {
     flex: 1;
     min-width: 0;
     padding: 6px 10px;
@@ -656,12 +759,7 @@ body.sidebar-resizing {
     font-size: 0.945rem;
 }
 
-#search-input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-#search-clear {
+.search-clear {
     border: none;
     background: transparent;
     color: var(--text-muted);
@@ -671,12 +769,12 @@ body.sidebar-resizing {
     border-radius: var(--radius-sm);
 }
 
-#search-clear:hover {
+.search-clear:hover {
     color: var(--text-primary);
     background: var(--bg-elevated);
 }
 
-#search-results {
+.search-results {
     flex: 1;
     overflow-y: auto;
     padding: 8px;
@@ -704,7 +802,6 @@ body.sidebar-resizing {
     outline: none;
 }
 
-/* live/cold scope tag on the result's line-1. */
 .search-scope {
     margin-left: 6px;
     font-size: 0.725rem;
@@ -721,9 +818,9 @@ body.sidebar-resizing {
     border-color: var(--accent);
 }
 
-/* B5: attested-subagent label on a hidden-log hit (SearchHitWire.subagentOf).
-   Plain muted text, no badge treatment: it explains why the row never sat
-   in Recent Logs. Omitted outright when the hit carries no field. */
+/* Attested-subagent label on a hidden-log hit (SearchHitWire.subagentOf):
+   plain muted text, no badge treatment (it explains why the row never sat
+   in Recent Logs); omitted when the hit carries no field. */
 .search-subagent {
     margin-left: 6px;
     font-size: 0.725rem;
@@ -772,17 +869,12 @@ body.sidebar-resizing {
     margin-bottom: 2px;
 }
 
-.session-item:hover {
-    background: var(--bg-hover);
-}
-
 .session-item.active {
     background: var(--accent-soft);
 }
 
-/* Rows are keyboard-focusable (role=listitem tabindex=0, audit 1.2); mirror
-   the log-row focus grammar and add an inset accent ring so focus is visible
-   on the accent-soft active background too. */
+/* Rows are keyboard-focusable (role=listitem tabindex=0); inset accent ring
+   so focus stays visible on the accent-soft active background too. */
 .session-item:focus-visible {
     background: var(--bg-hover);
     outline: 1px solid var(--accent);
@@ -790,22 +882,14 @@ body.sidebar-resizing {
 }
 
 /* ── Sidebar Row Grammar (shared by live sessions and cold logs) ───────────
-   line 1: profile · provider/model        [status][action]  -- model
-                                                            ellipsizes; badge
-                                                            + action form the
-                                                            right-hand cluster
-   middle row (class row-l2): the title -- quiet text, single line with
-       ellipsis (the full value rides the native title); omitted outright
-       when the session has none (the row stays two lines)
-   bottom row (class row-l3): YYYY-MM-DD HH:MM · ctx · msgs [plug n] [⋮]
-       (the raw session id is no longer displayed; it stays a key only; the
-        client count is a plug icon, never text; the row's visible menu
-        button inlines at the very end of this line -- never its own row --
-        revealed on hover/focus and always shown on the active row, see
-        .row-menu-btn)
-   Separators are middle dots (·, U+00B7), vertically centered by the font's
-   em box. No literal parens: status is a glyph badge (.row-glyph, inline
-   SVG tinted by currentColor), profile quiet muted text. */
+   line 1 (.row-l1): profile · provider/model [status][action] -- the model
+       ellipsizes; badge + action form the right-hand cluster
+   line 2 (.row-l2): the title, quiet single line with ellipsis (full value
+       rides the native title); omitted when the session has none
+   line 3 (.row-l3): date · ctx · msgs [plug n] [menu] -- the raw session id
+       is NOT displayed; .row-menu-btn inlines at the line's end, shown on
+       hover/focus and always on the active row. Separators are middle dots
+       (·); status is a glyph badge (.row-glyph), profile quiet muted. */
 
 .session-item .row-l1,
 .log-item .row-l1 {
@@ -825,9 +909,8 @@ body.sidebar-resizing {
     color: var(--text-secondary);
 }
 
-/* Middle row: the title. It's the longest text on the card (server-capped
-   at 12 words), so the ellipsis is load-bearing and the native title
-   carries the full value (the status-glyph tooltip idiom). */
+/* The title: longest text on the card (server-capped at 12 words), so the
+   ellipsis is load-bearing and the native title carries the full value. */
 .session-item .row-l2,
 .log-item .row-l2 {
     font-size: 0.905rem;
@@ -852,8 +935,8 @@ body.sidebar-resizing {
 }
 
 .row-model {
-    /* Matches the dot-joined profile tag; row-l1's size is the line's title
-       voice, which made the model read bigger than the rest of the card. */
+    /* Matches the dot-joined profile tag's size; row-l1's own size is the
+       line's title voice, which made the model read bigger than the card. */
     font-size: 0.875rem;
     flex: 0 1 auto;
     min-width: 0;
@@ -870,8 +953,8 @@ body.sidebar-resizing {
 }
 
 /* Pin marker: leads line-1 on pinned rows (server pin flag). The emoji
-   carries its own color, so no text tint here; borderless and bare to
-   read as a marker, not another status badge. */
+   carries its own color; borderless and bare to read as a marker, not
+   another status badge. */
 .row-pin {
     flex: 0 0 auto;
     display: inline-flex;
@@ -880,11 +963,10 @@ body.sidebar-resizing {
     line-height: 1.5;
 }
 
-/* Status badge: glyph in a quiet box -- faint tint + hairline border,
-   minimal rounding (radius-sm, not a pill). log-state-* overrides color +
-   background; base covers unclassed live rows. The glyph is a custom stroke
-   SVG set tinted by currentColor (see .row-glyph), so the state colors carry
-   into it for free; the human label rides as the native title. */
+/* Status badge: glyph in a quiet box (radius-sm, not a pill). log-state-*
+   overrides color + background; base covers unclassed live rows. The glyph
+   is a currentColor-tinted stroke SVG (.row-glyph), so state colors carry
+   into it for free; the human label rides the native title. */
 .row-status {
     display: inline-flex;
     align-items: center;
@@ -899,11 +981,10 @@ body.sidebar-resizing {
     line-height: 1.5;
 }
 
-/* Status glyph set (bolt/circle/question/x/moon): the shapes live in
-   icons.tsx (RowStatusGlyph) as inline SVG; the row-glyph and
-   row-glyph-<status> classes ride the svg as identity hooks. Sizing is the
-   svg's own attrs; the tint is the badge's currentColor, so the state
-   colors below carry into the stroke for free. */
+/* Status glyph set (bolt/circle/question/x/moon): shapes live in icons.tsx
+   (RowStatusGlyph); the row-glyph / row-glyph-<status> classes ride the svg
+   as identity hooks. Sizing is the svg's own attrs; the tint is the badge's
+   currentColor, so the state colors below carry into the stroke for free. */
 
 .row-sep {
     color: var(--text-muted);
@@ -931,21 +1012,19 @@ body.sidebar-resizing {
     margin-left: 0;
 }
 
-/* Profile tag: rides line 1 ahead of the model. Quieter than the status
-   badge -- plain muted text, no badge treatment so the status stays the
-   loudest slot; the model keeps the ellipsizing role (.row-model). */
+/* Profile tag (line 1): plain muted text -- the status stays the loudest
+   slot; the model keeps the ellipsizing role (.row-model). */
 .row-profile {
     font-size: 0.875rem;
     font-weight: 400;
     color: var(--text-muted);
 }
 
-/* Client plug: the live count on session cards, trailing line 3 at the
-   card's bottom-right (margin-left:auto -- the row-action-right idiom). The
-   plug is the inline SVG idiom (icons.tsx IconPlug) as the span's first
-   child: an empty glyph adds nothing to textContent, so the span's text
-   stays pure number; 1 client is icon-only (0/unattested never renders), so
-   a bare plug means "this one", the number counts the rest. */
+/* Client plug: the live count, trailing line 3 bottom-right
+   (margin-left:auto). The plug is an inline SVG (icons.tsx IconPlug) as the
+   span's first child: an empty glyph adds nothing to textContent, so the
+   span's text stays a pure number. 1 client renders icon-only (0 never
+   renders): a bare plug means "this one", the number counts the rest. */
 .row-clients {
     flex: 0 0 auto;
     margin-left: auto;
@@ -955,25 +1034,21 @@ body.sidebar-resizing {
     cursor: default;
 }
 
-
 /* Slightly louder than the muted text it rides beside, so the plug reads
    as a live marker. aria-hidden decoration: no focus stop, no lift state. */
 .row-clients:hover {
     color: var(--text-primary);
 }
 
-/* Visible menu affordance, the twin of the right-click (owner: make the
-   trigger seeable). Trails the card bottom-right behind the plug; hidden
-   until the row is hovered or keyboard-focused (visibility drops it from
-   the tab order while invisible -- no phantom stops), with one exception:
-   the ACTIVE (viewed) row shows it always (same treatment as the subagent
-   rows -- there the menu is the working affordance,
-   not a discovery hunt). Bare-icon idiom like the section-header chips. */
+/* Visible menu affordance, the twin of the right-click. Trails the card
+   bottom-right behind the plug; hidden until hover/focus-within (visibility
+   drops it from the tab order while invisible -- no phantom stops), always
+   shown on the ACTIVE row: there the menu is the working affordance. */
 .row-menu-btn {
     flex: 0 0 auto;
     /* Pin right: the button owns the auto margin when it trails metrics
-       directly; behind the client plug, the plug keeps it and the button
-       rides 2px off its shoulder. */
+       directly; behind the client plug the plug keeps it and the button
+       rides 2px off its shoulder (see the .row-clients sibling rule). */
     margin-left: auto;
     padding: 0 2px;
     display: inline-flex;
@@ -989,11 +1064,10 @@ body.sidebar-resizing {
     position: relative;
 }
 
-/* Row-menu affordance sizing (shared idiom, subagent rows first):
-   the 12px glyph read as invisible -- a 15px glyph, and the hit target
-   >= ~31px: an absolutely-positioned pseudo extends the button's clickable
-   box into the surrounding flex gap -- the glyph rides the line, the
-   pointer zone grows. */
+/* Row-menu affordance sizing (shared idiom): a 12px glyph read as invisible
+   -- 15px glyph, hit target >= ~31px via the absolutely-positioned pseudo
+   extending the clickable box into the surrounding flex gap (the glyph
+   rides the line, the pointer zone grows). */
 .row-menu-btn svg {
     width: 15px;
     height: 15px;
@@ -1018,7 +1092,6 @@ body.sidebar-resizing {
     visibility: visible;
     opacity: 1;
 }
-
 
 .row-menu-btn:hover {
     color: var(--text-primary);
@@ -1052,11 +1125,9 @@ body.sidebar-resizing {
     font-size: 0.805rem;
 }
 
-/* Bottom-row metrics (ctx / msgs): the ellipsizing tail role, riding the
-   bottom row after the date. Every metric shrinks (not just the trailing
-   ones) so the pinned right-hand cluster -- client plug + menu button --
-   can never be pushed off the clipped edge; with room to spare, nothing
-   visually changes. */
+/* Bottom-row metrics (ctx / msgs): every metric shrinks (not just the
+   trailing ones) so the pinned right-hand cluster -- client plug + menu
+   button -- can never be pushed off the clipped edge. */
 .row-l3 .row-metric {
     flex: 0 1 auto;
     min-width: 0;
@@ -1065,8 +1136,7 @@ body.sidebar-resizing {
 }
 
 /* ── Session Working Indicator (sidebar) ──────────────────────────────────
-   The busy tell rides the Stop button itself (composer .spinner idiom),
-   so the badge stays plain text; inline-flex + gap carry the ring label. */
+   The busy tell rides the Stop button itself (composer .spinner idiom). */
 
 .session-cancel-btn {
     display: inline-flex;
@@ -1100,29 +1170,23 @@ body.sidebar-resizing {
 
 .sidebar-header-secondary {
     margin-top: 4px;
-    /* The band pin is the TOP row's; the Recent Logs titlebar keeps its own
-       natural height (2+28+2+2 seams) -- opt back out of the token. */
+    /* The band height pin is the TOP row's; this titlebar keeps its natural
+       height (2+28+2+2 seams) -- opt back out of the token. */
     height: auto;
     padding-top: 2px;
     padding-bottom: 2px;
     border-top: 1px solid var(--border);
 }
 
-/* The titlebar doubles as the section's vertical resize handle (see
-   panel-resize.ts + the logsPanel wiring in app.tsx): drag anywhere on it
-   except the collapse button, double-click resets, and -- because it carries
-   role="separator" tabindex="0" while expanded -- arrows resize it. Collapsed
-   drops the class, so no cursor lies about what a drag would do. */
+/* The titlebar doubles as the section's vertical resize handle
+   (panel-resize.ts + logsPanel in app.tsx): drag anywhere except the
+   collapse button, double-click resets, arrows resize (role="separator"
+   tabindex="0" while expanded). Collapsed drops the class: no cursor lies. */
 .sidebar-header-resize {
     cursor: row-resize;
     touch-action: none; /* the drag owns the gesture instead of scrolling */
 }
 
-.sidebar-header-resize:hover {
-    background: var(--bg-hover);
-}
-
-/* Same focus grammar as #sidebar-resize: tint plus an inset accent outline. */
 .sidebar-header-resize:focus-visible {
     background: var(--accent-soft);
     outline: 1px solid var(--accent);
@@ -1134,45 +1198,9 @@ body.sidebar-resizing {
     user-select: none;
 }
 
-/* Collapse chevron at the right edge of the titlebar: an inline 24-viewBox
-   stroke svg (icons.tsx IconChevron), tinted by currentColor like every
-   glyph in the house idiom. */
-#logs-toggle {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
+/* The chevron (icons.tsx IconChevron) points down at rest; collapsed it
+   points where the next click takes the list (flip: .logs-toggle-glyph-up). */
 
-#logs-toggle:hover {
-    color: var(--accent);
-    background: var(--accent-soft);
-}
-
-#logs-toggle:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-}
-
-
-/* The chevron is an inline svg (icons.tsx IconChevron) pointing down at
-   rest. Collapsed: the arrow points where the next click takes the list --
-   the flip rides a rotation class on the SAME svg, so the class name the
-   tests pin survives unchanged. */
-.logs-toggle-glyph-up {
-    transform: rotate(180deg);
-}
-
-/* While dragging the section: consistent cursor everywhere, no selection --
-   the body.sidebar-resizing idiom one axis over. */
 body.logs-resizing {
     cursor: row-resize;
     user-select: none;
@@ -1187,9 +1215,8 @@ body.logs-resizing .sidebar-header-resize {
 #log-list {
     flex: 0 0 auto;
     /* The user's height (or the 240px default) is a CAP, not a reservation:
-       a short list stays short and the live-sessions list above it keeps
-       taking the leftover. Collapsed takes the box out of the flow entirely
-       -- the header stays, the sessions list gets the space back. */
+       a short list stays short and the live-sessions list keeps the
+       leftover. Collapsed takes the box out of flow (header stays). */
     max-height: var(--logs-height);
     overflow-y: auto;
     padding: 8px;
@@ -1199,10 +1226,9 @@ body.logs-resizing .sidebar-header-resize {
     display: none;
 }
 
-/* Day-section labels (owner ruling 2026-11-18): light type, no surface -- the list
-   deepens into named days ("TODAY", "YESTERDAY", then YYYY-MM-DD) and the
-   pinned block reads as its own section above them. No border, no fill:
-   the rows keep being the only surfaces in here (clean-surface ruling). */
+/* Day-section labels: light type, no surface (the rows keep being the only
+   surfaces in here) -- the list deepens into named days ("TODAY",
+   "YESTERDAY", then YYYY-MM-DD), pinned block reading as its own section. */
 .log-section-label {
     font-size: 0.725rem;
     font-weight: 600;
@@ -1234,10 +1260,6 @@ body.logs-resizing .sidebar-header-resize {
        attests in a border color); no resting background -- the fill belongs
        to hover/focus/active only. */
     border: 1px solid transparent;
-}
-
-.log-item:hover {
-    background: var(--bg-hover);
 }
 
 .log-item:focus-visible {
@@ -1282,11 +1304,9 @@ body.logs-resizing .sidebar-header-resize {
 
 /* ── Top Band (global controls) ───────────────────────────────────────────── */
 
-/* The app's top band: a full-width child of #main-ui carrying ONLY the
-   global controls (.header-status-group: settings / theme / chat-editor
-   mode / workbench), pinned right. Content-hugging: the 28px glyph boxes
-   set the height (2+28+2 over the 1px seam = 33px); sidebar and workspace
-   live below it in #workspace-row, so nothing here can be pushed by a pane. */
+/* The app's top band: full-width child of #main-ui carrying ONLY the global
+   controls (.header-status-group), pinned right; the 28px glyph boxes set
+   the height (2+28+2 over the 1px seam). Panes live below in workspace-row. */
 #session-info {
     display: flex;
     align-items: center;
@@ -1299,10 +1319,9 @@ body.logs-resizing .sidebar-header-resize {
 
 /* ── Chat Header (per-pane identity + toggles) ────────────────────────────── */
 
-/* The chat column's own header, directly under the top band: the id copy
-   badge and the browse chips left, the pane's toggles (reasoning, exec
-   fence) right. Same content band as .sidebar-header (4+28+4 over the
-   1px seam), so the two stacked pane headers read as one row. */
+/* The chat column's header under the top band: id copy badge + browse chips
+   left, pane toggles right. Same content band as .sidebar-header (4+28+4
+   over the seam), so the two stacked pane headers read as one row. */
 #chat-header {
     display: flex;
     align-items: center;
@@ -1315,7 +1334,7 @@ body.logs-resizing .sidebar-header-resize {
     flex-shrink: 0;
 }
 
-#session-label {
+.session-label {
     color: var(--text-secondary);
     font-weight: 500;
     display: flex;
@@ -1323,10 +1342,9 @@ body.logs-resizing .sidebar-header-resize {
     gap: 6px;
 }
 
-/* Left cluster: the sidebar disclosure leads the identity chip and the
-   browse chips (2026-11-14), so #chat-header keeps exactly two flex
-   children and space-between pins the status group right whatever the
-   chips do. The 8px gap is the header's rhythm (the status group's too). */
+/* Left cluster (sidebar disclosure + identity chip + browse chips):
+   #chat-header keeps exactly two flex children so space-between pins the
+   status group right whatever the chips do. 8px is the header's rhythm. */
 .header-identity-group {
     display: flex;
     align-items: center;
@@ -1334,7 +1352,7 @@ body.logs-resizing .sidebar-header-resize {
     min-width: 0;
 }
 
-#current-session-id {
+.current-session-id {
     color: var(--text-muted);
     font-family: var(--font-mono);
     font-size: 0.875rem;
@@ -1343,15 +1361,12 @@ body.logs-resizing .sidebar-header-resize {
     border-radius: var(--radius-sm);
 }
 
-/* The fingerprint badge IS the full-id copy button (app.tsx onCopySessionId):
-   the footer copy idiom (.footer-copy family -- quiet affordance, hover lift
-   to full opacity/text-primary, success flash while confirmed) with the whole
-   badge as the click target. The icon pair replicates ICON_COPY/ICON_CHECK
-   from message-list.ts (same 24-viewBox geometry) as inline SVGs
-   (icons.tsx IconCopy/IconCheck); the empty glyphs add nothing to
-   textContent, so the badge text stays pure id, and the .copied state swaps
-   which of the two renders. */
-#current-session-id {
+/* The fingerprint badge IS the full-id copy button (app.tsx
+   onCopySessionId): the .footer-copy idiom (quiet, hover lift, success
+   flash) with the whole badge as the click target. The inline SVG glyph
+   pair adds nothing to textContent, so the badge text stays pure id;
+   .copied swaps which glyph renders. */
+.current-session-id {
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -1361,32 +1376,20 @@ body.logs-resizing .sidebar-header-resize {
     transition: opacity 0.15s, color 0.15s;
 }
 
-
-#current-session-id:hover {
-    opacity: 1;
-    color: var(--text-primary);
-}
-
-#current-session-id.copied {
-    opacity: 1;
-    color: var(--success);
-}
-
 .session-copy-check {
     display: none;
 }
 
-#current-session-id.copied .session-copy-icon {
+.current-session-id.copied .session-copy-icon {
     display: none;
 }
 
-#current-session-id.copied .session-copy-check {
+.current-session-id.copied .session-copy-check {
     display: inline-block;
 }
 
-/* Log view indicator */
-#log-view-label,
-#peek-view-label {
+.log-view-label,
+.peek-view-label {
     color: var(--warning);
     font-weight: 500;
     font-size: 0.875rem;
@@ -1399,8 +1402,8 @@ body.logs-resizing .sidebar-header-resize {
     border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
-#current-log-id,
-#current-peek-id {
+.current-log-id,
+.current-peek-id {
     color: var(--warning);
     font-family: var(--font-mono);
     font-size: 0.825rem;
@@ -1415,7 +1418,7 @@ body.logs-resizing .sidebar-header-resize {
 
 /* The peek's explicit claim: the ONE action that turns the read-only view
    into an attach. Accent-styled so it reads as the decision it is. */
-#peek-takeover-btn {
+.peek-takeover-btn {
     background: var(--accent-soft);
     border: 1px solid var(--accent);
     color: var(--accent);
@@ -1425,13 +1428,11 @@ body.logs-resizing .sidebar-header-resize {
     cursor: pointer;
 }
 
-#peek-takeover-btn:hover {
+.peek-takeover-btn:hover {
     background: var(--accent-glow);
 }
 
-#close-log-view-btn,
-#close-peek-view-btn,
-#close-subagent-view-btn {
+.close-view-btn {
     background: none;
     border: none;
     color: var(--warning);
@@ -1443,56 +1444,37 @@ body.logs-resizing .sidebar-header-resize {
     transition: opacity 0.15s;
 }
 
-#close-log-view-btn:hover,
-#close-peek-view-btn:hover,
-#close-subagent-view-btn:hover {
+.close-view-btn:hover {
     opacity: 1;
 }
 
-/* Keyboard focus on the read-only banners' controls (owner ruling
-   2026-11-18): the buttons are real, so Tab reaches them; the house focus
-   grammar (an inset accent outline, zero layout shift) names the seat.
-   Mouse posture is untouched. */
-#close-log-view-btn:focus-visible,
-#close-peek-view-btn:focus-visible,
-#close-subagent-view-btn:focus-visible {
+/* Keyboard focus on the read-only banners' controls: the buttons are real,
+   so Tab reaches them; the house inset-outline grammar names the seat with
+   zero layout shift. Mouse posture is untouched. */
+.close-view-btn:focus-visible {
     opacity: 1;
     outline: 1px solid var(--accent);
     outline-offset: -1px;
 }
 
-#peek-takeover-btn:focus-visible {
+.peek-takeover-btn:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: 1px;
 }
 
-/* Disabled input area for read-only log view */
-#input-area.read-only #chat-input {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-#input-area.read-only #send-btn {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-#input-area.read-only #model-selector,
-#input-area.read-only #profile-selector {
+.input-area.read-only .model-selector,
+.input-area.read-only .profile-selector {
     opacity: 0.5;
 }
 
 /* ── Model & Profile Switchers (composer pills) ───────────────────────────── */
 
 /* The label is the pill; the combobox trigger sits inside it borderless.
-   min-width:0 on the pills is what lets the composer row squeeze them when
-   the CHAT COLUMN narrows (docked workbench, wide sidebar) -- a viewport
-   media query cannot see a narrow column on a wide screen, and without
-   this the nowrap Stop/Send cluster overflowed the row and laid out under
-   the workbench panel, hit boxes and all (owner dogfood 2026-11-14).
-   With slack the pills still size to content, so nothing moves at rest. */
-#model-selector,
-#profile-selector {
+   min-width:0 lets the composer row squeeze the pills when the CHAT COLUMN
+   narrows -- a viewport media query cannot see a narrow column on a wide
+   screen (without this the nowrap Stop/Send cluster overflowed the row). */
+.model-selector,
+.profile-selector {
     color: var(--text-muted);
     font-size: 0.845rem;
     display: flex;
@@ -1511,10 +1493,9 @@ body.logs-resizing .sidebar-header-resize {
 
 #model-select,
 #profile-select {
-    /* The combobox trigger: the borderless inner control the native selects
-       were (same transparent/mono/pointer language), now a button -- so it
-       also sheds the UA button face, left-aligns its text and lays the value
-       beside the caret. */
+    /* The combobox trigger: a button now, so it sheds the UA button face
+       but keeps the transparent/mono/pointer language of the native selects
+       it replaced; left-aligns the value beside the caret. */
     appearance: none;
     background: transparent;
     color: var(--text-secondary);
@@ -1532,9 +1513,8 @@ body.logs-resizing .sidebar-header-resize {
     text-align: left;
 }
 
-/* The caret the native select painted on its own: two hairline borders make
-   a chevron in currentColor, so hover's ink shift carries it for free. Pure
-   CSS -- it adds no text to the control's accessible name. */
+/* Caret from two hairline borders in currentColor (hover's ink shift
+   carries it for free) -- pure CSS adds no text to the accessible name. */
 #model-select::after,
 #profile-select::after {
     content: "";
@@ -1554,37 +1534,33 @@ body.logs-resizing .sidebar-header-resize {
     white-space: nowrap;
 }
 
-/* Honest disabled posture: the pill already dims to 0.5 and hands its
-   cursor to default; the trigger must stop claiming pointer, or the
-   disabled chip still begs to be clicked. */
+/* Honest disabled posture: the pill already dims; the trigger must stop
+   claiming pointer, or the disabled chip still begs to be clicked. */
 #model-select:disabled,
 #profile-select:disabled {
     cursor: default;
 }
 
-#model-selector:hover,
-#profile-selector:hover {
+.model-selector:hover,
+.profile-selector:hover {
     border-color: var(--border-light);
 }
 
-#model-selector:hover #model-select,
-#profile-selector:hover #profile-select {
+.model-selector:hover #model-select,
+.profile-selector:hover #profile-select {
     color: var(--text-primary);
 }
 
-#model-selector:focus-within,
-#profile-selector:focus-within {
+.model-selector:focus-within,
+.profile-selector:focus-within {
     border-color: var(--accent);
 }
 
 /* ── Combobox popup (profile/model switchers) ─────────────────────────────
-   The one popup the switcher comboboxes share, mounted at the overlay root
-   beside the session context menu. It RIDES that menu's stack: same
-   position:fixed, same z-9999 tier, same clampMenuAnchor correction (the
-   app flips it above the trigger when the composer's viewport-bottom seat
-   leaves no room below), same outside-mousedown dismissal -- no third
-   stack. Its surface language is the composer's own completion menu
-   (--bg-elevated over --border/--shadow-lg, the 180px scroll ceiling). */
+   The one popup the switcher comboboxes share. RIDES the session context
+   menu's stack: same fixed position, z-9999, clampMenuAnchor correction,
+   outside-mousedown dismissal -- no third stack. Surface: --bg-elevated,
+   --shadow-lg, the 180px scroll ceiling. */
 .combobox-popup {
     position: fixed;
     z-index: 9999;
@@ -1634,10 +1610,6 @@ body.logs-resizing .sidebar-header-resize {
     user-select: none;
 }
 
-.combobox-option:hover {
-    background: var(--bg-hover);
-}
-
 /* Highlight follows ArrowUp/ArrowDown (the completion-item .active grammar:
    fill plus accent ink). */
 .combobox-option.active {
@@ -1658,20 +1630,16 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* ── Connection Status (composer action row) ────────────────────────────────
-   #connection-status renders ONLY while disconnected -- connected is ZERO
-   DOM, not a hidden span. It sits immediately LEFT of the Stop/Send cluster
-   in #composer-actions: the auto margin rides the indicator while it exists
-   (the buttons keep their own margin-left:auto for the indicator-less case,
-   and the sibling rules hand it over while it does), the cluster stays
-   pinned to the row's right edge, and nothing is reserved -- appearance and
-   vanish shift no button. Error-adjacent and small, the dot kept; a plain
-   span: no tab stop. */
-#connection-status {
+   Renders ONLY while disconnected -- connected is ZERO DOM, not a hidden
+   span. Left of the Stop/Send cluster: the auto margin rides the indicator
+   while it exists (sibling rules hand it over; the buttons keep their own
+   margin-left:auto otherwise), so appearance shifts no button. No tab stop. */
+.connection-status {
     margin-left: auto;
 }
 
-#connection-status + #cancel-btn,
-#connection-status + #send-btn {
+.connection-status + .cancel-btn,
+.connection-status + .send-btn {
     margin-left: 0;
 }
 
@@ -1694,195 +1662,40 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* Reasoning chip + fence icon + settings + theme + workbench, grouped so
-   the strip stays right-aligned as items come and go. 8px (owner-specified):
-   the 12px default spaced the icon-only chips further apart than their 28px
-   boxes wanted. */
+   the strip stays right-aligned as items come and go. 8px, not the 12px
+   default: icon-only chips sit tighter beside their 28px boxes. */
 .header-status-group {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-/* A degraded plane (broker respawn cap) must not look calm. */
-.header-btn.tool-exec-degraded {
+/* A degraded plane (broker respawn cap) must not look calm. .toggleable
+   stays as the behavior marker the DOM tests assert; its chrome is the
+   house ghost-glyph standard above. */
+.tool-exec-status.tool-exec-degraded {
     color: var(--error);
     font-weight: 600;
 }
 
-/* Icon-only header chips (the reasoning toggle, the fence chip + settings
-   gear) join the #search-btn/#theme-btn/#workbench-toggle glyph standard: a
-   28px box whose 1px border is merely transparent at rest (width kept --
-   hover shifts no layout), no fill, muted ink -> accent over accent-soft. The
-   classes (.header-btn toggleable / tool-exec-degraded) keep their BEHAVIOR
-   meaning; these ID rules just paint over the chip's rest chrome. No header
-   chip carries words any more -- the reasoning toggle went glyph-only too, so
-   the text-chip carve-out is gone. */
-#tool-exec-status,
-#settings-btn,
-#thinking-toggle {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    align-self: center;
-}
-
-#tool-exec-status:hover:not(.tool-exec-degraded),
-#settings-btn:hover,
-#thinking-toggle:hover {
-    color: var(--accent);
-    background: var(--accent-soft);
-}
-
 /* A degraded plane keeps its error ink even while hovering: the accent pop
    paints the box, never re-tints the shield. */
-#tool-exec-status.tool-exec-degraded:hover {
+.tool-exec-status.tool-exec-degraded:hover {
     background: var(--accent-soft);
-}
-
-#tool-exec-status:focus-visible,
-#settings-btn:focus-visible,
-#thinking-toggle:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
 }
 
 /* The fence chip is icon-only: posture truth rides title + aria-label, the
-   icon class carries the tint. fence-off = deliberate off, no-symbol on the
-   error token; fence-probe-failed = the same no-symbol on WARNING (a jail
-   the host cannot give is an accident, not a choice); degraded keeps the
-   chip's error ink above; shield-check ON and the neutral shields stay the
-   chip's quiet currentColor. */
+   icon class carries the tint. fence-off = deliberate off (error token);
+   fence-probe-failed = a jail the host cannot give is an accident, not a
+   choice (warning); degraded keeps the chip's error ink; shields stay quiet. */
 
-#tool-exec-status .fence-off {
+.tool-exec-status .fence-off {
     color: var(--error);
 }
 
-#tool-exec-status .fence-probe-failed {
+.tool-exec-status .fence-probe-failed {
     color: var(--warning);
 }
-
-.header-btn {
-    border-radius: var(--radius-sm);
-    padding: 2px 8px;
-    transition: border-color 0.15s, background 0.15s;
-    color: var(--text-muted);
-    font-size: 0.875rem;
-    font-family: var(--font-mono);
-}
-
-/* Worker-plane posture is a click-to-toggle control for the session's fence:
-   chip-button chrome (border + fill + hover/active) so the cue is visible
-   before the pointer arrives; still quiet enough to read as status. */
-.header-btn.toggleable {
-    border: 1px solid var(--border);
-    background: var(--bg-secondary);
-}
-
-.header-btn.toggleable:hover {
-    border-color: var(--accent);
-    background: var(--bg-hover);
-}
-
-.header-btn.toggleable:active {
-    background: var(--bg-active);
-}
-
-/* Header theme switcher: the #search-btn glyph standard -- transparent box
-   whose 1px border is merely transparent at rest (so hover/focus shift no
-   layout), muted -> accent over accent-soft, and the 16px artist's-palette
-   glyph as an inline SVG tinted by currentColor (icons.tsx IconPalette), so
-   it recolors itself with whatever palette is on screen. */
-#theme-btn {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    align-self: center;
-}
-
-#theme-btn:hover {
-    color: var(--accent);
-    background: var(--accent-soft);
-}
-
-/* Same focus grammar as #logs-toggle / .file-reload-btn: an inset outline,
-   no layout change. */
-#theme-btn:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-}
-
-
-/* Header workbench disclosure: the #search-btn / #theme-btn glyph standard
-   (28px box, 1px border merely transparent at rest so hover/focus shift no
-   layout; hover returns the .toggleable accent border over accent-soft;
-   :focus-visible takes #theme-btn's inset-outline grammar -- the
-   "header-btn toggleable" class keeps its behavior meaning). The glyph:
-   rounded rectangle outline, the narrow RIGHT column solid-filled -- its
-   left edge IS the single divider (5/16 of the box width from the right) --
-   mirroring the right dock this button opens, which it now sits beside (the
-   status group's last element). Inline SVG tinted by currentColor
-   (icons.tsx IconWorkbench). The chat-header's #sidebar-toggle copies the
-   recipe verbatim: same 28px glyph-box standard, its glyph the mirror (fill
-   on the LEFT column) pointing at the sessions dock left of the chat. The
-   top band's #editor-mode-toggle rides this SAME standard (its band
-   neighbors): without the ID override it would sit on the raw
-   .header-btn.toggleable chrome (visible border + --bg-secondary fill) that
-   these glyph boxes all reset to a transparent box at rest. */
-#workbench-toggle,
-#sidebar-toggle,
-#editor-mode-toggle {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    align-self: center;
-}
-
-#workbench-toggle:hover,
-#sidebar-toggle:hover,
-#editor-mode-toggle:hover {
-    color: var(--accent);
-    background: var(--accent-soft);
-}
-
-#workbench-toggle:focus-visible,
-#sidebar-toggle:focus-visible,
-#editor-mode-toggle:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-}
-
-
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MESSAGES
@@ -1932,7 +1745,6 @@ body.logs-resizing .sidebar-header-resize {
     word-break: break-word;
 }
 
-/* Bubble content */
 .message .bubble {
     padding: 8px 12px;
     border-radius: var(--radius-lg);
@@ -1959,10 +1771,9 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* Long user prompts fold to ~4 lines (message-list USER_PROMPT_FOLD_LINES).
-   A clamp, not a truncation: the full text stays in the DOM (the search
-   scan reads it), and revealMatch opens the fold when the hit lands inside
-   it. max-height is the engine-without-line-clamp fallback, matching the
-   bubble's 1.55 line-height. */
+   A clamp, not a truncation: the full text stays in the DOM (the search scan
+   reads it) and revealMatch opens the fold on a hit inside. max-height is
+   the no-line-clamp fallback, matching the bubble's 1.55 line-height. */
 .message.user .content.prompt-folded {
     display: -webkit-box;
     -webkit-line-clamp: 4;
@@ -1995,16 +1806,9 @@ body.logs-resizing .sidebar-header-resize {
     margin-left: 0;
 }
 
-.user-fold-toggle[aria-expanded="true"] .fold-chevron {
-    transform: rotate(180deg);
-}
-
 /* ── Assistant Message Footer ───────────────────────────────────────────────
-   Muted meta row after a completed assistant message: finish time, the
-   ctx gauge segment (used/total, when the render path attests the usage),
-   turn duration (when the render path knows it), copy affordance.
-   Deliberately quiet; the copy icon lifts to full contrast on hover (title
-   carries the tooltip), and the confirmed state flashes green. */
+   Muted meta row after a completed assistant message (finish time, ctx
+   gauge, duration, copy affordance) -- quiet; copy lifts on hover, green. */
 .message-assistant-footer {
     align-self: center;
     display: flex;
@@ -2017,19 +1821,16 @@ body.logs-resizing .sidebar-header-resize {
     padding: 4px 2px 16px;
 }
 
-/* The `used/total` ctx segment: the gauge pair the sidebar shows, in the
-   retired token-usage bubble's mono. Its title carries the hover breakdown
-   (native title is the house tooltip idiom, multi-line content included),
-   and tabIndex lets keyboard focus surface it. */
+/* The `used/total` ctx segment in mono; its native title carries the hover
+   breakdown (house tooltip idiom) and tabIndex lets keyboard focus it. */
 .message-assistant-footer .footer-ctx {
     font-family: var(--font-mono);
     cursor: default;
     white-space: nowrap;
 }
 
-/* The per-call duration segment sits beside the gauge in the same quiet
-   mono; no styling beyond staying on one line (its derived-ness, when
-   there is no gauge to carry it, rides the native title). */
+/* The per-call duration segment: same quiet mono, one line; when there is
+   no gauge its derived-ness rides the native title. */
 .message-assistant-footer .footer-call {
     font-family: var(--font-mono);
     white-space: nowrap;
@@ -2048,16 +1849,6 @@ body.logs-resizing .sidebar-header-resize {
     transition: opacity 0.15s, color 0.15s;
 }
 
-.message-assistant-footer .footer-copy:hover {
-    opacity: 1;
-    color: var(--text-primary);
-}
-
-.message-assistant-footer .footer-copy.copied {
-    opacity: 1;
-    color: var(--success);
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    MARKDOWN RENDERED CONTENT (.md-content)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -2067,7 +1858,6 @@ body.logs-resizing .sidebar-header-resize {
     white-space: normal;
 }
 
-/* Headings */
 .md-content h1,
 .md-content h2,
 .md-content h3,
@@ -2100,7 +1890,6 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-secondary);
 }
 
-/* First child heading shouldn't have top margin */
 .md-content > h1:first-child,
 .md-content > h2:first-child,
 .md-content > h3:first-child,
@@ -2110,7 +1899,6 @@ body.logs-resizing .sidebar-header-resize {
     margin-top: 0;
 }
 
-/* Paragraphs */
 .md-content p {
     margin: 0.8em 0;
 }
@@ -2123,7 +1911,6 @@ body.logs-resizing .sidebar-header-resize {
     margin-bottom: 0;
 }
 
-/* Inline code */
 .md-content code.inline-code {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
@@ -2134,7 +1921,6 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--accent);
 }
 
-/* Code blocks */
 .md-content pre.code-block {
     background: var(--bg-base);
     border: 1px solid var(--border);
@@ -2155,7 +1941,6 @@ body.logs-resizing .sidebar-header-resize {
     white-space: pre-wrap;
 }
 
-/* Lists */
 .md-content ul,
 .md-content ol {
     margin: 0.4em 0;
@@ -2179,7 +1964,6 @@ body.logs-resizing .sidebar-header-resize {
     margin-top: 0.3em;
 }
 
-/* Blockquotes */
 .md-content blockquote {
     border-left: 3px solid var(--accent);
     margin: 0.4em 0;
@@ -2191,14 +1975,12 @@ body.logs-resizing .sidebar-header-resize {
     margin: 0.2em 0;
 }
 
-/* Horizontal rules */
 .md-content hr {
     border: none;
     border-top: 1px solid var(--border);
     margin: 1em 0;
 }
 
-/* Links */
 .md-content a {
     color: var(--accent);
     text-decoration: none;
@@ -2210,7 +1992,6 @@ body.logs-resizing .sidebar-header-resize {
     border-bottom-color: var(--accent);
 }
 
-/* Bold and italic */
 .md-content strong {
     font-weight: 600;
 }
@@ -2224,7 +2005,6 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-muted);
 }
 
-/* Tables */
 .md-content table.md-table {
     width: 100%;
     border-collapse: collapse;
@@ -2259,23 +2039,14 @@ body.logs-resizing .sidebar-header-resize {
     border-bottom: none;
 }
 
-.md-content table.md-table tbody tr:hover {
-    background: var(--bg-hover);
-}
-
 /* ── Tool Call Blocks ───────────────────────────────────────────────────────
-   A generic interpreter for the declared display DSL (ToolDisplayWire).
-   Parts render in declaration order under the header; the posture is decided
-   by the spec, never by the tool name. Single-surface rule (owner ruling):
-   the BLOCK is the only surface -- one quiet background fill, no border, no
-   shadow. The header is a quiet typographic row (no band, no slab); the
-   declared-path parts (file bodies, the edit diff) open with a typographic path
-   header (muted dir + primary basename, copy button, meta right), and the
-   file/result bodies read as typographic content inside the block. Only an
-   expandable body carries one inner treatment so its extent is legible, and
-   only the diff rows carry a fill (the --diff-* family: a whisper on the row,
-   the number columns at a near-identical step so the rail stays continuous).
-   Color stays semantic: diff add/del, the error tint, tok-*. */
+   A generic interpreter for the declared display DSL (ToolDisplayWire):
+   parts render in declaration order, posture decided by the spec, never by
+   the tool name. Single-surface rule: the BLOCK is the only surface -- one
+   quiet fill, no border/shadow; the header is a quiet typographic row;
+   declared-path parts open with a path header (muted dir + primary
+   basename). Only an expandable body gets an inner treatment; only diff
+   rows carry a fill (--diff-*). Color stays semantic (diff, error, tok-*). */
 
 .tool-call-block {
     background: var(--bg-secondary);
@@ -2298,16 +2069,14 @@ body.logs-resizing .sidebar-header-resize {
     justify-content: space-between;
     font-size: 0.945rem;
     /* Static typographic row: the name carries the emphasis (primary), the
-       path summary stays the muted mono badge (below). Muted remainder, so a
-       pending block is already the resting state -- nothing to brighten until
-       a result changes the glyph. */
+       path summary stays the muted mono badge. Muted remainder, so a
+       pending block is already the resting state. */
     color: var(--text-muted);
     font-weight: 500;
     gap: var(--space-md);
 }
 
-/* The name keeps the primary ink -- the emphasis the row used to only
-   borrow on hover. */
+/* The name keeps the primary ink: it is the row's emphasis. */
 .tool-call-name {
     flex-shrink: 0;
     display: flex;
@@ -2337,8 +2106,7 @@ body.logs-resizing .sidebar-header-resize {
 .tool-call-status.status-ok { color: var(--success); }
 .tool-call-status.status-error { color: var(--error); }
 
-/* The prose posture's json disclosure pre (the framed header's args box is
-   gone; this is the class's only renderer now). */
+/* The prose posture's json disclosure pre (the class's only renderer). */
 .tool-args {
     margin: 0;
     font-family: var(--font-mono);
@@ -2348,19 +2116,18 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* ── In-flight Tool Call (live-only streamingToolCall frame) ───────────────
-   The committed block's own posture carries the frame and the header, so the
-   in-progress tell is two things only: the shared .spinner in the status slot
-   (currentColor, so no hue of its own) and the accumulating wire args below.
-   The accent rail says "this call has not committed yet" in the same grammar
-   the thinking block uses; the final toolCall frame replaces the whole block
-   in this element, so the rail disappears with the posture. */
+   The committed block's posture carries the frame and header, so the
+   in-progress tell is the shared .spinner in the status slot (currentColor,
+   no hue of its own) plus the accumulating wire args. The accent rail says
+   "not committed yet" in the thinking-block grammar; the final toolCall
+   frame replaces the block, so the rail disappears with the posture. */
 .tool-call-block.tool-call-streaming {
     border-left: 2px solid var(--accent);
     border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 /* The partial args, shown as-is: mid-stream this is usually NOT valid JSON,
-   so no folding, no highlighting, no prettifying -- a ceiling keeps a huge
+   so no folding, no highlighting, no prettifying; the ceiling keeps a huge
    write call from growing the transcript without limit (the committed frame
    carries the complete args and renders them properly). */
 .tool-call-stream-preview {
@@ -2375,10 +2142,8 @@ body.logs-resizing .sidebar-header-resize {
     overflow: hidden;
 }
 
-/* The generic result posture's collapsed disclosure: one muted centered summary
-   line until opened, then lazy content. NOT a box: no border, no fill -- the
-   block behind it is the only surface. (Declared-path parts got their own
-   header row below; this idiom now serves the result box alone.) */
+/* The generic result posture's collapsed disclosure: one muted centered
+   summary line until opened. NOT a box: the block behind is the surface. */
 .tool-file,
 .tool-result-box {
     margin: var(--space-xs) var(--space-lg);
@@ -2404,17 +2169,11 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-secondary);
 }
 
-/* Expand/collapse affordance: a chevron svg (icons.tsx IconChevron, class
-   .fold-chevron) rides directly right of the centered summary label / at
-   the part-row's end (currentColor, so the error posture's red carries in)
-   and pops to the accent on hover/focus -- the summary already toggles, so
-   this only signals that it is clickable. Inline over clipped on purpose: a
-   summary long enough to ellipsize scrolls the chevron out of the row with
-   the text, which the centered reading buys back. A single down chevron
-   rotating 180° is the expand/collapse pair (down = expand when closed,
-   up = collapse when open). The open body renders as the summary's
-   following <pre>, so :has(+ pre) on the host is the open attestation -- no
-   per-posture class. */
+/* Expand/collapse affordance: a chevron svg (.fold-chevron, icons.tsx)
+   rides right of the summary label / at the part-row's end (currentColor,
+   so the error posture's red carries in); pops to accent on hover/focus.
+   Inline over clipped: a long summary scrolls the chevron with the text.
+   Open state: the body is the summary's following <pre> (:has(+ pre)). */
 .fold-chevron {
     flex: 0 0 auto;
     margin-left: 6px;
@@ -2424,12 +2183,6 @@ body.logs-resizing .sidebar-header-resize {
         color 0.15s var(--ease-out);
 }
 
-.tool-box-summary:has(+ .tool-file-pre) .fold-chevron,
-.tool-box-summary:has(+ .tool-result-pre) .fold-chevron,
-.part-head-toggle:has(+ .tool-file-pre) .fold-chevron {
-    transform: rotate(180deg);
-}
-
 .tool-box-summary:hover .fold-chevron,
 .tool-box-summary:focus-visible .fold-chevron,
 .part-head-toggle:hover .fold-chevron,
@@ -2437,25 +2190,12 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--accent);
 }
 
-/* The file-part fold is a div (role=button), so focus needs the same quiet
-   accent step the old <button> got from the UA. */
-.part-head-toggle:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-}
-
-/* Part header (declared-path parts -- read's file box and both diff postures:
-   the edit diff, the all-add write diffs): the file header as a typographic
-   row. LEFT the path verbatim from the arg, directory portion muted and the
-   basename primary (the emphasis that makes a long path scannable);
-   immediately right of it the copy-path button; FAR RIGHT the meta --
-   "lines 12–61 of 340" / "N lines · K chars" for a file body (the basename is
-   already on the left, so the prefix is gone), "+N −M" for a diff (a zero-del
-   side renders nothing). Single-surface rule holds: no fill, no slab, no
-   border around the row -- only a hairline where an open body actually starts.
-   Toggle semantics live here for file parts (the centered summary they used to
-   ride is gone); the diff header is NOT a toggle, its line fold is the only
-   fold. The copy button stops propagation, so a copy never folds the body. */
+/* Part header (declared-path parts -- read's file box and both diff
+   postures): path verbatim on the LEFT, directory muted, basename primary
+   (what makes a long path scannable); copy-path beside it; FAR RIGHT the
+   meta -- line counts or "+N −M" (a zero-del side renders nothing). No
+   fill, no border -- only a hairline where an open body starts. File parts
+   toggle here; the diff header does not. Copy stops propagation. */
 .part-head {
     display: flex;
     align-items: center;
@@ -2523,16 +2263,6 @@ body.logs-resizing .sidebar-header-resize {
     transition: opacity 0.15s, color 0.15s;
 }
 
-.part-copy:hover {
-    opacity: 1;
-    color: var(--text-primary);
-}
-
-.part-copy.copied {
-    opacity: 1;
-    color: var(--success);
-}
-
 .part-copy-check {
     display: none;
 }
@@ -2570,8 +2300,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* Quiet envelope line under an open args-sourced body (append/overwrite
-   return a size confirmation): the footer inside the file box, and the same
-   quiet mono line under an all-add diff body. */
+   return a size confirmation) and under an all-add diff body. */
 .tool-file-meta {
     margin: 0;
     padding: 4px 10px 6px;
@@ -2610,11 +2339,10 @@ body.logs-resizing .sidebar-header-resize {
     text-decoration: underline;
 }
 
-/* The result meta strip (owner ruling 2026-11-18): one muted line under
-   the result block in the assistant-footer register -- quiet mono, quiet
-   color, no surface. Curated envelope facts only; a failing fact (nonzero
-   exit) takes the house error tint, and the FULL raw envelope stays
-   reachable behind the "envelope" disclosure in the same toggle idiom. */
+/* The result meta strip: one muted line under the result block in the
+   assistant-footer register (quiet mono, no surface). Curated envelope
+   facts only; a failing fact (nonzero exit) takes the house error tint;
+   the FULL raw envelope stays behind the "envelope" disclosure. */
 .tool-result-meta {
     display: flex;
     flex-wrap: wrap;
@@ -2647,15 +2375,10 @@ body.logs-resizing .sidebar-header-resize {
     word-break: break-all;
 }
 
-/* DIFF part: primary inline content on the block surface -- the GitHub body:
-   [old-no][new-no][sign][text]. The semantic hue carries the meaning, but as
-   GitHub wears it: a whisper of tint on the row (fill spans the FULL row,
-   gutters included), the two number columns at a near-identical step so the
-   rail never breaks across ctx/add/del rows (owner ruling 2026-11-05: big
-   gutter deltas read as bricks), and the line text itself stays near-default
-   -- the old whole-line green/red .diff-text tint is exactly what got dropped
-   (30 rows of tinted prose read as noise; GitHub looks like code on a colored
-   row). No outer frame: a diff needs no box to be legible. */
+/* DIFF part: the GitHub body -- [old-no][new-no][sign][text]. A whisper of
+   tint spans the FULL row (gutters included), the number columns step
+   near-identically so the rail never breaks (big deltas read as bricks),
+   the line text stays near-default (whole-line tint reads as noise). */
 .tool-diff {
     margin: var(--space-xs) var(--space-lg);
     font-family: var(--font-mono);
@@ -2665,18 +2388,16 @@ body.logs-resizing .sidebar-header-resize {
 
 .diff-row {
     display: flex;
-    /* stretch, NOT flex-start (owner finding 2026-11-05): an empty-side cell
-       (the old number on an add row) is a blockified span with zero content
-       height -- under flex-start it painted only its padding as a little box
-       mid-row and read as a border between every row. Stretched, its whisper
-       paint covers the exact row box, so the number rail stays continuous. */
+    /* stretch, NOT flex-start: an empty-side cell (the old number on an add
+       row) is a blockified span with zero content height -- under flex-start
+       it painted only its padding as a little box mid-row, reading as a
+       border between rows. Stretched, its whisper paint covers the row box. */
     align-items: stretch;
 }
 
-/* The two number columns: right-aligned tabular mono, muted, never selectable
-   (selecting diff text should copy the code, not the line numbers). An empty
-   side keeps painting its (whisper) cell -- continuity of the rail is the
-   point; the step over the row must stay too small to read as a slab. */
+/* The number columns: right-aligned tabular mono, muted, never selectable
+   (copy should copy the code, not the line numbers). An empty side keeps
+   painting its whisper cell -- rail continuity is the point. */
 .diff-ln {
     flex: none;
     width: 3.6em;
@@ -2745,140 +2466,112 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-secondary);
 }
 
-/* Tokenizer classes from the shared @utils/syntax registry (shell today).
-   Unknown token types render unstyled. */
+/* ── Token vocabulary, BOTH sinks ───────────────────────────────────────────
+   The shared @utils/syntax registry colors two sinks: tool-block.tsx
+   renders `tok-<type>` spans, file-view.tsx `tk tk-<type>` spans. One
+   reading, one hue: each class defined ONCE with both selector forms;
+   unknown types render unstyled, "default" has no rule on purpose. The
+   viewer's deltas are styled in the file-view section below. */
+
+/* Shell: the command word is the structure you scan (green), operators are
+   scaffolding, muted so they never compete with keywords. */
 .tok-command { color: var(--success); }
-.tok-operator { color: var(--text-muted); }
+.tok-operator, .tk-operator { color: var(--text-muted); }
 
-/* YAML token classes (the yaml tokenizer's vocabulary; shell keeps tok-command).
-   One hue family per reading: keys are the accent (the structure you scan),
-   strings one warm family, scalar literals (number/boolean/null) one cool
-   family, comments muted and italic so they recede, anchor/alias/tag share
-   the reference hue, doc markers loud (they divide the file). All theme vars,
-   readable on every panel bg; the palette is the same semantic set the diff
-   and status colors ride. */
+/* YAML: one hue family per reading -- keys accent (the structure you scan),
+   strings warm, scalar literals (number/boolean/null) one cool family,
+   comments muted italic, anchor/alias/tag the reference hue, doc markers
+   loud (they divide the file). Shell keeps tok-command. */
 .tok-key { color: var(--accent); }
-.tok-string { color: var(--warning); }
-.tok-comment { color: var(--text-muted); font-style: italic; }
-.tok-number { color: var(--diff-info-ink); }
-.tok-boolean { color: var(--diff-info-ink); }
-.tok-null { color: var(--diff-info-ink); }
-.tok-anchor { color: var(--success); }
-.tok-alias { color: var(--success); }
-.tok-tag { color: var(--error); }
-.tok-marker { color: var(--text-primary); font-weight: 600; }
+.tok-string, .tk-string { color: var(--warning); }
+.tok-comment, .tk-comment { color: var(--text-muted); font-style: italic; }
+.tok-number, .tok-boolean, .tok-null,
+.tk-number, .tk-boolean, .tk-null { color: var(--diff-info-ink); }
+.tok-anchor, .tk-anchor { color: var(--success); }
+.tok-alias, .tk-alias { color: var(--success); }
+.tok-tag, .tk-tag { color: var(--error); }
+.tok-marker, .tk-marker { color: var(--text-primary); font-weight: 600; }
 
-/* JSON token classes: shares key/string/number/boolean/null/comment with
-   yaml (same reading, same hues); operators are the structural scaffolding. */
+/* JSON shares the yaml families (same reading, same hues); operators are
+   the structural scaffolding. */
 
-/* CSS token classes: selectors are the scannable structure (the accent,
-   like yaml keys); declarations split property (accent) from value
-   (secondary); literals keep the shared families; custom properties ride
-   the reference hue; at-rules are loud (they divide the file, like yaml
-   doc markers). */
+/* CSS: selectors and declarations' properties take the accent (the
+   scannable structure, like yaml keys); values secondary; literals shared;
+   custom properties the reference hue; at-rules loud (like doc markers). */
 .tok-selector { color: var(--accent); }
 .tok-property { color: var(--accent); }
-.tok-value { color: var(--text-secondary); }
-.tok-color { color: var(--success); }
-.tok-variable { color: var(--success); }
-.tok-atrule { color: var(--text-primary); font-weight: 600; }
+.tok-value, .tk-value { color: var(--text-secondary); }
+.tok-color, .tk-color { color: var(--success); }
+.tok-variable, .tk-variable { color: var(--success); }
+.tok-atrule, .tk-atrule { color: var(--text-primary); font-weight: 600; }
 
-/* HTML token classes: tag names ("name", not the yaml tag class) carry the
-   accent as the structure, attributes the secondary hue (present on almost
-   every tag, so one notch down from the name), doctype loud, entities the
-   reference hue. */
+/* HTML: tag names ("name", not the yaml tag class) carry the accent as the
+   structure; attributes secondary (present on almost every tag, one notch
+   down); doctype loud; entities the reference hue. */
 .tok-name { color: var(--accent); }
-.tok-attribute { color: var(--text-secondary); }
-.tok-entity { color: var(--success); }
-.tok-doctype { color: var(--text-primary); font-weight: 600; }
+.tok-attribute, .tk-attribute { color: var(--text-secondary); }
+.tok-entity, .tk-entity { color: var(--success); }
+.tok-doctype, .tk-doctype { color: var(--text-primary); font-weight: 600; }
 
-/* JavaScript/TypeScript token classes (both langs share this vocabulary;
-   the scanner is shared too). Keywords are the control-flow structure
-   (accent); types sit right beside them one notch down (secondary --
-   denser on the page than keywords); call/declaration
-   names take the reference hue, templates and regexes the literal warm
-   family (they are string-shaped), decorators the reference hue with a
-   bolder stance. Strings, comments, numbers, booleans/null and object keys
-   reuse the shared families above; `default` rides the wash. jsx/tsx share
-   these -- their tag markup rides the same identifier/string classes. */
+/* JavaScript/TypeScript (shared vocabulary AND scanner; jsx/tsx ride these).
+   Keywords accent (control flow); types secondary, one notch down; call/
+   declaration names (.tok-fn) the reference hue; templates and regexes the
+   warm family (string-shaped); decorators the reference hue, bolder.
+   Strings, comments, numbers, bools/null and object keys reuse the shared
+   families. */
 .tok-keyword { color: var(--accent); }
-.tok-type { color: var(--text-secondary); }
-.tok-fn { color: var(--success); }
-.tok-template { color: var(--warning); }
-.tok-regexp { color: var(--warning); font-style: italic; }
-.tok-decorator { color: var(--success); font-weight: 600; }
+.tok-type, .tk-type { color: var(--text-secondary); }
+.tok-fn, .tk-fn { color: var(--success); }
+.tok-template, .tk-template { color: var(--warning); }
+.tok-regexp, .tk-regexp { color: var(--warning); font-style: italic; }
+.tok-decorator, .tk-decorator { color: var(--success); font-weight: 600; }
 
-/* Markdown token classes (the streaming tokenizer's vocabulary; tok-marker
-   and tok-operator already exist from the yaml/shell blocks). Delimiters --
-   fences AND frontmatter rules -- recede like the terminal's md_fence; the
-   frontmatter block itself is the yaml class set above (same tokenizer).
-   Headings take the accent bold, strong bold only, inline code the warm
-   literal family, unstyled fenced lines the secondary wash. */
-.tok-heading { color: var(--accent); font-weight: 600; }
-.tok-fence { color: var(--text-muted); }
-.tok-code_block { color: var(--text-secondary); }
-.tok-strong { font-weight: 600; }
-.tok-code { color: var(--warning); }
+/* Markdown: delimiters -- fences AND frontmatter rules -- recede like the
+   terminal's md_fence (frontmatter itself is the yaml class set). Headings
+   accent bold, strong bold only, inline code warm, fenced lines the wash. */
+.tok-heading, .tk-heading { color: var(--accent); font-weight: 600; }
+.tok-fence, .tk-fence { color: var(--text-muted); }
+.tok-code_block, .tk-code_block { color: var(--text-secondary); }
+.tok-strong, .tk-strong { font-weight: 600; }
+.tok-code, .tk-code { color: var(--warning); }
 
-/* TOML/INI token classes (one shared scanner, two dialects): section
-   headers are the loud dividers -- the [table]/[[array]]/[section] lines
-   carve the file up, same reading as yaml doc markers and css at-rules.
-   Everything else reuses the shared families above: dotted keys accent,
-   strings the warm family (ini values ride string, there are no typed
-   literals there), numbers/booleans scalar literals (TOML datetimes ride
-   number too), comments muted italic, = and : operators. */
-.tok-section { color: var(--text-primary); font-weight: 600; }
+/* TOML/INI (one shared scanner, two dialects): section headers are the loud
+   dividers (like yaml doc markers and css at-rules); the rest reuses the
+   shared families -- dotted keys accent, strings warm, numbers/booleans
+   scalar literals (TOML datetimes ride number), comments muted italic. */
+.tok-section, .tk-section { color: var(--text-primary); font-weight: 600; }
 
-/* XML rides the HTML class set above (one scanner, two dialect configs):
-   tag names accent, attributes secondary, values string, comments and
-   entities as in html; processing instructions ride doctype (loud, they
-   are the file's declarations) and CDATA sections ride string (raw
-   literal text). No new classes. */
+/* XML rides the HTML class set above (one scanner, two dialect configs);
+   processing instructions ride doctype (loud, the file's declarations) and
+   CDATA rides string (raw literal text). No new classes. */
 
-/* Python rides the JavaScript/TypeScript class set above: keywords
-   accent, def/class names and calls fn, decorators the bolder reference
-   hue, strings triple-quoted included the warm family, True/False/None
-   the scalar literals, dict keys accent. No new classes. */
+/* Python rides the JavaScript/TypeScript class set above (keywords, calls,
+   decorators, strings, True/False/None as scalar literals, dict keys all
+   match). No new classes. */
 
-/* C rides the JavaScript/TypeScript class set above too (the scanner is
-   standalone but the readings match): keywords accent, primitives and
-   Capitalized typedef names the secondary type hue, calls fn, strings and
-   char literals the warm family (one quote scan), comments muted italic,
-   numbers/operators the shared families. One new class: preproc -- the
-   line-leading # directives (#include, #define, #ifdef) are the file's
-   loud declarations, the same divider family as at-rules and doctype. */
-.tok-preproc { color: var(--text-primary); font-weight: 600; }
+/* C rides the JavaScript/TypeScript class set too (standalone scanner,
+   matching readings). One new class: preproc -- the line-leading #
+   directives (#include, #define, #ifdef) are the file's loud declarations,
+   the divider family again. */
+.tok-preproc, .tk-preproc { color: var(--text-primary); font-weight: 600; }
 
-/* Dockerfile reuses the classes above entirely: instruction words keyword
-   (accent, the scannable structure), # comments muted italic, quoted
-   arguments the warm string family, $VAR/${VAR} the css variable hue, =
-   operator; the RUN shell bodies and continuation tails ride the wash
-   (no shell-inside-RUN parsing -- the documented ceiling). No new
-   classes. */
+/* Dockerfile reuses the classes above: instruction words keyword, comments
+   muted italic, quoted args warm, $VAR the variable hue; RUN shell bodies
+   ride the wash (no shell-in-RUN parsing -- the documented ceiling). */
 
-/* Go rides the JavaScript/TypeScript class set above too (the scanner is
-   c.ts-family): the 25 reserved words accent, the predeclared primitives
-   and Capitalized names the secondary type hue, calls fn, all three
-   string forms (interpreted, rune, raw backtick) the warm family -- raw
-   strings ride string, not template, Go interpolates nothing -- comments
-   muted italic, numbers and the :=/<- operators the shared families. No
-   new classes. */
+/* Go rides the JavaScript/TypeScript set too: all three string forms warm
+   -- raw backtick strings ride string, not template, Go interpolates
+   nothing -- :=/<- operators. Comments muted italic. No new classes. */
 
-/* SQL rides the same shared families: keywords accent matched
-   case-insensitively (the dockerfile-instruction reading, mid-sentence),
-   NULL/TRUE/FALSE the scalar-literal hues, both quote forms the warm
-   string family (quoted identifiers ride string too -- the documented
-   MySQL leniency), calls fn, -- and block comments muted italic, plain
-   numbers cool; the operator accent is the structural ; . , only, so
-   arithmetic and comparison stay prose. No new classes. */
+/* SQL: keywords accent (case-insensitive), NULL/TRUE/FALSE scalar literals,
+   both quote forms warm (quoted identifiers too -- the MySQL leniency),
+   comments muted italic; the operator accent is the structural ; . , only,
+   so arithmetic and comparison stay prose. No new classes. */
 
-/* Make reuses the classes above entirely: directive words keyword, the
-   target/variable names the yaml key accent (one accent for both, the
-   precedent stands), the glued assignment/rule operators operator, #
-   comments muted italic -- in recipes too, make strips them there --
-   $(VAR)/${VAR}/$@ the css variable hue; the recipe shell bodies ride
-   the wash (no shell-in-recipe parsing, same ceiling as Dockerfile RUN).
-   No new classes. */
+/* Make reuses the classes above: directives keyword, target/variable names
+   the key accent, # comments muted italic (in recipes too -- make strips
+   them there), $(VAR)/$@ the variable hue; recipe shell bodies ride the
+   wash (same ceiling as Dockerfile RUN). No new classes. */
 
 /* PROSE part: a quiet agent-message row with a left icon gutter. */
 .tool-prose {
@@ -2896,7 +2589,6 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-muted);
 }
 
-/* Pending chip: quiet muted mono text (no bubble, no fill). */
 .tool-prose-chip {
     font-family: var(--font-mono);
     font-size: 0.845rem;
@@ -2933,20 +2625,16 @@ body.logs-resizing .sidebar-header-resize {
     line-height: 1.5;
 }
 
-/* When thinking blocks render markdown, use normal whitespace */
 .thinking-block.md-content {
     white-space: normal;
 }
 
 /* ── Live "Thinking" Row (the chat-log busy tell) ─────────────────────────
-   The transcript-side sibling of the Stop button's spinner: one quiet line at
-   the bottom of the live log while a model call waits with nothing visible on
-   screen yet (text, a tool bubble or a SHOWN reasoning block retires it).
-   `order` pins it as the last visual row of the flex column even while later
-   rows keep landing in DOM order above it -- no re-stacking per append.
-   Theme variables only; the dots' staggered opacity cycle is the whole
-   animation, and it changes no text (the row's aria-live content is set once,
-   the dots are aria-hidden), so a reader hears "Thinking" once per call. */
+   One quiet line at the bottom of the live log while a model call waits
+   (text, a tool bubble or a SHOWN reasoning block retires it). `order` pins
+   it last in the flex column though later rows land above it in DOM order.
+   The dots change no text (aria-live set once, dots aria-hidden): readers
+   hear "Thinking" once per call. */
 
 .thinking-live {
     order: 1;
@@ -2987,15 +2675,19 @@ body.logs-resizing .sidebar-header-resize {
 
 /* ── Special Message Types ────────────────────────────────────────────────── */
 
-.message.compacting {
+/* Centered system rows (compact notice, slash-command echo, task progress,
+   compaction summary): hug the middle, never outstretch the list. */
+.message.compacting,
+.message.command-result,
+.message.task-progress,
+.message.compaction-result {
     align-self: center;
     max-width: 100%;
 }
 
 .message.compacting .bubble {
     background: var(--accent-soft);
-    /* Theme-aware tint: color-mix over the active palette's --accent, same
-       alpha as the old hardcoded value, every theme its own flavor. */
+    /* Theme-aware tint: color-mix over the active palette's --accent. */
     border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
     font-size: 0.945rem;
@@ -3004,11 +2696,6 @@ body.logs-resizing .sidebar-header-resize {
     padding: 6px 16px;
     border-radius: var(--radius-full);
     display: inline-block;
-}
-
-.message.command-result {
-    align-self: center;
-    max-width: 100%;
 }
 
 .message.command-result .bubble {
@@ -3022,7 +2709,6 @@ body.logs-resizing .sidebar-header-resize {
     display: inline-block;
 }
 
-/* System messages (profile switch, etc.) */
 .message.system-message {
     align-self: center;
     max-width: 100%;
@@ -3030,8 +2716,6 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.system-message .bubble {
-    /* Accent tint rides the active theme's --accent (0.15 fill / 0.4 border
-       alphas unchanged). */
     background: color-mix(in srgb, var(--accent) 15%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
     color: var(--accent);
@@ -3048,10 +2732,8 @@ body.logs-resizing .sidebar-header-resize {
 .attachment-box {
     background: var(--bg-secondary);
     /* The box owns a dark surface inside a parent whose ink may be
-       inverse-oriented (the user bubble carries --text-inverse, dark in the
-       hotdog palette where it serves the mustard fills). Inheriting that put
-       near-black ink on the near-black sheet; the surface carries its own
-       ink instead, true for every palette. */
+       inverse-oriented (the user bubble's --text-inverse): inheriting it put
+       near-black ink on near-black. The surface carries its own ink. */
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
@@ -3150,11 +2832,6 @@ body.logs-resizing .sidebar-header-resize {
     min-width: 180px;
 }
 
-.message.question .q-text:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
 .message.question .q-error {
     color: var(--danger, #e5484d);
     font-size: 0.905rem;
@@ -3190,11 +2867,6 @@ body.logs-resizing .sidebar-header-resize {
     padding-top: 8px;
 }
 
-.message.task-progress {
-    align-self: center;
-    max-width: 100%;
-}
-
 .message.task-progress .bubble {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -3203,11 +2875,6 @@ body.logs-resizing .sidebar-header-resize {
     padding: 4px 14px;
     border-radius: var(--radius-full);
     display: inline-block;
-}
-
-.message.compaction-result {
-    align-self: center;
-    max-width: 100%;
 }
 
 .message.compaction-result .bubble {
@@ -3230,9 +2897,9 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--error);
 }
 
-/* Honest failed-subagent-attach card (owner ruling 2026-11-18): a NEUTRAL notice, not an error
-   row -- the worker may be fine, only the live tail is unreachable. Two
-   real actions, never a dead end. */
+/* Honest failed-subagent-attach card: a NEUTRAL notice, not an error row --
+   the worker may be fine, only the live tail is unreachable. Two real
+   actions, never a dead end. */
 .message.attach-fallback .bubble {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -3259,10 +2926,10 @@ body.logs-resizing .sidebar-header-resize {
     border-color: var(--warning);
 }
 
-/* Owner ruling 2026-11-18: client/daemon build-skew strip (see ui/build-info.ts). Warning
-   chrome, one sentence, and a real ✕ (a button, focusable like every
-   close affordance since the a11y batch). */
-#version-skew-banner {
+/* Client/daemon build-skew strip (ui/build-info.ts): warning chrome, one
+   sentence, and a real close glyph (a button, focusable like every close
+   affordance since the a11y batch). */
+.version-skew-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3275,7 +2942,7 @@ body.logs-resizing .sidebar-header-resize {
     font-size: 0.85rem;
 }
 
-#version-skew-banner button {
+.version-skew-banner button {
     background: none;
     border: none;
     color: var(--warning);
@@ -3287,7 +2954,7 @@ body.logs-resizing .sidebar-header-resize {
     transition: opacity 0.15s;
 }
 
-#version-skew-banner button:hover {
+.version-skew-banner button:hover {
     opacity: 1;
 }
 
@@ -3295,12 +2962,11 @@ body.logs-resizing .sidebar-header-resize {
    INPUT AREA
    ═══════════════════════════════════════════════════════════════════════════ */
 
-#input-area {
+.input-area {
     display: flex;
-    /* Floating composer: the slab is gone. #input-area and #chat-form carry
-       no fill and no box -- the field sits directly on the pane's own
-       --bg-primary, which is what #message-list already renders on. Position
-       is the scrim anchor. */
+    /* Floating composer: .input-area and .chat-form carry no fill and no
+       box -- the field sits directly on the pane's --bg-primary, which is
+       what #message-list already renders on. Position is the scrim anchor. */
     position: relative;
     padding: 16px 20px;
     gap: 10px;
@@ -3308,13 +2974,11 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* Transcript seam. The bottom area is a flex sibling of #message-list (its
-   own scroll box), so text never scrolls literally under the field -- but
-   with the slab gone, the last lines would stop dead at the composer edge.
-   A pointer-transparent gradient scrim hangs above the seam: rows fade into
-   the pane background as they approach the floating field, so the seam
-   reads as depth, never as a collision. (Drawn under #completion-menu,
-   which keeps its z-index and rides on top.) */
-#input-area::before {
+   own scroll box), so text never scrolls under the field, but without the
+   slab the last lines would stop dead at the composer edge. A
+   pointer-transparent gradient scrim hangs above the seam so rows fade into
+   the pane background -- depth, never a collision (under .completion-menu). */
+.input-area::before {
     content: "";
     position: absolute;
     left: 0;
@@ -3325,11 +2989,10 @@ body.logs-resizing .sidebar-header-resize {
     pointer-events: none;
 }
 
-/* Jump-to-bottom (message-list's jumpHost button): hangs over the transcript
-   seam, centered above the floating composer -- the same bottom: calc(100% +
-   6px) anchor as #completion-menu. Center because the composer's right edge
-   belongs to send/cancel; z-index rides over the scrim but under the tab-
-   completion popup (20). Chrome buttons never inherit the field's chrome. */
+/* Jump-to-bottom (message-list's jumpHost button): hangs over the seam,
+   centered above the composer (same bottom: calc(100% + 6px) anchor as
+   .completion-menu; center because the right edge belongs to send/cancel).
+   z-index 10: over the scrim, under the completion popup (20). */
 .jump-to-bottom {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -3359,21 +3022,21 @@ body.logs-resizing .sidebar-header-resize {
     background: var(--bg-active);
 }
 
-/* Author display beats the UA [hidden] rule, so the hide is spelled out:
-   the manager toggles the .hidden property (reflects to the attribute). */
+/* Author display beats the UA [hidden] rule, so the hide is spelled out
+   (the manager toggles the .hidden property, reflecting to the attribute). */
 .jump-to-bottom[hidden] {
     display: none;
 }
 
-#chat-form {
+.chat-form {
     position: relative;
     flex: 1;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    /* No slab: the form is a transparent layout box. The 1px border keeps
-       its WIDTH color-invisible at rest so the drag-over posture swaps in
-       without shifting anything (the composer blend idiom, one level up). */
+    /* Transparent layout box; the 1px border keeps its WIDTH
+       color-invisible at rest so the drag-over posture swaps in without
+       shifting anything (the composer blend idiom). */
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-lg);
@@ -3383,21 +3046,20 @@ body.logs-resizing .sidebar-header-resize {
         box-shadow 0.2s;
 }
 
-/* File drag hovering the composer (see onComposerDragenter in app.tsx):
-   the ONLY resting-state border the form can wear, and it appears with the
-   drag, so the float stays clean. */
-#chat-form.drag-over {
+/* File drag hovering the composer (onComposerDragenter in app.tsx): the
+   ONLY resting border the form wears, and it appears with the drag. */
+.chat-form.drag-over {
     border-style: dashed;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-#chat-input {
+.chat-input {
     width: 100%;
     padding: 2px 4px;
     /* Borderless/transparent field on the page background. The hairline
-       under it is the quietest honest posture carrier: it says "there is a
-       field here" at rest without a box, and it is what focus recolors. */
+       under it is the quietest honest posture carrier: "there is a field
+       here" at rest without a box, and it is what focus recolors. */
     border: none;
     border-bottom: 1px solid var(--border);
     background: transparent;
@@ -3412,16 +3074,16 @@ body.logs-resizing .sidebar-header-resize {
     transition: border-color 0.2s;
 }
 
-#chat-input:focus {
+.chat-input:focus {
     border-bottom-color: var(--accent);
 }
 
-#chat-input::placeholder {
+.chat-input::placeholder {
     color: var(--text-muted);
 }
 
 /* Tab-completion popup: sits directly above the composer. */
-#completion-menu {
+.completion-menu {
     position: absolute;
     bottom: calc(100% + 6px);
     left: 0;
@@ -3449,50 +3111,49 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--accent);
 }
 
-#composer-actions {
+.composer-actions {
     display: flex;
     align-items: center;
     gap: 8px;
     /* Wrapping is the BASE rule's job: every column can get narrower than
-       this row of pills (the editor-mode dock floors the chat at 280px),
-       and #send-btn's margin-left:auto collapses to nothing on a full row,
-       so without wrap the send button rides off-screen. */
+       this row of pills (the editor dock floors the chat at 280px), and
+       .send-btn's margin-left:auto collapses on a full row, so without wrap
+       the send button rides off-screen. */
     flex-wrap: wrap;
 }
 
-/* Min-width discipline (owner ruling + screenshot 2026-11-18): the
-   wrap lands on UNIT boundaries, never mid-control. Icon buttons and the
-   right-anchored Send/Stop pair never squeeze below their hit areas; the
-   two pills are the ONLY shrinkable segments and they degrade through
-   their own value ellipsis (the existing .combobox-value overflow idiom),
-   never by pushing Send off-screen; the disconnected stamp never folds
-   its two words. */
-#composer-actions #attach-btn,
-#composer-actions #mic-btn,
-#composer-actions #cancel-btn,
-#composer-actions #send-btn,
-#composer-actions #connection-status {
+/* Min-width discipline: the wrap lands on UNIT boundaries, never
+   mid-control. Icon buttons and the Send/Stop pair never squeeze below
+   their hit areas; the two pills are the ONLY shrinkable segments and
+   degrade through their own value ellipsis (.combobox-value idiom); the
+   disconnected stamp never folds its two words. */
+.composer-actions .attach-btn,
+.composer-actions .mic-btn,
+.composer-actions .cancel-btn,
+.composer-actions .send-btn,
+.composer-actions .connection-status {
     flex-shrink: 0;
 }
 
-#composer-actions #connection-status {
+.composer-actions .connection-status {
     white-space: nowrap;
 }
 
-#chat-form {
+.chat-form {
     min-width: 0;
 }
 
 /* Phone tier (below the existing 768 pill-shrink tier): see the collapse
    tiers at the foot of this sheet (END RESPONSIVE COLLAPSE). */
 
-#send-btn {
+/* The composer's action pills: one chrome, two intents (Send filled with
+   the accent, Stop/Cancel danger-toned). */
+.send-btn,
+.cancel-btn {
     margin-left: auto;
     padding: 6px 18px;
     border: none;
     border-radius: var(--radius-sm);
-    background: var(--accent);
-    color: var(--text-inverse);
     font-size: 0.975rem;
     font-weight: 600;
     font-family: var(--font-sans);
@@ -3502,48 +3163,42 @@ body.logs-resizing .sidebar-header-resize {
     height: 32px;
 }
 
-#send-btn:hover {
+.send-btn {
+    background: var(--accent);
+    color: var(--text-inverse);
+}
+
+.send-btn:hover {
     background: var(--accent-hover);
     box-shadow: var(--shadow-glow);
 }
 
-#send-btn:active {
+.send-btn:active {
     transform: scale(0.96);
 }
 
 /* Composer Stop (working only): a peer of Send, danger-toned. The auto
    margin right-anchors the pair; the sibling rule pulls Send flush so
    Stop sits immediately left of it. */
-#cancel-btn {
-    margin-left: auto;
+.cancel-btn {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 18px;
-    border: none;
-    border-radius: var(--radius-sm);
     background: var(--error-soft);
     color: var(--error);
-    font-size: 0.975rem;
-    font-weight: 600;
-    font-family: var(--font-sans);
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-    height: 32px;
 }
 
-#cancel-btn + #send-btn {
+.cancel-btn + .send-btn {
     margin-left: 0;
 }
 
-#cancel-btn:hover {
+.cancel-btn:hover {
     background: var(--error);
     color: var(--text-inverse);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SPINNER (shared: composer #cancel-btn and the sidebar's Stop button)
+   SPINNER (shared: composer .cancel-btn and the sidebar's Stop button)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* currentColor-tracked ring so it survives the button's hover flip
@@ -3568,10 +3223,9 @@ body.logs-resizing .sidebar-header-resize {
    WORKBENCH (right-docked pane; see ui/workbench.tsx)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Collapsed renders NO DOM (workbench.tsx returns null), so there is no
-   hidden state here -- the pane either participates in the flex row or is
-   absent. min-width: 0 keeps the tab strip/body from forcing the row wider
-   than --workbench-width at the clamp floor (no horizontal overflow). */
+/* Collapsed renders NO DOM (workbench.tsx returns null) -- the pane either
+   participates in the flex row or is absent. min-width:0 keeps the tab
+   strip/body from forcing the row wider than --workbench-width at the floor. */
 #workbench-panel {
     width: var(--workbench-width, 420px);
     flex-shrink: 0;
@@ -3584,28 +3238,16 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* Workspace-tree dock pin (the tree header's disclosure, beside Refresh):
-   pinned, the tree rides a fixed left column and the tab strip + viewer a
-   right one -- the sessions-sidebar/chat-column shape mirrored into the
-   dock. .workbench-main-col is display:contents flat, so the unpinned DOM
-   stays pixel-identical to the old flat panel; the pinned row is what
-   turns it into a flex sibling. The column is content-bounded (clamp):
-   the gate's 420px floor already leaves the viewer side usable. Width
-   gate + persistence live in app.tsx (workbenchTreePinnedAtom, gated on
-   WORKBENCH_TREE_PIN_MIN_WIDTH via workbenchSizeAtom). */
+   pinned, tree rides a fixed left column, strip + viewer a right one -- the
+   sidebar/chat shape mirrored into the dock. .workbench-main-col is
+   display:contents flat (unpinned DOM pixel-identical). Gate in app.tsx. */
 #workbench-panel.workbench-tree-pinned {
-    /* The docked column's USED width: the seam's number, capped so the tab
-       strip + viewer side keeps its floor (WORKBENCH_VIEWER_MIN_WIDTH). In the
-       wide editor pane the cap is inert; in chat mode the dock can be as slim
-       as the pin's 420 floor while the stored number came from wherever the
-       user last dragged it (the wide pane reaches 480), so this is what stops
-       a stale number from collapsing the viewer side. Both the column's
-       flex-basis and #tree-col-resize's offset read ONE capped number, so the
-       handle can never sit off the border it claims; the seam clamps the
-       number itself on the next gesture (treeColPanel's chat-mode cap is the
-       same dock width minus the same floor). A carried-in 480 therefore
-       RENDERS 220 in the 420 dock and only aria-valuenow reads high until a
-       drag -- and since the render already sits at the cap, that first drag
-       moves nothing, it just tells the truth. */
+    /* The docked column's USED width: the seam's number, capped so the
+       viewer side keeps its floor (WORKBENCH_VIEWER_MIN_WIDTH) -- a stale
+       number from a wider window cannot collapse it. Column flex-basis and
+       #tree-col-resize's offset read ONE capped number, so the handle sits
+       on the border it claims; a carried-in 480 RENDERS 220 and only
+       aria-valuenow reads high until a drag clamps it. */
     --tree-col-used: min(var(--tree-col-width), calc(100% - 200px));
     flex-direction: row;
 }
@@ -3628,68 +3270,40 @@ body.logs-resizing .sidebar-header-resize {
     flex-direction: column;
     min-height: 0;
     overflow-y: auto;
-    /* Rides right up at the top like the SESSIONS header band (4px above
-       it, not the body's 12 -- the column header IS a pane header, not
-       body content); side rails 6px (tighter
-       tree), and the column's right border keeps the dock seam (deliberate:
-       it stays). */
+    /* Rides up at the top like the SESSIONS header band (4px -- the column
+       header IS a pane header, not body content); side rails 6px; the
+       column's right border keeps the dock seam (deliberate: it stays). */
     padding: 4px 6px 12px;
     border-right: 1px solid var(--border);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   CHAT/EDITOR MODE (desktop swap; the top band's #editor-mode-toggle)
+   CHAT/EDITOR MODE (desktop swap; the top band's .editor-mode-toggle)
    ═══════════════════════════════════════════════════════════════════════════
-   One class on #workspace-row (app.tsx editorModeAtom, "hotdog.editorMode")
-   is the whole swap: DOM identity never changes (CSS owns order/width -- the
-   drawer's grammar), so the imperatively-rendered transcript survives every
-   flip in place. Editor shape, left to right: the workbench pane leads the
-   row (order:-1) in the pinned shape the projection forces (tree column |
-   strip+viewer), then the DOCK -- the SESSIONS SIDEBAR and the CHAT, one
-   block riding the far right. The dock flag (#workbench-toggle) closes the
-   WHOLE block (owner ruling 2026-11-14): the chat gets .chat-dock-hidden
-   (display:none, never unmounted; the composer's staged state rides along
-   hidden) and the rail LEAVES WITH IT -- in this shape the rail is dock
-   furniture, never a lone column at the row's end, and tree+viewer take the
-   row back. The rail lives in the row's DOM, not under #chat-area, so the
-   hide is a :has() lookup across the row: display only, pref untouched.
-   TWO NUMBERS for that block (owner ruling): D = --editor-dock-width is the
-   BLOCK's width, dragged at the block's LEFT border (the viewer<->sessions
-   line) by #dock-resize, which is mounted on #workspace-row and anchored
-   from its right edge so it tracks D whatever S is. S = --sidebar-width is
-   the RAIL, dragged at the rail's right border (the sessions<->chat line) by
-   the sidebar seam's own handle -- there the CHAT absorbs the difference, so
-   a rail drag never moves the block's outer edges. The chat column renders
-   calc(D - S). --tree-col-width keeps sizing the tree column through its own
-   seam (in every shape, docked), and --workbench-width goes back to being the
-   CHAT-mode pane's number only: the editor dock is nobody's workbench. Handles
-   follow the borders they own: #dock-resize is this mode's own seam (released
-   here, display:none outside the block); #tree-col-resize rides the docked
-   tree column in EVERY desktop shape -- chat's dock as well as this pane --
-   so its release lives with the seam family instead; the pane's own handle
-   hides (its number sizes nothing here); and the SIDEBAR handle
-   stays LIVE -- its border is the rail's right edge, and inside the dock
-   that border means something: it is the sessions<->chat line, and the rail
-   really does move under a drag there. DESKTOP-ONLY (@media): at phone widths
-   the overlay + drawer already own these shapes; the class rules stop
-   applying, the toggle hides, and the stored side waits for the next wide
-   viewport -- the tree-pin width gate's doctrine. */
+   One class on #workspace-row (app.tsx editorModeAtom) is the whole swap:
+   DOM identity never changes (CSS owns order/width), so the transcript
+   survives every flip. Shape: the workbench pane leads (order:-1) in the
+   pinned shape (tree | strip+viewer), then the DOCK -- sessions rail + chat
+   as one block at the far right. The dock flag closes the WHOLE block: the
+   chat gets .chat-dock-hidden (display, never unmounted) and the rail -- a
+   ROW child -- leaves with it via a :has() lookup across the row.
+   TWO NUMBERS: D = --editor-dock-width, the BLOCK (dragged at its left
+   border by #dock-resize, anchored from the row's right edge); S =
+   --sidebar-width, the RAIL (the chat absorbs the difference, so a rail
+   drag never moves the block's outer edges; the chat renders calc(D - S)).
+   --workbench-width is the CHAT-mode pane's number only. DESKTOP-ONLY. */
 @media (min-width: 769px) {
     /* The handle that sizes the block is a child of the ROW, not of either
        docked column: its anchor must be the row's right edge, independent of
-       S (anchoring inside #chat-area would make the offset move when the rail
-       grows). Written on the compound selector: editor-mode rides THIS
-       element, so a descendant `.editor-mode #workspace-row` could never
-       match and the handle would anchor to the viewport instead. */
+       S. Written on the compound selector -- a descendant `.editor-mode
+       #workspace-row` could never match, anchoring the handle to viewport. */
     #workspace-row.editor-mode {
         position: relative;
     }
 
     /* The rail's divider flips side with the rail: its LEFT edge now meets
        the viewer (that seam needs the line), while its right edge IS the
-       chat dock's border-left -- keeping border-right here would draw the
-       same line twice. When the rail's pref hides it, the chat's own
-       divider keeps the seam whole. */
+       chat dock's border-left (drawing it too would double the line). */
     .editor-mode #sidebar {
         border-right: 0;
         border-left: 1px solid var(--border);
@@ -3703,23 +3317,21 @@ body.logs-resizing .sidebar-header-resize {
         border-left: 0; /* it leads the row now; the seam rides the chat dock */
     }
 
-    /* (The tree column needs no editor override: it rides its own
-       --tree-col-used in every shape -- see the pinned-panel rule above.) */
+    /* Tree column: no editor override needed -- it rides --tree-col-used
+       in every shape (see the pinned-panel rule above). */
     .editor-mode #chat-area {
-        /* The dock's remainder: D - S. min-width is the extreme guard --
-           the seams keep them apart independently (D >= 520 = the rail's own
-           floor + 280, S <= D - 280 via the seam's editor-mode viewportMax),
-           so it only binds if the two numbers arrive from a wider window in
-           a contradiction; there the render floors the column and the stored
-           numbers may disagree with it by the difference (accepted ceiling). */
+        /* The dock's remainder: D - S. min-width is the extreme guard (the
+           seams keep the numbers apart independently: D >= 520, S <= D -
+           280); when both arrive contradictory from a wider window the
+           render floors the column and stored numbers may disagree (an
+           accepted ceiling). */
         flex: 0 0 calc(var(--editor-dock-width, 720px) - var(--sidebar-width));
         min-width: 280px;
         border-left: 1px solid var(--border); /* the seam's divider follows the dock */
     }
 
-    /* Rail hidden, the block IS the chat: the chat takes the rail's share so
-       the dock keeps its D and #dock-resize stays on a real border instead
-       of hovering S pixels out in the viewer. */
+    /* Rail hidden, the block IS the chat: it takes the rail's share so the
+       dock keeps its D and #dock-resize stays on a real border. */
     .editor-mode #sidebar.sidebar-hidden + #chat-area {
         flex-basis: var(--editor-dock-width, 720px);
     }
@@ -3728,34 +3340,25 @@ body.logs-resizing .sidebar-header-resize {
         display: none;
     }
 
-    /* A closed dock closes the BLOCK (owner ruling 2026-11-14): the sessions
-       rail is dock furniture here, so it leaves with the chat instead of
-       standing alone at the row's end. The rail is the ROW's child, not the
-       chat's, so the hide reads the row's own class + the chat's flag
-       (:has(), the same tool #workbench-body:has(.file-view) uses). Display
-       only, never unmounted: the disclosure's pref stays orthogonal, so
-       reopening the dock restores the rail exactly as left, and
-       #sidebar-resize rides inside -- it leaves with it, and the seam's
-       offsetParent guard no-ops any gesture meanwhile. */
+    /* A closed dock closes the BLOCK: the rail is dock furniture, so it
+       leaves with the chat instead of standing alone at the row's end. The
+       rail is the ROW's child, hence :has(). Display only, never unmounted:
+       the disclosure pref stays orthogonal; #sidebar-resize rides inside. */
     .editor-mode:has(#chat-area.chat-dock-hidden) #sidebar {
         display: none;
     }
 
     /* A closed dock has no handle to drag: the block's handle rides the row,
-       so it goes with the dock it points at (the seam's offsetParent guard
-       is the second lock, and the node stays in the DOM for the mode's own
-       aria story -- display, never unmount). */
+       so it goes with the dock it points at (offsetParent guard is the
+       second lock; the node stays in the DOM for the mode's aria story). */
     .editor-mode #chat-area.chat-dock-hidden ~ #dock-resize {
         display: none;
     }
 
-    /* Only the pane's own handle hides: it belongs to --workbench-width,
-       which sizes nothing in this shape. #sidebar-resize stays put -- see
-       the header (it is the dock's INNER seam now, not a dead one).
-       #dock-resize is the EDITOR dock's seam, so the mode releases it;
-       #tree-col-resize rides the docked tree column in EVERY desktop shape,
-       so its release lives with the seam family instead. Both are
-       display:none outside a release (see the family block). */
+    /* Only the pane's own handle hides (--workbench-width sizes nothing
+       here). #sidebar-resize stays live: inside the dock it is the
+       sessions<->chat seam. #dock-resize is released by this mode;
+       #tree-col-resize's release lives with the seam family. */
     .editor-mode #workbench-resize {
         display: none;
     }
@@ -3806,24 +3409,15 @@ body.workbench-resizing {
 }
 
 /* ── The docked column's seams ─────────────────────────────────────────────
-   Two handles, each bound to the one seam object that owns its number:
-   - #tree-col-resize is the tree column's OWN seam at the column's right
-     border (geometry = #sidebar-resize -- drag RIGHT grows the column), in
-     BOTH shapes: chat mode's narrow dock (the WORKSPACE-tree <> file-viewer
-     line) and the wide editor pane. It anchors on #workbench-panel
-     (position:relative), offset by the column's USED width, so it never
-     rides the column's scroll and never sits off the border it claims.
-   - #dock-resize is the editor dock BLOCK's seam (editorDockPanel) at the
-     block's LEFT border, i.e. the viewer<->sessions line (geometry =
-     #workbench-resize; nearEdge -- drag LEFT grows the block). It is a child
-     of #workspace-row anchored from the row's RIGHT edge by the same number,
-     so it tracks the border no matter how wide the rail inside the block is.
-   Both are DISPLAY-NONE by default and released by a min-width block -- the
-   tree column's handle by the rule below (every desktop shape), the dock's by
-   the editor-mode block above (the mode's own shape). Which also keeps the
-   seams' offsetParent guards honest wherever a handle is hidden: the phone
-   overlay stacks the tree column and CSS owns its size, so the handle has
-   nothing to drag there. */
+   Two handles, each bound to the seam object that owns its number:
+   - #tree-col-resize: the tree column's OWN seam at its right border
+     (geometry = #sidebar-resize; drag RIGHT grows), in BOTH docked shapes;
+     anchors on #workbench-panel offset by the column's USED width.
+   - #dock-resize: the editor dock BLOCK's seam (editorDockPanel) at the
+     block's LEFT border (geometry = #workbench-resize; nearEdge: drag LEFT
+     grows), a child of #workspace-row anchored from its RIGHT edge.
+   DISPLAY-NONE by default, released by a min-width block; on phones CSS
+   owns the sizes, so the handles would be inert (offsetParent guard). */
 #dock-resize,
 #tree-col-resize {
     display: none;
@@ -3838,21 +3432,17 @@ body.workbench-resizing {
 }
 
 #dock-resize {
-    /* Starts at the block's left border: the block is the last D pixels of
-       the row (see the CHAT/EDITOR MODE block). Same doctrine as
-       #sidebar-resize: the strip starts AT the border and rides
-       the dock side -- the chat's scrollbar track sits just left of the
-       border -- so the handle no longer covers the track. */
+    /* The block is the last D pixels of the row. Same doctrine as
+       #sidebar-resize: the strip starts AT the border and rides the dock
+       side, clear of the chat's scrollbar track just left of it. */
     right: calc(var(--editor-dock-width, 720px) - 6px);
 }
 
 #tree-col-resize {
-    /* Starts at the tree column's right border: the column's flex-basis is
-       exactly --tree-col-used (the seam's number, dock-capped -- see the
-       pinned-panel rule), and the handle reads the SAME variable, so a
-       dock-capped column and its handle agree. Off the track:
-       the strip rides the FILE-VIEWER side, since the tree's
-       own scrollbar track lives just left of the border. */
+    /* The column's flex-basis is exactly --tree-col-used and the handle
+       reads the SAME variable, so a capped column and its handle agree. Off
+       the track: the strip rides the file-viewer side (the tree's scrollbar
+       track lives just left of the border). */
     left: var(--tree-col-used);
 }
 
@@ -3938,10 +3528,6 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-primary);
 }
 
-.workbench-tab-label:hover {
-    background: var(--bg-hover);
-}
-
 .workbench-dirty {
     color: var(--accent, var(--text-secondary));
 }
@@ -3970,19 +3556,14 @@ body.sidebar-resizing #tree-col-resize {
     padding: 0;
 }
 
-/* FULL-HEIGHT FILE TABS. A file tab -- the editor
-   or the read-only viewer -- owns the WHOLE pane: the code sheet runs the
-   full height, its own surface scrolls, and the foot bar pins the bottom even
-   on a three-line file. So #workbench-body must NOT be the scroller for those
-   two kinds (it would add a second scrollbar and let --bg-secondary show under
-   a short sheet). The height is a pure flex chain, never a magic number: the
-   panel is a definite-height flex column -> #workbench-body is flex:1 (its
-   used height is definite) -> the tab body is flex:1 -> the sheet is flex:1 ->
-   the surface scrolls and the bar is the column's last row. Only individual
-   rows carry a pixel height (EDIT_LINE_H, hit-test-trusted); the fill is
-   all ratios. The workspace-tree tab and the empty/placeholder bodies keep
-   riding #workbench-body's own y-scroll (unchanged). :has() is the same tool
-   the editor-mode dock already uses. */
+/* FULL-HEIGHT FILE TABS: a file tab (editor or read-only viewer) owns the
+   WHOLE pane -- sheet full height, its own surface scrolls, foot bar pinned
+   at the bottom even on a three-line file. So #workbench-body must NOT be
+   the scroller for those kinds (second scrollbar; --bg-secondary would show
+   under a short sheet). The height is a pure flex chain, never a magic
+   number: panel -> body flex:1 -> tab body flex:1 -> sheet flex:1 ->
+   surface scrolls, bar last row (EDIT_LINE_H is the only pixel number). The
+   tree tab and placeholders keep riding #workbench-body's y-scroll. */
 #workbench-body:has(.editor),
 #workbench-body:has(.file-view) {
     display: flex;
@@ -3999,10 +3580,8 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 /* Full-bleed by default: the code sheet and the editor's line layer run
-   edge to edge, the tab strip's hairline is their top line, and the gutters
-   live on the parts that need one -- the file view's notes and sticky foot
-   bar (their own padding), the empty line and placeholders (their own
-   margin), and the tree tab below. */
+   edge to edge (the tab strip's hairline is their top line); gutters live
+   on the parts that need one (file-view notes, foot bar, placeholders). */
 #workbench-body .file-tree {
     padding: 12px;
 }
@@ -4023,11 +3602,6 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-secondary);
     font: inherit;
     cursor: pointer;
-}
-
-.workbench-empty-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
 }
 
 /* ── Workbench file tree ─────────────────────────────────────────────────── */
@@ -4051,59 +3625,14 @@ body.sidebar-resizing #tree-col-resize {
     letter-spacing: 0.04em;
 }
 
-/* The header's right group: Refresh, then the tree dock pin riding to its
-   right (both .file-reload-btn chrome). A group span keeps the header's
-   space-between pinning the PAIR right -- three loose children would
-   strand Refresh mid-row. */
+/* The header's right group: Refresh + the tree dock pin (both
+   .file-reload-btn chrome). The group span keeps space-between pinning the
+   PAIR right -- three loose children would strand Refresh mid-row. */
 .ft-header-actions {
     display: flex;
     align-items: center;
     gap: 4px;
 }
-
-/* Reload affordances (the file tree's Refresh, the file viewer's foot-bar
-   Reload and the settings dialog's Refresh share one shape): the
-   #search-btn standard -- transparent box, muted -> accent over accent-soft
-   on hover, and the 16px clockwise-arrow as an inline SVG tinted by
-   currentColor (icons.tsx IconReload; the .file-reload-glyph class rides the
-   svg as a pure identity hook -- sizing and color are the svg's own). The
-   border keeps its 1px width transparent at rest, so hover/focus never
-   shifts the layout. */
-.file-reload-btn {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.file-reload-btn:hover:not(:disabled) {
-    color: var(--accent);
-    background: var(--accent-soft);
-}
-
-/* The settings dialog's Refresh rides this standard and IS disabled while a
-   snapshot is in flight (the tree/viewer riders never are); the hover tint
-   must not fake an affordance the disabled attribute refuses. */
-.file-reload-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Same focus grammar as #logs-toggle: an inset outline, no layout change. */
-.file-reload-btn:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-}
-
 
 .ft-row {
     /* Indent comes from the nested .ft-children container, not a style attr. */
@@ -4123,11 +3652,6 @@ body.sidebar-resizing #tree-col-resize {
     font: inherit;
     text-align: left;
     cursor: pointer;
-}
-
-.ft-row-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
 }
 
 /* Reveal target (the subagent row menu's "Reveal run directory"): the
@@ -4177,10 +3701,9 @@ body.sidebar-resizing #tree-col-resize {
 
 .file-view {
     font-size: 14px;
-    /* Full-height flex column (paired with the :has(.file-view) chain on
-       #workbench-body): the sheet owns the pane, its rows scroll, the foot
-       bar rides the bottom. --bg-base on the root so the area under the last
-       line stays the code sheet, never the panel's --bg-secondary. */
+    /* Full-height flex column (the :has(.file-view) chain on
+       #workbench-body): sheet owns the pane, rows scroll, foot bar rides the
+       bottom. --bg-base keeps the area under the last line the code sheet. */
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -4188,13 +3711,11 @@ body.sidebar-resizing #tree-col-resize {
     background: var(--bg-base);
 }
 
-/* The viewer's WHOLE chrome (owner ruling 2026-11-14): the tab names the
-   file, so nothing sits above the sheet -- the name row and its air are
-   gone. This bar is the foot: status left, pager and reload right,
-   sticky-bottom in the scrolling #workbench-body so it holds the foot of
-   the pane while long files scroll under it. It needs the panel's own
-   opaque background, and the hairline above it is the seam the rows'
-   border-top used to keep at the head. */
+/* The viewer's whole chrome is this foot bar (the tab names the file):
+   status left, pager and reload right, sticky-bottom in the scrolling
+   #workbench-body so it holds the pane's foot while long files scroll
+   under it. Opaque panel background; the hairline above it is the seam the
+   rows' border-top used to keep at the head. */
 .file-view-bar {
     position: sticky;
     bottom: 0;
@@ -4205,13 +3726,11 @@ body.sidebar-resizing #tree-col-resize {
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
-    /* Narrow-column discipline (owner screenshot 2026-11-18): the foot
-       bar NEVER wraps -- a two-row pile of pills is the garbled band. It
-       fits, ellipsizes, or progressively drops segments (container queries
-       below: they follow the COLUMN, which a dock drag narrows without the
-       viewport moving). Save always rides: the status segment carries the
-       save state ("saving.../edited/saved") and Ctrl+S is keyboard-owned,
-       invisible to any of this. */
+    /* Narrow-column discipline: the foot bar NEVER wraps (a two-row pile of
+       pills is the garbled band). It fits, ellipsizes, or drops segments via
+       the container queries below -- they follow the COLUMN, which a dock
+       drag narrows without the viewport moving. Save always rides: the
+       status segment carries the save state; Ctrl+S is keyboard-owned. */
     flex-wrap: nowrap;
 }
 
@@ -4233,15 +3752,13 @@ body.sidebar-resizing #tree-col-resize {
     container-type: inline-size;
 }
 
-/* The syntax chooser (native select -- the composer pills left this idiom for
-   searchable comboboxes 2026-11-15): ghost at rest like the foot's reload
+/* The syntax chooser (native select): ghost at rest like the foot's reload
    button -- and the accent face while an override is in force, so a
    hand-painted sheet never masquerades as the machine's guess. */
 .file-view-lang {
-    /* 16ch fits "Auto (Markdown)" without clipping -- the reported
-       "Auto (Markdow" tell -- while staying well inside the fold before
-       the 340px collapse tier (END RESPONSIVE COLLAPSE) hides the chooser
-       outright rather than truncating mid-word. */
+    /* 16ch fits "Auto (Markdown)" without clipping (the reported "Auto
+       (Markdow" tell) and stays inside the fold before the 340px collapse
+       tier (END RESPONSIVE COLLAPSE) hides the chooser outright. */
     max-width: 16ch;
     padding: 2px 4px;
     font: inherit;
@@ -4250,11 +3767,6 @@ body.sidebar-resizing #tree-col-resize {
     border: 1px solid transparent;
     border-radius: 6px;
     cursor: pointer;
-}
-
-.file-view-lang:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
 }
 
 .file-view-lang.is-overridden {
@@ -4271,14 +3783,6 @@ body.sidebar-resizing #tree-col-resize {
     cursor: pointer;
 }
 
-.file-view-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-/* The pager rides the foot bar (see .file-view-bar) -- the bar carries the
-   gutter, so the button itself stays margin-free. */
-
 .file-view-note {
     color: var(--text-muted);
     font-style: italic;
@@ -4294,20 +3798,17 @@ body.sidebar-resizing #tree-col-resize {
 .file-view-rows {
     display: block;
     /* The scrollable sheet: flex:1 fills the pane, min-height:0 lets it
-       shrink (so it scrolls instead of pushing the foot bar out of view),
-       and it owns the y-scroll now that #workbench-body no longer scrolls a
-       file tab. overflow:auto keeps the horizontal scroll long lines had. */
+       shrink (scrolls instead of pushing the foot bar out) and owns the
+       y-scroll now that #workbench-body doesn't. auto keeps x-scroll too. */
     flex: 1 1 auto;
     min-height: 0;
     font-family: var(--font-mono);
     background: var(--bg-base);
-    /* Full-bleed (owner ruling): the sheet runs edge to edge with NO frame of
-       its own -- no radius, no side/bottom border, and no top border either
-       since the head chrome died (2026-11-14): the tab strip's own
-       border-bottom is the hairline the code starts under, and the foot bar
-       (.file-view-bar) owns the bottom seam; a border-top here would draw that
-       line twice. Now y-scrolls too (flex:1 above), so a long sheet scrolls
-       under its own foot instead of scrolling the whole workbench body. */
+    /* Full-bleed: the sheet runs edge to edge with NO frame -- no radius, no
+       border. The tab strip's border-bottom is the hairline the code starts
+       under (a border-top here would draw that line twice); .file-view-bar
+       owns the bottom seam. It y-scrolls on its own (flex:1 above), so a
+       long sheet scrolls under its foot. */
     overflow: auto;
 }
 
@@ -4344,121 +3845,49 @@ body.sidebar-resizing #tree-col-resize {
     -o-tab-size: 4;
 }
 
-/* Token classes: sinks own the coloring (see @utils/syntax). The file view
-   renders every tokenizer run as `tk tk-<type>` spans (file-view.tsx); the
-   registry's languages emit the full vocabulary below, so the whole union
-   is styled here -- the same semantic palette the tool block's tok- section
-   defines above (file-view.tsx renders `tk tk-<type>`; tool-block.tsx
-   renders `tok-<type>`; one reading, one hue, both sinks). Shared classes
-   get exactly ONE rule regardless of language; everything rides theme vars
-   so both palettes read alike. Unknown token classes (a custom extension
-   lang) still pass through plain, and "default" has no rule on purpose. */
+/* Token classes (file view): the shared vocabulary lives ONCE above
+   ("Token vocabulary, BOTH sinks"); every rule here is a deliberate viewer
+   DELTA (`tk tk-<type>` spans; file-view.tsx):
+   1. Shell command keeps the viewer's original hard-coded green -- shipped
+      before the token vars, stays put (the operator moved to the shared
+      muted reading: as accent it was indistinguishable from keywords).
+   2. Hotdog wears accent (#e0a32e) and warning (#fbbf24) as adjacent
+      mustards, so on the denser sheet the structural accent roles (key,
+      keyword, name, selector, property) carry a bold stance and separate
+      from the amber literals without a new hue; the tool block stays
+      regular (prose bubbles afford the adjacency). */
 
-/* Shell command (the viewer's original, kept verbatim). Operators moved to
-   the shared vocabulary below, muted like the tool block's tok-operator --
-   as accent they were indistinguishable from keywords. */
 .tk-command {
     color: #8bd5a0;
 }
 
-.tk-operator {
-    color: var(--text-muted);
-}
-
-/* Shared programming vocabulary (the c-family, go, rust, java, kotlin,
-   groovy, dart, swift, zig, elixir, php, python, ruby, js/ts, sql, lua):
-   keywords are the scannable structure (accent), types sit one notch down
-   (secondary), call/declaration names take the reference green, decorators
-   the bolder green stance, variables the same green (lifetimes, $vars,
-   css vars, elixir atoms all ride it). Strings -- every quote form, raw
-   strings, charlists, backticks -- the warm literal family; templates and
-   regexes are string-shaped, same family (regex italic so it never reads
-   as a doubled string). Numeric literals (number/boolean/null, radix
-   forms, datetimes, nil/None/undefined) the cool literal family; comments
-   muted italic so they recede. The hotdog palette keeps accent (#e0a32e)
-   and warning (#fbbf24) as adjacent mustards, so the structural accent
-   roles carry a bold stance -- the same weight cue the heading/marker
-   family uses -- and separate from plain amber literals without a new hue.
-   */
-.tk-string { color: var(--warning); }
-.tk-template { color: var(--warning); }
-.tk-regexp { color: var(--warning); font-style: italic; }
-.tk-number { color: var(--diff-info-ink); }
-.tk-boolean { color: var(--diff-info-ink); }
-.tk-null { color: var(--diff-info-ink); }
-.tk-comment { color: var(--text-muted); font-style: italic; }
-.tk-keyword { color: var(--accent); font-weight: 600; }
-.tk-type { color: var(--text-secondary); }
-.tk-fn { color: var(--success); }
-.tk-decorator { color: var(--success); font-weight: 600; }
-.tk-variable { color: var(--success); }
-
-/* Data/config vocabulary (json, yaml, toml, ini, env, make, dockerfile,
-   graphql): keys accent (the structure you scan), assignment/collection
-   scaffolding secondary, section headers and directives (TOML tables, INI
-   sections, make macros, cmake/c/php line-leading # directives) the loud
-   divider family -- same reading as yaml doc markers and css at-rules. */
 .tk-key { color: var(--accent); font-weight: 600; }
-.tk-value { color: var(--text-secondary); }
-.tk-section { color: var(--text-primary); font-weight: 600; }
-.tk-preproc { color: var(--text-primary); font-weight: 600; }
-
-/* Markup vocabulary (html, xml): tag names accent as the structure,
-   attributes one notch down, entities the reference green, doctype/PI the
-   loud declaration family. */
+.tk-keyword { color: var(--accent); font-weight: 600; }
 .tk-name { color: var(--accent); font-weight: 600; }
-.tk-attribute { color: var(--text-secondary); }
-.tk-entity { color: var(--success); }
-.tk-doctype { color: var(--text-primary); font-weight: 600; }
-
-/* CSS vocabulary: selectors and properties accent, values secondary,
-   literals the reference green, at-rules loud dividers. */
 .tk-selector { color: var(--accent); font-weight: 600; }
 .tk-property { color: var(--accent); font-weight: 600; }
-.tk-color { color: var(--success); }
-.tk-atrule { color: var(--text-primary); font-weight: 600; }
-
-/* YAML reference family: anchors/aliases share the reference green, tags
-   the error red (rare and loud), doc markers the divider family. */
-.tk-anchor { color: var(--success); }
-.tk-alias { color: var(--success); }
-.tk-tag { color: var(--error); }
-.tk-marker { color: var(--text-primary); font-weight: 600; }
-
-/* Markdown vocabulary: delimiters -- fences AND frontmatter rules --
-   recede; headings accent bold; strong weight only; inline code the warm
-   literal family; unstyled fenced lines the secondary wash. (Fenced code
-   inside re-enters the programming vocabulary above.) */
-.tk-heading { color: var(--accent); font-weight: 600; }
-.tk-fence { color: var(--text-muted); }
-.tk-code_block { color: var(--text-secondary); }
-.tk-strong { font-weight: 600; }
-.tk-code { color: var(--warning); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    EDITOR (ui/editor.tsx) -- hidden-textarea capture + rendered line layer
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Full-height column flex (the :has(.editor) chain on #workbench-body makes
-   the tab body definite-height, so flex:1 fills the WHOLE pane): the viewport
-   scrolls and its --bg-base sheet paints the empty area under the last line,
-   the foot bar (shared .file-view-bar chrome) is the column's last row and so
-   sits at the pane's bottom on short AND long files. The height is ratios all
-   the way down -- no magic px. The row box is exactly EDIT_LINE_H px, the ONE
-   pixel number here: JS hit-testing and the caret/selection overlay trust it;
-   never set a per-line height elsewhere. */
+   the tab body definite-height, so flex:1 fills the WHOLE pane): the
+   viewport scrolls, its --bg-base sheet paints under the last line, and
+   the foot bar (shared .file-view-bar chrome) is the column's last row.
+   Heights are ratios; the ONE pixel number is the row box (EDIT_LINE_H),
+   trusted by JS hit-testing and the caret/selection overlay. */
 .editor {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
     font-size: 14px;
-    /* The caret/hit cell model assumes one code unit == one fixed advance.
-       That is only true for a MONOSPACE face with NO ligatures (a ligature
-       like "==" collapses two code units into one cell) and no letter-spacing.
-       --font-mono + these switches make
-       the rendered advance match the probe's, which measures the same chain
-       (inheriting the UI face is the caret-drift trap). */
+    /* The caret/hit cell model assumes one code unit == one fixed advance:
+       only true for a MONOSPACE face with NO ligatures ("==" collapses two
+       units into one cell) and no letter-spacing. These switches make the
+       rendered advance match the probe's (inheriting the UI face is the
+       caret-drift trap). */
     font-family: var(--font-mono);
     font-weight: 400;
     letter-spacing: normal;
@@ -4509,16 +3938,12 @@ body.sidebar-resizing #tree-col-resize {
     position: relative;
     white-space: pre;
     color: var(--text-primary);
-    /* The probe/paint parity, ENFORCED: the UA
-       stylesheet gives every code element a SPECIFIED monospace font family,
-       which beats the --font-mono inherited from .editor -- so without this
-       the rows rendered in the system mono while .editor-measure measured the
-       house face. Weight-400 advances happened to match, but the tokenizer's
-       600-weight runs (tk-key, tk-section, ...) fell through per-glyph
-       fallbacks at a different advance (measured live: 7.33px vs the model's
-       8.00), so every semibold glyph dragged the caret LEFT of the clicked
-       column, growing from the line start. Pin the face on the element the UA
-       would otherwise claim. */
+    /* Probe/paint parity: the UA stylesheet gives every code element a
+       SPECIFIED monospace family, beating the --font-mono inherited from
+       .editor -- rows would render system mono while .editor-measure
+       measured the house face. Weight-400 advances happened to match, but
+       the 600-weight runs fell through per-glyph fallbacks at another
+       advance (measured 7.33px vs 8.00), dragging the caret LEFT. */
     font-family: var(--font-mono);
     /* The model counts TAB_STOP=4 cells (editor-buffer.ts); CSS tabs default
        to 8, so raw tabs must be pinned to the model's stop or every
@@ -4529,9 +3954,8 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 /* The capture textarea: focus + IME only. Transparent, parked under the
-   caret inside the canvas (its coordinates never exceed what the rows
-   already size), one cell wide -- the invariant is empty text, the keydown
-   layer owns everything else. */
+   caret inside the canvas, one cell wide -- the invariant is empty text;
+   the keydown layer owns everything else. */
 .editor-input {
     position: absolute;
     z-index: 3;
@@ -4582,18 +4006,15 @@ body.sidebar-resizing #tree-col-resize {
     position: absolute;
     background: var(--accent-soft);
     pointer-events: none;
-    /* The rect is an EMPTY abs child: with no vertical extent Blink paints it
-       ZERO pixels tall -- the selection was mathematically correct and
-       invisible the whole time (the live repro's "nothing highlights"). The
-       caret's own recipe (no top: the static position; explicit row-height
-       extent) gives every rect the exact vertical box the caret uses. */
+    /* The rect is an EMPTY abs child: with no vertical extent Blink paints
+       it ZERO pixels tall -- correct selection, invisible. The caret's own
+       recipe (no top; explicit row-height extent) fixes every rect. */
     height: 20px;
 }
 
 /* Matched-bracket pair tint (VS Code's bracket-pair highlight): one cell on
-   each side of the pair, driven by matchBracket in the render layer. Theme
-   vars only (rides --accent like the selection); pointer-events off so the
-   paint never steals a click. */
+   each side, driven by matchBracket in the render layer. Theme vars only;
+   pointer-events off so the paint never steals a click. */
 .editor-match {
     position: absolute;
     background: var(--accent-glow);
@@ -4613,11 +4034,10 @@ body.sidebar-resizing #tree-col-resize {
     opacity: 0;
     pointer-events: none;
     /* MUST equal the code spans' computed font EXACTLY -- the caret/hit cell
-       is derived from this measurement, so any face/size/weight/letter-spacing
-       divergence between probe and paint re-introduces column drift. Mirrors
-       the .editor chain verbatim (mono, 14px, weight 400, no letter-spacing,
-       ligatures off); it sits inside .editor and so inherits the same, but the
-       explicit copy pins the invariant against a future .editor edit. */
+       derives from this measurement, so probe/paint divergence re-introduces
+       column drift. Mirrors the .editor chain (mono, 14px, 400, no
+       letter-spacing, ligatures off); the explicit copy pins the invariant
+       against a future .editor edit. */
     font-family: var(--font-mono);
     font-size: 14px;
     font-weight: 400;
@@ -4632,17 +4052,15 @@ body.sidebar-resizing #tree-col-resize {
     -o-tab-size: 4;
 }
 
-/* The foot bar rides the viewer's (sticky chrome is harmless with the
-   viewport's own scroll: the editor column never y-scrolls itself). */
+/* The foot bar reuses the viewer's chrome (sticky is harmless: the editor
+   column never y-scrolls itself). */
 .editor-bar .file-view-status {
     font-size: 12px;
 }
 
-/* The caret readout + jump box: a foot-bar cell that
-   swaps button<->input at ONE seat, so both twins share height, font, and
-   padding and the swap never shifts the bar. Max 24px tall inside the 2px
-   bar (the 28px reload chrome would outgrow it); mono tabular digits so the
-   readout never jitters as the caret moves. */
+/* The caret readout + jump box: one foot-bar cell swapping button<->input,
+   so the twins share height/font/padding and the swap never shifts the bar;
+   mono tabular digits keep the readout from jittering. */
 .editor-goto-btn,
 .editor-goto-input {
     height: 22px;
@@ -4670,12 +4088,6 @@ body.sidebar-resizing #tree-col-resize {
     background: var(--accent-soft);
 }
 
-.editor-goto-btn:focus-visible,
-.editor-goto-input:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-}
-
 .editor-goto-input {
     /* one full row:col spec of room (the file cap is six digits); longer
        input scrolls inside the box instead of widening the bar */
@@ -4685,13 +4097,10 @@ body.sidebar-resizing #tree-col-resize {
     outline-offset: -1px;
 }
 
-/* Whitespace marks (the shared ws-render decoration -- faint dots/arrows;
-   trailing runs get the subtle wash). FONT-PROOF BY CONSTRUCTION: the REAL
-   whitespace character stays in the text flow (the
-   advance equals the unmarked line's, whatever face is loaded -- CSS tab-size
-   still expands the tab), and the MARK is an absolutely positioned glyph that
-   contributes zero width (out of flow, pointer-events off, aria-hidden). Dot
-   at cell center, arrow at cell start. */
+/* Whitespace marks: faint dots/arrows, trailing runs the subtle wash.
+   FONT-PROOF BY CONSTRUCTION: the REAL whitespace stays in the text flow
+   (its advance equals the unmarked line's; tab-size still expands the tab)
+   and the MARK is an absolutely positioned zero-width glyph (aria-hidden). */
 .ws {
     position: relative;
     color: var(--text-muted);
@@ -4712,10 +4121,6 @@ body.sidebar-resizing #tree-col-resize {
     transform: translateX(-50%);
 }
 
-.ws-trail {
-    background: var(--bg-hover);
-}
-
 /* The toggle wears the reload button's chrome; the accent face means the
    marks are ON (same "override in force" signal as .file-view-lang). */
 .editor-ws-btn.is-on,
@@ -4728,12 +4133,10 @@ body.sidebar-resizing #tree-col-resize {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
-    /* Chat/Editor mode is a desktop layout preference: the overlay + drawer
-       already own the phone shapes, the .editor-mode rules (a min-width
-       block) stop applying, and the toggle goes -- a control whose effect
-       the viewport refuses has no business on screen. The stored side
-       survives for the next wide visit (the tree-pin gate's doctrine). */
-    #editor-mode-toggle {
+    /* Chat/Editor mode is a desktop preference: the overlay + drawer own the
+       phone shapes, the .editor-mode rules stop applying, and the toggle
+       goes -- a control whose effect the viewport refuses has no business. */
+    .editor-mode-toggle {
         display: none;
     }
 
@@ -4741,31 +4144,25 @@ body.sidebar-resizing #tree-col-resize {
         display: none;
         position: fixed;
         left: 0;
-        /* Under the top band AND the chat column's header, whose
-           #sidebar-toggle is this drawer's only opener/closer (2026-11-14):
-           33px of band chrome (2+28+2+1) + 37px of header band (4+28+4+1)
-           = 70px. At the old 33px the open drawer buried the toggle under
-           its own Sessions titlebar -- a drawer you could open but never
-           close. The workbench overlay keeps 33px: its control rides the
-           band, above the overlay. */
+        /* Under the top band AND the chat header, whose .sidebar-toggle is
+           this drawer's only opener/closer: 33px band + 37px header = 70px.
+           At the old 33px the open drawer buried the toggle under its own
+           Sessions titlebar -- a drawer you could open but never close. The
+           workbench overlay keeps 33px: its control rides the band. */
         top: 70px;
         bottom: 0;
         z-index: 100;
         box-shadow: var(--shadow-lg);
     }
 
-    /* Drawer mode: width is CSS-controlled, no resizing. */
     #sidebar-resize {
         display: none;
     }
 
     /* Workbench on phones: an OPEN pane becomes a full-width overlay (the
-       chosen degradation -- document decision: "hidden-but-openable" would
-       leave a docked strip stealing chat width on the smallest screens,
-       and the sidebar drawer already sets the grammar). The header toggle
-       is the only entry point; collapsed still renders no DOM. The handle
-       goes -- like the drawer, CSS owns the width, so the seam's
-       offsetParent guard would make it inert anyway. */
+       drawer's grammar; "hidden-but-openable" would steal chat width). The
+       header toggle is the only entry; collapsed renders no DOM. The handle
+       goes: CSS owns the width, so the seam would be inert anyway. */
     #workbench-panel {
         position: fixed;
         left: 0;
@@ -4783,11 +4180,10 @@ body.sidebar-resizing #tree-col-resize {
         display: none;
     }
 
-    /* Pinned tree inside the phone overlay STACKS above the tab column:
-       the overlay's width is the viewport (small) while the pin gate's
-       number is the desktop seam's, so two side-by-side columns would be
-       a squeeze the gate never actually vetted. Stacked, the tree keeps a
-       scrollable half-height band above the tabs. */
+    /* Pinned tree inside the phone overlay STACKS above the tab column: the
+       overlay width is the viewport while the pin gate's number is the
+       desktop seam's -- side-by-side would be a squeeze the gate never
+       vetted. Stacked, the tree keeps a scrollable half-height band. */
     #workbench-panel.workbench-tree-pinned {
         flex-direction: column;
     }
@@ -4799,21 +4195,17 @@ body.sidebar-resizing #tree-col-resize {
         border-bottom: 1px solid var(--border);
     }
 
-    /* The Recent Logs titlebar keeps its gestures here: unlike the sidebar
-       width, the drawer's height is still the flex column the --logs-height
-       cap acts on, and viewportMax (half the viewport) keeps the section
-       under half the drawer, so nothing needs no-op'ing. Touch has no hover,
-       and a sticky hover tint on a drag surface reads as a stuck state, so
-       only the hover fill goes quiet -- the collapse button and its chevron
-       are untouched and keep working. */
+    /* The Recent Logs titlebar keeps its gestures: the drawer's height is
+       still the flex column the --logs-height cap acts on (viewportMax
+       bounds it). Touch has no hover and a sticky tint on a drag surface
+       reads as stuck, so only the hover fill goes quiet. */
     .sidebar-header-resize:hover {
         background: transparent;
     }
 
-    /* The drawer's OPEN state, driven by the chat-header disclosure since
-       2026-11-14 (app.tsx sidebarCollapsedAtom renders .open when the one
-       stored preference says shown; collapsed drops the class and the
-       display:none default above reclaims the drawer). */
+    /* Drawer OPEN state (chat-header disclosure; app.tsx
+       sidebarCollapsedAtom renders .open when the stored preference says
+       shown -- the display:none default above reclaims it otherwise). */
     #sidebar.open {
         display: flex;
     }
@@ -4831,10 +4223,9 @@ body.sidebar-resizing #tree-col-resize {
         margin-left: 8px;
     }
 
-    /* Spec-driven content breathes less on phones: one mono step down for the
-       typographic parts and their summaries, shorter internal scroll windows
-       for the two expandable bodies (file/result). Single-surface rule: no
-       phone-only fills or borders -- the block is still the only surface. */
+    /* Spec-driven content breathes less on phones: one mono step down for
+       the typographic parts, shorter scroll windows for the expandable
+       bodies. Single-surface rule: no phone-only fills or borders. */
     .tool-code,
     .tool-diff,
     .tool-file-pre,
@@ -4862,18 +4253,18 @@ body.sidebar-resizing #tree-col-resize {
     }
 
     /* Composer: pills shrink on narrow screens (the wrap itself lives on
-       the base #composer-actions rule now; only the tighter row-gap is
+       the base .composer-actions rule now; only the tighter row-gap is
        phone-specific) */
-    #input-area {
+    .input-area {
         padding: 12px;
     }
 
-    #composer-actions {
+    .composer-actions {
         row-gap: 6px;
     }
 
-    #model-selector,
-    #profile-selector {
+    .model-selector,
+    .profile-selector {
         min-width: 0;
     }
 
@@ -4923,10 +4314,6 @@ body.sidebar-resizing #tree-col-resize {
     user-select: none;
 }
 
-.context-menu-item:hover {
-    background: var(--bg-hover);
-}
-
 .context-menu-item:active {
     background: var(--bg-active);
 }
@@ -4949,7 +4336,7 @@ body.sidebar-resizing #tree-col-resize {
 
 /* ── Copy confirmation toast (app.tsx showCopyToast) ─────────────────────── */
 
-#copy-toast {
+.copy-toast {
     position: fixed;
     bottom: 18px;
     left: 50%;
@@ -4968,7 +4355,7 @@ body.sidebar-resizing #tree-col-resize {
     user-select: none;
 }
 
-#copy-toast.visible {
+.copy-toast.visible {
     opacity: 1;
 }
 
@@ -5001,10 +4388,9 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-secondary, #888);
 }
 
-/* History image stub: the byte-honest page ships no payload, so
-   the box attests what was omitted (media type + size) and fetches the
-   pixels when it comes on screen. Dashed frame reads as a placeholder, not
-   a broken thumbnail; a failed fetch turns honest-red in place. */
+/* History image stub: the byte-honest page ships no payload, so the box
+   attests what was omitted and fetches pixels when it comes on screen.
+   Dashed frame reads as placeholder; a failed fetch turns honest-red. */
 .image-stub {
     display: inline-flex;
     align-items: center;
@@ -5024,13 +4410,13 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 /* ── Composer file uploads ────────────────────────────────────────────────── */
-#attachment-chips {
+.attachment-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
 }
 
-#attachment-chips:empty {
+.attachment-chips:empty {
     display: none;
 }
 
@@ -5071,16 +4457,12 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--error, #e55);
 }
 
-/* Composer blend (floating field): the removed slab's --bg-tertiary tint
-   made these two glyph buttons read as mini-slabs on the transparent
-   floating field. Rest now BLEND: transparent fill, 1px border kept at the
-   SAME width but color-invisible (never absent->present, so nothing shifts
-   -- the exact composer-blend idiom one level up on #chat-form). Hover and
-   focus return the affordance per that shared idiom: the fill change plus a
-   real border (hover --border-light, focus --border-focus, the var-driven
-   accent token the theme recipe says to ride). No size or movement changes:
-   padding, border width and radius are untouched. */
-#attach-btn {
+/* Composer blend (floating field): at rest these glyph buttons BLEND --
+   transparent fill, the 1px border kept at the SAME width but
+   color-invisible (never absent->present, so nothing shifts; the
+   .chat-form idiom). Hover/focus return the affordance: fill change plus
+   a real border (hover --border-light, focus var-driven --border-focus). */
+.attach-btn {
     padding: 6px 10px;
     display: inline-flex;
     align-items: center;
@@ -5092,27 +4474,19 @@ body.sidebar-resizing #tree-col-resize {
     cursor: pointer;
 }
 
-#attach-btn:hover:not(:disabled) {
+.attach-btn:hover:not(:disabled) {
     background: var(--bg-active, #3a3a3a);
     border-color: var(--border-light);
 }
 
-#attach-btn:focus-visible {
+.attach-btn:focus-visible {
     border-color: var(--border-focus);
 }
 
-#attach-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Push-to-talk: same blended rest shell as #attach-btn (transparent fill +
-   color-invisible 1px border; hover/focus return the affordance), red while
-   holding to record. The recording state's RED border must survive a hover
-   (it is the only live-recording cue), so the border-return rules carry
-   :not(.recording); the hover fill still lands. The inline-SVG mic glyph
-   (see app.tsx) rides inline-flex + gap beside the phase label. */
-#mic-btn {
+/* Push-to-talk: same blended rest shell as .attach-btn, red while holding.
+   The recording border must survive a hover (the only live cue), so the
+   border-return rules carry :not(.recording); the hover fill still lands. */
+.mic-btn {
     padding: 6px 12px;
     display: inline-flex;
     align-items: center;
@@ -5125,41 +4499,33 @@ body.sidebar-resizing #tree-col-resize {
     white-space: nowrap;
 }
 
-#mic-btn:hover:not(:disabled) {
+.mic-btn:hover:not(:disabled) {
     background: var(--bg-active, #3a3a3a);
 }
 
-#mic-btn:hover:not(:disabled):not(.recording) {
+.mic-btn:hover:not(:disabled):not(.recording) {
     border-color: var(--border-light);
 }
 
-#mic-btn:focus-visible:not(.recording) {
+.mic-btn:focus-visible:not(.recording) {
     border-color: var(--border-focus);
 }
 
-#mic-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-#mic-btn.recording {
+.mic-btn.recording {
     border-color: var(--error, #e55);
     color: var(--error, #e55);
 }
 
 /* ── Subagents sidebar section (nested under the manager card) ────────────
-   A collapsible list of the tasks the session delegated: header ("Subagents"
-   + chevron, the #logs-toggle disclosure idiom) then one row per task --
-   status glyph, step label, elapsed clock, and the shared .row-menu-btn
-   kebab trigger (the session/log rows' anchor idiom: hover/focus-revealed,
-   opens the same context menu as right-click). Rows are focusable list
-   items; the full task id and status ride the native title. */
+   Collapsible list of delegated tasks: header ("Subagents" + chevron, the
+   .logs-toggle idiom), then one row per task -- status glyph, step label,
+   elapsed clock, shared .row-menu-btn kebab (same context menu as
+   right-click). Rows focusable; full task id and status on native title. */
 
 .subagents-section {
     /* Children of the card, not a third-level indent: NO left margin -- the
-       header label and the row glyph align on the manager card's OWN content
-       edge (10px insets below, the .session-item padding, one canonical
-       value documented in both rules it feeds). */
+       header label and row glyph align on the manager card's OWN content
+       edge (the 10px insets below, one canonical .session-item value). */
     margin: 2px 0 4px;
 }
 
@@ -5180,7 +4546,7 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-muted);
 }
 
-/* Chevron button: the #logs-toggle grammar at list scale (aria-expanded +
+/* Chevron button: the .logs-toggle grammar at list scale (aria-expanded +
    a rotated glyph while collapsed; the rotation class is the test pin). */
 .subagents-toggle {
     width: 22px;
@@ -5199,15 +4565,6 @@ body.sidebar-resizing #tree-col-resize {
 .subagents-toggle:hover {
     color: var(--accent);
     background: var(--accent-soft);
-}
-
-.subagents-toggle:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-}
-
-.subagents-toggle-glyph-up {
-    transform: rotate(180deg);
 }
 
 /* Collapsed drops the rows out of the flow (the #sidebar.logs-collapsed
@@ -5238,8 +4595,7 @@ body.sidebar-resizing #tree-col-resize {
     background: var(--bg-hover);
 }
 
-/* Focusable list item (the shared row grammar): keyboard focus reads like
-   the session/log rows. */
+/* Focusable list item: focus reads like the session/log rows. */
 .subagent-row:focus-visible {
     background: var(--bg-hover);
     outline: 1px solid var(--accent);
@@ -5298,12 +4654,9 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-muted);
 }
 
-/* The task row's context-menu kebab: the shared .row-menu-btn treatment,
-   revealed with the row -- hover/focus like the
-   session/log rows, plus always shown on the ACTIVE (viewed) row.
-   The elapsed clock keeps the auto margin, so the
-   button rides tight off its shoulder (.row-clients + .row-menu-btn
-   idiom). */
+/* The task row's kebab: shared .row-menu-btn treatment -- revealed with the
+   row, always shown on the ACTIVE row; the elapsed clock keeps the auto
+   margin, so the button rides tight off its shoulder (.row-clients idiom). */
 .subagent-row:hover .row-menu-btn,
 .subagent-row:focus-within .row-menu-btn,
 .subagent-row.active .row-menu-btn {
@@ -5315,12 +4668,11 @@ body.sidebar-resizing #tree-col-resize {
     margin-left: 2px;
 }
 
-/* ── Settings viewer (settings button in the chat header) ────────────────
-   An overlay dialog (fixed-position, dimmed backdrop, not a docked pane): a
-   snapshot read of the resolved config with a Zed-style two-pane body (redesign C6):
-   a LEFT RAIL (search input on top, the category list with row counts, the
-   config dir at the bottom) and a RIGHT PANE (diagnostics notice at the top,
-   then the scrollable grouped settings). */
+/* ── Settings viewer (settings button in the chat header) ──────────────────
+   An overlay dialog (fixed-position, dimmed backdrop): a snapshot read of
+   the resolved config, two-pane -- LEFT rail (search, category list with
+   counts, config dir at the bottom), RIGHT pane (diagnostics, scrollable
+   grouped settings). */
 .settings-view {
     position: fixed;
     top: 6%;
@@ -5372,11 +4724,6 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--accent);
 }
 
-.settings-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 .settings-close {
     font-size: 1.025rem;
     line-height: 1;
@@ -5388,7 +4735,6 @@ body.sidebar-resizing #tree-col-resize {
     font-size: 0.975rem;
 }
 
-/* The two-pane body: rail + scrollable content column. */
 .settings-view-body {
     display: flex;
     min-height: 0;
@@ -5421,12 +4767,7 @@ body.sidebar-resizing #tree-col-resize {
     min-width: 0;
 }
 
-.settings-search:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-/* The search clear affordance (settings rail, owner 2026-11-11). The wrap
+/* The search clear affordance (settings rail). The wrap
    is the positioning context so the button can ride the input's right edge
    without touching the rail layout. */
 .settings-search-wrap {
@@ -5488,11 +4829,6 @@ body.sidebar-resizing #tree-col-resize {
     cursor: pointer;
 }
 
-.settings-cat:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
 .settings-cat[aria-current="true"] {
     background: var(--accent-soft);
     color: var(--text-primary);
@@ -5505,7 +4841,6 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-muted);
 }
 
-/* Right pane: scrollable column; the diagnostics notice rides at its top. */
 .settings-content {
     flex: 1;
     min-width: 0;
@@ -5513,8 +4848,8 @@ body.sidebar-resizing #tree-col-resize {
     padding: 12px 16px 18px;
 }
 
-/* Diagnostics: the Zed amber notice at the top of the right pane (behavior
-   unchanged -- broken files + key-level findings, names/lines only). */
+/* Diagnostics: the amber notice at the top of the right pane (broken files
+   + key-level findings, names/lines only). */
 .settings-diagnostics {
     border: 1px solid rgba(251, 191, 36, 0.35);
     border-left: 3px solid var(--warning, #d9a441);
@@ -5585,13 +4920,10 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-muted);
 }
 
-/* ZED ROWS: bold derived label, a muted description line (or the raw keyPath
-   in monospace when the schema has none -- never invented prose), control
-   right-aligned, hairline separators, the full keyPath in the title.
-   The label column keeps a real min-width: a wide control or a long mono
-   value must never squeeze it to one-character-per-line (the "p r o v i d e r s"
-   collapse from the owner's screenshot -- inherited overflow-wrap breaking at
-   a 1ch column). 11rem fits any real derived label; longer paths still wrap. */
+/* ZED ROWS: bold derived label, muted description (or the raw keyPath in
+   mono when the schema has none -- never invented prose), control right,
+   hairline separators, full keyPath in the title. The label column's real
+   min-width (11rem) stops inherited overflow-wrap one-char-per-line wrap. */
 .settings-row {
     display: grid;
     grid-template-columns: minmax(11rem, 1fr) minmax(0, auto);
@@ -5657,14 +4989,10 @@ body.sidebar-resizing #tree-col-resize {
     font-style: italic;
 }
 
-/* Secret-row layout (owner ruling + screenshot 2026-11-18): "set
-   (redacted)" is a fixed short phrase -- it reads as ONE right-aligned
-   badge, never wrapped mid-phrase inside the row. The write-only REPLACE
-   field keeps a real minimum so its placeholder stops clipping against the
-   Set button, and the Set button never shrinks. When the control column
-   gets narrower than the pair, the whole REPLACE box wraps to its own row
-   (the outer control row wraps as units); the badge keeps the right edge.
-   No DOM change: this is the row the server already ships. */
+/* Secret-row layout: "set (redacted)" reads as ONE right-aligned badge,
+   never wrapped mid-phrase; the REPLACE field keeps a real minimum (its
+   placeholder clipped against Set) and Set never shrinks. Below the pair's
+   width the REPLACE box wraps whole, the badge keeping the right edge. */
 .settings-row-control {
     flex-wrap: wrap;
     row-gap: 6px;
@@ -5745,16 +5073,9 @@ body.sidebar-resizing #tree-col-resize {
     min-width: 0;
 }
 
-.settings-edit-input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-/* The panel owns its stepper: Chrome's native number spin buttons were a
-   second, un-themed control colliding with our −/+ buttons -- and showing
-   up ALONE on rows without declared bounds, giving the panel two control
-   languages. Suppress them; keyboard arrows still step the field, and our
-   buttons remain the only on-screen stepper. */
+/* The panel owns its stepper: Chrome's native number spin buttons were an
+   un-themed second control colliding with our −/+ buttons (and showed up
+   ALONE on rows without bounds). Suppress them; arrows still step. */
 .settings-edit-input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
@@ -5917,12 +5238,10 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 /* ── List blocks (arrayChrome arrays: header + element rows + one add) ─────
-   The chrome row is the array's header: label / description / attested layer
-   badges + an element-count summary, with the ONE "+ add" affordance riding
-   on it (the chrome row always ships ahead of its elements, so a truncated
-   snapshot cannot strand the add from its array). The array VALUE never
-   paints here. Element rows are ordinary .settings-row wearing a trailing
-   one-click x. */
+   The chrome row is the array's header: label / description / layer badges
+   + element-count summary, with the ONE "+ add" riding on it (the chrome
+   row ships ahead of its elements, so a truncated snapshot cannot strand
+   the add). The array VALUE never paints here; rows are .settings-row. */
 .settings-list-block {
     margin: 2px 0 8px;
 }
@@ -5962,11 +5281,6 @@ body.sidebar-resizing #tree-col-resize {
     max-width: 220px;
 }
 
-.settings-list-add-input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
 .settings-btn.settings-list-add-go {
     color: var(--accent);
     border-color: var(--accent);
@@ -5998,11 +5312,10 @@ body.sidebar-resizing #tree-col-resize {
     margin-top: 8px;
 }
 
-/* ── Provider cards (owner 2026-11-11: one card per provider) ───────────────
-   The Providers category renders the card-shaped snapshot: the `providers`
-   chrome row is the section heading, each `providers[i]` chrome row is a card
-   header (bold name + mono path + two-step Remove), and the element's field
-   rows live in the card body. Hairlines and existing theme vars only. */
+/* ── Provider cards ─────────────────────────────────────────────────────────
+   Card-shaped snapshot: the `providers` chrome row is the section heading,
+   each `providers[i]` chrome row a card header (bold name + mono path +
+   two-step Remove), field rows in the card body. Hairlines, theme vars. */
 .settings-provider-card {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -6042,7 +5355,6 @@ body.sidebar-resizing #tree-col-resize {
     gap: 6px;
 }
 
-/* The destructive step names itself in the error ink (existing --error). */
 .settings-btn.settings-provider-remove-yes {
     color: var(--error);
     border-color: var(--error);
@@ -6094,18 +5406,12 @@ body.sidebar-resizing #tree-col-resize {
     max-width: 220px;
 }
 
-.settings-provider-add-input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
 .settings-btn.settings-provider-add-go {
     color: var(--accent);
     border-color: var(--accent);
 }
 
-/* The list-op refusal line under the affordance rides the shared error ink;
-   outside the row grid it just needs its own spacing. */
+/* The list-op refusal line: shared error ink; own spacing outside the grid. */
 .settings-provider-list-error {
     grid-column: auto;
     margin-top: 6px;
@@ -6129,21 +5435,16 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   END RESPONSIVE COLLAPSE (owner screenshots 2026-11-18)
+   END RESPONSIVE COLLAPSE
    ───────────────────────────────────────────────────────────────────────────
    Deliberately at the FOOT of the sheet: the collapse rules must win over
    every base rule above (cascade order is their whole mechanism), and the
    structural test helpers read FIRST-MATCH selector bodies -- a collapse
    body must never shadow a base body.
 
-   Editor/viewer foot bars (container = .editor / .file-view): progressive,
-   light to heavy. The OPTIONAL toggles go first (visible whitespace, reload
-   -- both live in the tab's context menu and the file tree), then the syntax
-   chooser (auto-detect keeps painting; the override UI returns one step
-   wider), then the caret readout (Ctrl+G still opens the jump input, which
-   stays visible). The status segment -- the save-state seat ("saving.../
-   edited/saved") -- is NEVER hidden, and Ctrl+S is keyboard-owned, invisible
-   to any of this: Save stays reachable at every width.
+   Foot bars (container = .editor / .file-view) collapse light to heavy:
+   optional toggles, the syntax chooser, the caret readout. The status
+   segment (save state) is NEVER hidden; Save stays reachable at any width.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @container (max-width: 440px) {
@@ -6166,21 +5467,19 @@ body.sidebar-resizing #tree-col-resize {
     }
 }
 
-/* Composer phone tiers (below the existing 768 pill-shrink tier): the row
-   gives up its OPTIONAL segments before the band becomes the owner's
-   garbled pile -- the mic first (its "● Recording" text is the widest
-   transient in there), then the profile pill; both re-appear one tier up.
-   What survives at the floor: attach, the model pill (its value ellipsizes
-   through the existing .combobox-value idiom), Stop/Send right-anchored --
+/* Composer phone tiers: the row gives up its OPTIONAL segments before it
+   becomes a garbled pile -- the mic first (its "● Recording" text is the
+   widest transient), then the profile pill. Survivors at the floor: attach,
+   the model pill (value ellipsizes through .combobox-value), Stop/Send --
    the message path itself never collapses. */
 @media (max-width: 480px) {
-    #composer-actions #mic-btn {
+    .composer-actions .mic-btn {
         display: none;
     }
 }
 
 @media (max-width: 400px) {
-    #composer-actions #profile-selector {
+    .composer-actions .profile-selector {
         display: none;
     }
 }

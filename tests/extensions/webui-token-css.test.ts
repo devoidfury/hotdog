@@ -5,8 +5,11 @@
 // highlighting" complaint was exactly this: the registry grew to 35 languages
 // while the viewer's tk- block still styled only the shell pair, so every other
 // class rendered in default ink. Doctrine: one reading, one hue, both sinks --
-// shared classes get exactly ONE rule; theme vars only; "default" stays
-// unstyled on purpose.
+// each token class is defined exactly ONCE, shared readings carrying both
+// selector forms in one rule (`.tok-x, .tk-x { }`); the viewer keeps only its
+// deliberate deltas (the legacy shell hue, the bold accent roles); theme vars
+// only (the one grandfathered hex is the viewer's shipped shell green);
+// "default" stays unstyled on purpose.
 //
 // Same read-the-CSS doctrine as webui-theme-pref.test.ts's token-split pin:
 // these rules are plain CSS, and the dom-helper has no CSSOM. The vocabulary
@@ -27,12 +30,14 @@ const CSS = readFileSync(
 );
 
 function hasRule(cls: string): boolean {
-  return new RegExp("\\." + cls + "\\s*\\{").test(CSS);
+  // Selector-list aware: the class may sit anywhere in a list (`.tok-x, .tk-x {`).
+  return new RegExp("\\." + cls + "\\s*[,{]").test(CSS);
 }
 
-/** The body of the rule whose selector is exactly `sel` (first match). */
+/** The body of the first rule whose selector list contains `sel` (the
+ *  caller passes the leading dot, e.g. ".tk-keyword"). */
 function ruleBody(sel: string): string {
-  const at = CSS.search(new RegExp("\\n" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{"));
+  const at = CSS.search(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*[,{]"));
   if (at < 0) throw new Error(`rule ${sel} missing from styles.css`);
   const start = CSS.indexOf("{", at);
   const end = CSS.indexOf("}", start);
@@ -114,13 +119,13 @@ describe("every registry token class has a CSS rule for both sinks", () => {
   });
 
   it("the tok- and tk- families cover the same class set", () => {
-    const tokSet = new Set([...CSS.matchAll(/\.tok-([a-z_]+)\s*\{/g)].map((m) => m[1]));
-    const tkSet = new Set([...CSS.matchAll(/\.tk-([a-z_]+)\s*\{/g)].map((m) => m[1]));
+    const tokSet = new Set([...CSS.matchAll(/\.tok-([a-z_]+)\s*[,{]/g)].map((m) => m[1]));
+    const tkSet = new Set([...CSS.matchAll(/\.tk-([a-z_]+)\s*[,{]/g)].map((m) => m[1]));
     expect([...tkSet].sort()).toEqual([...tokSet].sort());
   });
 
   it("no token rule hard-codes a color (theme vars keep both palettes)", () => {
-    for (const m of CSS.matchAll(/\.(?:tok|tk)-([a-z_]+)\s*\{([^}]*)\}/g)) {
+    for (const m of CSS.matchAll(/\.(?:tok|tk)-([a-z_]+)\s*[,{]([^}]*)\}/g)) {
       const body = m[2]!;
       const colors = [...body.matchAll(/color:\s*([^;}]+)/g)].map((c) => c[1]!.trim());
       for (const value of colors) {

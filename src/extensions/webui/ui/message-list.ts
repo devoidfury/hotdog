@@ -688,6 +688,10 @@ export function createMessageList(
       header.className = "tool-call-header";
       const nameEl = document.createElement("span");
       nameEl.className = "tool-call-name";
+      // Pre-naming placeholder: the toolName delta can trail the first arg
+      // deltas by a beat (and on a mid-call attach the bubble opens without
+      // one); without this the header would be a spinner on empty air.
+      nameEl.textContent = "🛠 working…";
       const statusEl = document.createElement("span");
       statusEl.className = "tool-call-status status-pending";
       // The house busy affordance (composer/sidebar .spinner): a

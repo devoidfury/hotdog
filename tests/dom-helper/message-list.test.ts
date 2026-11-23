@@ -1997,8 +1997,8 @@ describe("live activity: the in-flight tool bubble", () => {
     const host = bubbles()[0]!;
     // The bubble takes over from the row.
     expect(container.querySelector(".thinking-live")).toBeNull();
-    // No toolName delta yet: nothing is invented for it.
-    expect(host.querySelector(".tool-call-name")!.textContent).toBe("");
+    // No toolName delta yet: the placeholder says a call is in flight.
+    expect(host.querySelector(".tool-call-name")!.textContent).toBe("🛠 working…");
     expect(host.querySelector(".spinner")).not.toBeNull();
     expect(previews()[0]!.textContent).toBe('{"comm');
 

@@ -2054,6 +2054,12 @@ body.logs-resizing .sidebar-header-resize {
     margin: 4px 0 4px var(--space-sm);
     overflow: hidden;
     animation: messageIn 0.25s var(--ease-out) both;
+    /* #message-list is a flex column; `overflow: hidden` makes the flexbox
+       automatic minimum size zero, so a block is the only shrinkable row in
+       a tall transcript and gets crushed to 0px once content overflows the
+       viewport (only its margins keep pushing). Visible overflow rows never
+       shrink; this block must not either. */
+    flex-shrink: 0;
 }
 
 /* Prose posture: reads as an agent message row, so the surface goes too. */

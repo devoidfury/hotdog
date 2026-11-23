@@ -2363,7 +2363,7 @@ describe("jump-to-bottom button", () => {
     const btn = jumpBtn(host);
     expect(btn).not.toBeNull();
     expect(btn.tagName.toLowerCase()).toBe("button");
-    expect(btn.getAttribute("aria-label")).toBe("Jump to bottom");
+    expect(btn.getAttribute("aria-label")).toBe("Jump to end");
     const svg = btn.querySelector("svg")!;
     expect(svg.getAttribute("aria-hidden")).toBe("true");
     expect(svg.getAttribute("tabindex")).toBe("-1");

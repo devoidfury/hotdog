@@ -1880,9 +1880,9 @@ export function createMessageList(
     jumpButton = document.createElement("button");
     jumpButton.type = "button";
     jumpButton.className = "jump-to-bottom";
-    jumpButton.setAttribute("aria-label", "Jump to bottom");
+    jumpButton.setAttribute("aria-label", "Jump to end");
     jumpButton.hidden = true; // followBottom starts true; hide from frame one
-    jumpButton.innerHTML = ICON_CHEVRON_DOWN;
+    jumpButton.innerHTML = "Jump to end" + ICON_CHEVRON_DOWN;
     jumpButton.addEventListener("click", onJumpClick);
     jumpHost.appendChild(jumpButton);
   }

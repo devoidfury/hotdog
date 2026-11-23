@@ -21,7 +21,7 @@
 //   path; a promoted session's pin survives.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hostname, tmpdir } from "node:os";
 import { TMP_PARENT } from "../mocks/io.ts";
@@ -41,6 +41,9 @@ import { handleSend, handleCancel } from "@extensions/websocket/handlers-send.ts
 import { handleQuestionAnswer } from "@extensions/websocket/handlers-tasks.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { attachResumedSession } from "@extensions/websocket/attach.ts";
+import { listGen } from "@extensions/websocket/list-gen.ts";
+import { resumedHeldQuestions } from "@extensions/websocket/resume.ts";
+import { logger } from "@utils/logger.ts";
 import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { closePinStore, getPinnedIds, isPinned, setPinned } from "@extensions/websocket/pin-store.ts";
@@ -577,33 +580,71 @@ function makeAdoptFixture(name: string) {
     { t: new Date(SPAWN + 1).toISOString(), ev: "agent", id: "run:a4", agent: ADOPT_TORN },
   ]);
   // TURN_END-capable agents: the settle latch reads hooks.on, the test
-  // fires the hook by hand (real Agents carry the real HookSystem).
+  // fires the hook by hand (real Agents carry the real HookSystem). The
+  // unsubscribe really removes the handler; addMessage is captured per
+  // session; notifyHooks stands in for the session-log extension's
+  // resume_attempt record -- the artifact the quiet load must NOT produce.
   const hooks: Record<string, Array<(d: unknown) => unknown>> = {};
+  const unsubscribed: string[] = [];
+  const added: Array<{ sid: string; msg: unknown }> = [];
   const tm = manager(path);
   const registry = new SessionRegistry({
-    buildAgent: async (config: { sessionId?: string }) =>
-      makeWsMockAgent({
-        sessionId: config.sessionId || "fresh-5",
+    buildAgent: async (config: { sessionId?: string }) => {
+      const sid = config.sessionId || "fresh-5";
+      return makeWsMockAgent({
+        sessionId: sid,
+        addMessage: (msg: { role?: string }) => {
+          added.push({ sid, msg });
+        },
         hooks: {
-          notifyHooks: () => {},
+          notifyHooks: (name: string, payload: unknown) => {
+            if (name === HOOKS.SESSION_RESUME_ATTEMPT) {
+              const p = payload as { sessionId?: string; origin?: string };
+              if (p?.sessionId) {
+                appendFileSync(
+                  join(SESSIONS, `${p.sessionId}.jsonl`),
+                  JSON.stringify({
+                    ts: new Date().toISOString(),
+                    session_id: p.sessionId,
+                    source: "resume_attempt",
+                    content: { origin: p.origin },
+                  }) + "\n",
+                );
+              }
+            }
+            return Promise.resolve(undefined);
+          },
           runHookPipeline: async () => undefined,
           registerHook: () => {},
           unregisterHook: () => {},
           on: (hook: string, h: (d: unknown) => unknown) => {
-            (hooks[hook] ||= []).push(h);
-            return () => {};
+            const arr = (hooks[hook] ||= []);
+            arr.push(h);
+            return () => {
+              unsubscribed.push(hook);
+              const i = arr.indexOf(h);
+              if (i !== -1) arr.splice(i, 1);
+            };
           },
         } as never,
-      }),
+      });
+    },
     toolExecResolved: { toolExec: "inline", execFence: "probe" },
   });
   registry.setTaskManager(tm);
+  // The adopted-settle lanes ride the task manager's session seam
+  // (createWsServer wires the identical one in production).
+  tm.setSessionManager(registry.getSessionManager() as never);
   return {
     path,
     tm,
     registry,
+    added,
+    unsubscribed,
+    // Harness-sourced adds only (adoptions' own replays add conversation).
+    harnessAdds: () => added.filter((a) => (a.msg as { role?: string }).role === "harness"),
     fire: (hook: string, data: unknown) => {
-      for (const h of hooks[hook] ?? []) h(data);
+      for (const h of [...(hooks[hook] ?? [])]) h(data);
     },
   };
 }
@@ -612,6 +653,7 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
   it("auto adoption stamps the worker row: hidden, linked, badged, nested under the manager", async () => {
     const f = makeAdoptFixture("adopt-stamp");
     try {
+      const genBefore = Number(listGen().split("-").pop());
       const ws = createWsMockWs();
       await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
 
@@ -624,27 +666,41 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
       expect(row.attestPending).toBe(true); // the record was OPEN at adoption
       expect(row.getAgent?.()).toBeTruthy(); // the engine keeps running it
 
-      // The worker projection holds THROUGH adoption: the orphan is never
-      // a top-level live row (the SESSIONS payload is built from list()).
+      // The orphan never enters the top-level list, and the only row the
+      // attach adds is the manager's (zero-run pins:
+      // websocket-quiet-manager.test.ts).
       expect(f.registry.list().map((s) => s.id)).not.toContain(ADOPT);
-      expect(f.registry.size).toBe(0);
+      expect(f.registry.size).toBe(1);
+      const liveRow = f.registry.list().find((s) => s.id === ADOPT_MGR) as
+        | (Record<string, unknown> & { id: string })
+        | undefined;
+      expect(liveRow).toBeDefined();
+      expect(f.registry.getRow(ADOPT_MGR)!.kind).toBeUndefined(); // interactive, not a worker
+      expect(f.registry.getRow(ADOPT_MGR)!.quietLoaded).toBe(true);
 
-      // The RENDER inputs, pinned: the pane's payload badges it as a
-      // subagent of the attested parent (adopted tell rides too), and the
-      // manager's cold row nests the durable card for the SAME task -- the
-      // agentSessionId is the client's join key between the two.
+      // The pane's payload badges the orphan under the attested parent.
       const created = frames(ws).find((m) => m.type === S2C.SESSION_CREATED)!;
       expect(created.kind).toBe("subagent");
       expect(created.parentSessionId).toBe(ADOPT_MGR);
       expect(created.adopted).toBe(true);
+
+      // The revived manager left the cold list; its board rides the live
+      // row's additive `subagents` field.
       const rows = (await coldLogsPayload(f.registry)).logs;
       expect(rows.map((r) => r.id)).not.toContain(ADOPT); // hidden from the cold list too
-      const nested = (rows.find((r) => r.id === ADOPT_MGR)!.subagents ?? []) as Array<Record<string, unknown>>;
+      expect(rows.map((r) => r.id)).not.toContain(ADOPT_MGR); // revived, so no longer cold
+      const nested = (liveRow!.subagents ?? []) as Array<Record<string, unknown>>;
       const card = nested.find((t) => t.taskId === "run:a1");
       expect(card).toBeDefined();
-      expect(card!.status).toBe("interrupted");
+      expect(card!.adoptedLive).toBe(true);
+      expect(card!.status).toBe("running");
+      expect(card!.inRun).toBe(false); // exact bus fact: no turn kicked here
       expect(card!.durable).toBe(true);
       expect(card!.agentSessionId).toBe(ADOPT);
+      expect(card!.turnStartedAt).toBeNull(); // no invented clock anchor
+      // The cold-row departure bumped the membership watermark (push-frame
+      // grammar pinned in websocket-quiet-manager.test.ts).
+      expect(Number(listGen().split("-").pop())).toBeGreaterThan(genBefore);
     } finally {
       f.tm.stop();
     }
@@ -712,13 +768,54 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
       await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
       expect(f.registry.getRow(ADOPT)!.attestPending).toBe(true);
 
-      f.fire(HOOKS.TURN_END, { stopped: true, reason: "completion" });
+      // The latch is scoped to its agent: another session's turn end
+      // settles nothing.
+      f.fire(HOOKS.TURN_END, {
+        stopped: true,
+        reason: "completion",
+        agent: { sessionId: "some-other-agent" },
+      });
+      expect(f.registry.getRow(ADOPT)!.attestPending).toBe(true);
+      expect(f.registry.getRow(ADOPT)!.workerTerminal).toBe(false);
+      expect(readFileSync(f.path, "utf8")).not.toContain("adopted-completed");
+      expect(f.harnessAdds().length).toBe(0);
+
+      // The adopted session's OWN turn end lands the attestation.
+      f.fire(HOOKS.TURN_END, {
+        stopped: true,
+        reason: "completion",
+        agent: { sessionId: ADOPT },
+      });
       const text = await waitForFileText(f.path, "adopted-completed");
       expect(text).toContain('"ev":"end"');
       expect(text).toContain('"id":"run:a1"');
       const row = f.registry.getRow(ADOPT)!;
       expect(row.attestPending).toBe(false);
       expect(row.workerTerminal).toBe(true); // sweep may reclaim it once unwatched
+      // The handler is released the moment it serves (unheld, it leaks per
+      // adoption and outlives the dead meta).
+      expect(f.unsubscribed.filter((h) => h === HOOKS.TURN_END)).toHaveLength(1);
+
+      // Revived quietly, so the settle lands as a context write (lane 2),
+      // never a bus wake.
+      const notes = f.harnessAdds().map((a) => JSON.stringify(a.msg));
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toContain("run:a1");
+      expect(notes[0]).toContain("restart-adopted");
+      expect(notes[0]).toContain("adopted-completed");
+      expect(notes[0]).toContain("run_id");
+      expect(notes[0]).toContain("[Task completed]");
+      expect(f.registry.getSessionManager().getBus(ADOPT_MGR)?.queueItems.length).toBe(0);
+
+      // The card drops the overlay and carries the adopted terminal token.
+      const card = (((f.registry.list().find((s) => s.id === ADOPT_MGR) as
+        | Record<string, unknown>
+        | undefined)?.subagents ?? []) as Array<Record<string, unknown>>).find(
+        (t) => t.taskId === "run:a1",
+      );
+      expect(card).toBeDefined();
+      expect(card!.adoptedLive).toBeUndefined();
+      expect(card!.status).toBe("adopted-completed");
 
       // The card stops claiming "interrupted" -- THIS lifetime reads the
       // record CLOSED (the cached boot view follows its own line)...
@@ -734,8 +831,14 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
         tm2.stop();
       }
 
-      // Once-only: a later turn-end and a teardown never rewrite the line.
-      f.fire(HOOKS.TURN_END, { stopped: true, reason: "completion" });
+      // Once-only: a later own-agent turn-end and a teardown rewrite
+      // nothing and notify nothing (the unsubscribe already ran).
+      f.fire(HOOKS.TURN_END, {
+        stopped: true,
+        reason: "completion",
+        agent: { sessionId: ADOPT },
+      });
+      expect(f.harnessAdds()).toHaveLength(1);
       expect(f.registry.delete(ADOPT)).toBe(true);
       const ends = readFileSync(f.path, "utf8")
         .split("\n")
@@ -751,7 +854,11 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
     try {
       const ws = createWsMockWs();
       await attachResumedSession(ws, f.registry, bridgeStub, ADOPT_DIED, 0, true);
-      f.fire(HOOKS.TURN_END, { stopped: true, reason: "error" });
+      f.fire(HOOKS.TURN_END, {
+        stopped: true,
+        reason: "error",
+        agent: { sessionId: ADOPT_DIED },
+      });
       const text = await waitForFileText(f.path, "adopted-died");
       expect(text).toContain('"id":"run:a2"');
     } finally {
@@ -771,6 +878,8 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
       const text = await waitForFileText(f.path, "adopted-died");
       expect(text).toContain('"id":"run:a4"');
       expect(f.registry.getRow(ADOPT_TORN)).toBeNull();
+      // Teardown releases the latch too.
+      expect(f.unsubscribed.filter((h) => h === HOOKS.TURN_END)).toHaveLength(1);
     } finally {
       f.tm.stop();
     }
@@ -784,7 +893,11 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
       const row = f.registry.getRow(ADOPT_CLOSED)!;
       expect(row.kind).toBe("worker"); // worker posture holds...
       expect(row.attestPending).toBeFalsy(); // ...but the closed card is owed nothing
-      f.fire(HOOKS.TURN_END, { stopped: true, reason: "completion" });
+      f.fire(HOOKS.TURN_END, {
+        stopped: true,
+        reason: "completion",
+        agent: { sessionId: ADOPT_CLOSED },
+      });
       expect(row.workerTerminal).toBe(true); // settle still frees the sweep
       const text = readFileSync(f.path, "utf8");
       const ends = text.split("\n").filter((l) => l.includes('"ev":"end"') && l.includes('"run:a3"'));
@@ -809,7 +922,102 @@ describe("restart adoption: an attested worker returns honest, not top-level", (
       expect(f.registry.list().map((s) => s.id)).toContain(PLAIN5);
       const created = frames(ws).find((m) => m.type === S2C.SESSION_CREATED)!;
       expect("kind" in created).toBe(false);
+      // A row without a lineage group carries no subagents field.
+      const plainListRow = f.registry.list().find((s) => s.id === PLAIN5)!;
+      expect("subagents" in plainListRow).toBe(false);
       expect(f.registry.delete(PLAIN5)).toBe(true);
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("a live non-quiet manager wakes on the adopted settle through the bus lane", async () => {
+    const f = makeAdoptFixture("adopt-lane-bus");
+    try {
+      // A live manager row BEFORE the attach: the quiet load no-ops and
+      // the settle takes the bus-wake lane.
+      await f.registry.create({ sessionId: ADOPT_MGR });
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
+      expect(f.registry.getRow(ADOPT_MGR)!.quietLoaded).toBeUndefined();
+      f.fire(HOOKS.TURN_END, {
+        stopped: true,
+        reason: "completion",
+        agent: { sessionId: ADOPT },
+      });
+      // Read the queue in the same tick: the parked bus wakes on a microtask.
+      const items = f.registry.getSessionManager().getBus(ADOPT_MGR)?.queueItems ?? [];
+      expect(items).toHaveLength(1);
+      expect(items[0]!.source).toBe("harness");
+      const text = JSON.stringify(items[0]!.content);
+      expect(text).toContain("run:a1");
+      expect(text).toContain("restart-adopted");
+      expect(text).toContain("run_id");
+      expect(text).toContain("[Task completed]");
+      expect(f.harnessAdds()).toHaveLength(0); // a wake, not a context write
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("a manager holding a resumed question refuses the wake (warn and drop, no 400 bait)", async () => {
+    const f = makeAdoptFixture("adopt-lane-hold");
+    try {
+      await f.registry.create({ sessionId: ADOPT_MGR });
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
+      // Waking a dangling call 400s on strict backends: refuse warn-and-drop.
+      resumedHeldQuestions.set(ADOPT_MGR, [{ toolCallId: "tc-held", questions: [] }]);
+      const warns: string[] = [];
+      const origWarn = logger.warn;
+      logger.warn = (m: string) => {
+        warns.push(m);
+      };
+      try {
+        f.fire(HOOKS.TURN_END, {
+          stopped: true,
+          reason: "completion",
+          agent: { sessionId: ADOPT },
+        });
+      } finally {
+        logger.warn = origWarn;
+        resumedHeldQuestions.delete(ADOPT_MGR);
+      }
+      expect(f.registry.getSessionManager().getBus(ADOPT_MGR)?.queueItems.length ?? 0).toBe(0);
+      expect(f.harnessAdds()).toHaveLength(0);
+      expect(warns.some((w) => w.includes("run:a1"))).toBe(true);
+      // The sidecar line remains the whole attestation across the refusal.
+      const text = await waitForFileText(f.path, "adopted-completed");
+      expect(text).toContain('"id":"run:a1"');
+    } finally {
+      f.tm.stop();
+    }
+  });
+
+  it("a manager the book no longer holds gets warn-and-drop (misdelivery is worse)", async () => {
+    const f = makeAdoptFixture("adopt-lane-drop");
+    try {
+      const ws = createWsMockWs();
+      await attachResumedSession(ws, f.registry, bridgeStub, ADOPT, 0, true);
+      expect(f.registry.delete(ADOPT_MGR)).toBe(true); // gone before the settle
+      const warns: string[] = [];
+      const origWarn = logger.warn;
+      logger.warn = (m: string) => {
+        warns.push(m);
+      };
+      try {
+        f.fire(HOOKS.TURN_END, {
+          stopped: true,
+          reason: "completion",
+          agent: { sessionId: ADOPT },
+        });
+      } finally {
+        logger.warn = origWarn;
+      }
+      expect(f.harnessAdds()).toHaveLength(0);
+      expect(warns.some((w) => w.includes("run:a1") && w.includes("no bus"))).toBe(true);
+      const text = await waitForFileText(f.path, "adopted-completed");
+      expect(text).toContain('"id":"run:a1"');
     } finally {
       f.tm.stop();
     }

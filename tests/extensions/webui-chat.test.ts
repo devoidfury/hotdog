@@ -1252,3 +1252,103 @@ describe("createChat session view state (wire side)", () => {
     expect(composerForView(view).enabled).toBe(true);
   });
 });
+
+// ── Adopted-worker return navigation ──────────────────────────────────────
+// Away from the worker via sessionParentAtom (the adoption payload's
+// parentSessionId), back through the live card's switchSession route. The
+// card's click routing is pinned in openTargetFor
+// (webui-subagents-sidebar.test.tsx); the view state each landing leaves
+// behind is pinned here.
+
+describe("createChat adopted-worker return navigation", () => {
+  const RealWebSocket = globalThis.WebSocket;
+  let chat: ChatController | null = null;
+
+  afterEach(() => {
+    chat?.disconnect();
+    chat = null;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = RealWebSocket;
+  });
+
+  function makeNavChat(): { ws: FakeWebSocket } {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const container = makeContainer();
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => container as unknown as HTMLElement,
+      onSessionCreated: (d) => chat!.setSession(d.sessionId, d.replayDelta === true),
+    });
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+    ws.emit({ type: "sessionCreated", sessionId: "mgr-1" });
+    ws.sent.length = 0;
+    return { ws };
+  }
+
+  it("worker view -> parent -> worker again: the live round trip lands with the right posture", () => {
+    const { ws } = makeNavChat();
+    // The adoptedLive card press: switchSession with the subagent hint.
+    chat!.switchSession("wk-1", { subagent: true });
+    expect(ws.sent.filter((m) => m.type === "switchSession" && m.sessionId === "wk-1")).toHaveLength(1);
+    // The adoption payload stamps the pane: attached worker + parent join.
+    ws.emit({
+      type: "sessionCreated",
+      sessionId: "wk-1",
+      kind: "subagent",
+      parentSessionId: "mgr-1",
+      adopted: true,
+    });
+    let v = chat!.sessionViewAtom();
+    expect(v.mode).toBe("attached");
+    expect(v.attachedId).toBe("wk-1");
+    expect(v.workerView).toBe(true);
+    expect(chat!.sessionParentAtom()).toBe("mgr-1");
+
+    // Away from the worker: onCloseSubagentView switches to
+    // sessionParentAtom() (the revived manager, a plain live attach).
+    chat!.switchSession(chat!.sessionParentAtom()!);
+    ws.emit({ type: "sessionCreated", sessionId: "mgr-1" });
+    v = chat!.sessionViewAtom();
+    expect(v.mode).toBe("attached");
+    expect(v.attachedId).toBe("mgr-1");
+    expect(v.workerView).toBe(false);
+
+    // Back to the worker through the still-live card's route.
+    chat!.switchSession("wk-1", { subagent: true });
+    ws.emit({
+      type: "sessionCreated",
+      sessionId: "wk-1",
+      kind: "subagent",
+      parentSessionId: "mgr-1",
+      adopted: true,
+    });
+    v = chat!.sessionViewAtom();
+    expect(v.mode).toBe("attached");
+    expect(v.workerView).toBe(true);
+    expect(v.subjectId).toBeNull();
+    expect(composerForView(v).placeholder).toBe("Steer the subagent...");
+  });
+
+  it("settled card -> observing log; the close control returns to the attached session", () => {
+    const { ws } = makeNavChat();
+    // The SETTLED card press: viewLog (adoptedLive dropped with the row).
+    chat!.viewLog("wk-1");
+    expect(ws.sent.filter((m) => m.type === "viewLog" && m.logId === "wk-1")).toHaveLength(1);
+    ws.emit({ type: "logViewed", logId: "wk-1", entries: [] });
+    let v = chat!.sessionViewAtom();
+    expect(v.mode).toBe("observing");
+    expect(v.subjectId).toBe("wk-1");
+    expect(v.attachedId).toBe("mgr-1");
+    // The composer never claims the observed log.
+    expect(composerForView(v).enabled).toBe(false);
+    // Close (the app pairs clearView with the re-attach switch).
+    chat!.clearView();
+    chat!.switchSession("mgr-1");
+    v = chat!.sessionViewAtom();
+    expect(v.mode).toBe("attached");
+    expect(v.subjectId).toBeNull();
+    expect(v.attachedId).toBe("mgr-1");
+    expect(composerForView(v).enabled).toBe(true);
+  });
+});

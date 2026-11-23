@@ -227,6 +227,12 @@ export class SessionRegistry {
     this.#sessions.registerAdoptedWorker(sessionId, link);
   }
 
+  /** Resolve the lineage cache feeding the live rows' `subagents` field
+   *  (see AgentSessions.ensureLineageCache). */
+  async ensureLineageCache(): Promise<void> {
+    await this.#sessions.ensureLineageCache();
+  }
+
   /**
    * Release a worker row at its task's terminal event (marks it terminal,
    * nulls the agent accessor; no channel force-close). Unknown sid is a

@@ -379,6 +379,10 @@ const SUBAGENT_SHAPES: Record<string, JsxChild> = {
   // mid-task (restart survivor rows); distinct from cancelled's slashed
   // ring and parked's dashed one: the line itself is SEVERED.
   interrupted: <path d="M12 4a8 8 0 1 1-5.66 2.34" />,
+  // adopted terminals: done/cross twins of completed/failed; the row title
+  // keeps the raw token.
+  "adopted-completed": <path d="M4 12l5 5L20 6" stroke-width="2.5" />,
+  "adopted-died": <path d="M6 6 18 18M18 6 6 18" />,
   // dot: the "no shape for this token" fallback
   unknown: <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />,
 };

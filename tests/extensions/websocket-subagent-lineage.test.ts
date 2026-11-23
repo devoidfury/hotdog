@@ -211,6 +211,77 @@ describe("sendTaskSnapshot: rebuilt lineage on the live row", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("an ADOPTED live worker merges liveness into its durable card (overlayAdoptedLive)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lineage-overlay-"));
+    try {
+      const spawnLogPath = join(dir, "task-spawns.jsonl");
+      writeFileSync(
+        spawnLogPath,
+        [
+          { t: new Date(SPAWN).toISOString(), ev: "spawn", id: "run:c#3", desc: "mid-run death", session: "mgr-1", pid: 778, host: hostname() },
+          { t: new Date(SPAWN + 2000).toISOString(), ev: "agent", id: "run:c#3", agent: "worker-c" },
+        ]
+          .map((l) => JSON.stringify(l))
+          .join("\n") + "\n",
+      );
+      const tm = new TaskManager({
+        buildAgent: async () => ({ sessionId: "w", run: async () => undefined, notifyCompletion: () => {} }) as never,
+        modelRegistry: {},
+        config: {},
+        maxIterations: 3,
+        taskProfile: "default",
+        spawnLogPath,
+        spawnLogPidAlive: () => false,
+      });
+      // buildAgent must ADOPT the requested id (real Agents do; the bare
+      // mock default would key the row under its own "test").
+      const registry = new SessionRegistry({
+        buildAgent: async (config: { sessionId?: string }) =>
+          makeWsMockAgent({ sessionId: config.sessionId || "other" }),
+      });
+      registry.setTaskManager(tm);
+
+      const snapshot = async (): Promise<Record<string, unknown>> => {
+        const ws = createWsMockWs();
+        ws.activeSessionId = "mgr-1";
+        await registry.sendTaskSnapshot(ws);
+        const frame = JSON.parse(ws.messages[ws.messages.length - 1]!) as {
+          tasks: Array<Record<string, unknown>>;
+        };
+        return frame.tasks.find((t) => t.taskId === "run:c#3")!;
+      };
+
+      // No live row: the overlay is a no-op, the open record stays interrupted.
+      const frozen = await snapshot();
+      expect(frozen.status).toBe("interrupted");
+      expect("adoptedLive" in frozen).toBe(false);
+
+      // The reconnect adoption (no hooks on the mock: stamp-only, latch-free).
+      await registry.create({ sessionId: "worker-c" });
+      registry.registerAdoptedWorker("worker-c", {
+        taskId: "run:c#3",
+        parentSessionId: "mgr-1",
+        attest: true,
+      });
+      const live = await snapshot();
+      expect(live.adoptedLive).toBe(true);
+      expect(live.status).toBe("running");
+      expect(live.inRun).toBe(false); // exact bus fact: no turn started here
+      expect(live.durable).toBe(true);
+      expect(live.agentSessionId).toBe("worker-c");
+      expect(live.turnStartedAt).toBeNull(); // no invented clock anchor
+
+      // The release stops the overlay: the card reverts to the open record.
+      registry.releaseWorker("worker-c");
+      const after = await snapshot();
+      expect("adoptedLive" in after).toBe(false);
+      expect(after.status).toBe("interrupted");
+      tm.stop();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── coldLogsPayload: the nested `subagents` field on cold rows ──────────────

@@ -22,7 +22,13 @@ import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { replayLogSlice, replayPendingQuestion } from "./replay.ts";
 import { HISTORY_WINDOW_MESSAGES, windowOlderThan } from "./history-window.ts";
-import { adoptSessionLog, createAndAttachSession, seedResumedQuestions } from "./resume.ts";
+import {
+  adoptSessionLog,
+  createAndAttachSession,
+  loadSessionQuietly,
+  seedResumedQuestions,
+} from "./resume.ts";
+import { HOOKS } from "@core/hooks.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
 /** The FULL-replay image seam: a byte-honest view of the full log with every
@@ -92,6 +98,15 @@ export async function attachLiveSession(
   if (!channel) return false;
   ws.activeSessionId = sessionId;
   ws.activeChannel = channel;
+
+  // Keyed on the RAW row's kind, not the oracle branch: an adopted worker
+  // lives in the private manager, so the row itself is the worker fact.
+  // A cold attested parent loads quietly; every load precondition no-ops
+  // silently (see loadSessionQuietly).
+  const attachRow = registry.getRow(sessionId);
+  if (attachRow?.kind === "worker" && attachRow.workerTerminal !== true && attachRow.parentSessionId) {
+    await loadSessionQuietly(attachRow.parentSessionId, registry);
+  }
 
   // The agent behind the attach: interactive rows carry it on the oracle
   // entry; worker rows read it through the row ACCESSOR, null-tolerant
@@ -212,10 +227,31 @@ export async function attachResumedSession(
 
   const row = registry.getRow(sessionId);
   if (registry.get(sessionId)) {
+    // A manual Continue on a quietly-loaded row completes the withheld
+    // resume (the resume_attempt record plus, if the log's turn was open at
+    // load, the continuation). An auto reconnect is not a human claim.
+    let resumeOpenTurn = false;
+    if (row?.quietLoaded === true && auto === false) {
+      row.quietLoaded = false;
+      resumeOpenTurn = row.openTurnAtLoad === true;
+      row.openTurnAtLoad = undefined;
+      const agent = registry.get(sessionId)?.agent;
+      const resumeEntries = await readSessionEntries(sessionId, { full: true });
+      await agent?.hooks?.notifyHooks(HOOKS.SESSION_RESUME_ATTEMPT, {
+        // The payload surface names Agent; the row holds AgentLike (same live object).
+        agent: agent as unknown as Agent,
+        sessionId,
+        origin: "manual",
+        consecutiveAutoResumes: collectDurabilityFacts(resumeEntries).consecutiveAutoResumes,
+      });
+    }
     // The live session can go cold between the get and the attach; fall
     // back instead of stranding the socket.
     if (!(await attachLiveSession(ws, registry, bridge, sessionId, cursor))) {
       return fallBack(`Session ${sessionId} could not be attached.`);
+    }
+    if (resumeOpenTurn) {
+      registry.getSessionManager().getBus(sessionId)?.enqueue("", { continuation: true });
     }
     return;
   }

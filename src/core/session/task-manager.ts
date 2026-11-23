@@ -14,6 +14,7 @@ import {
 } from "./model-resolver.ts";
 import { LaneLedger } from "./lane-ledger.ts";
 import { SpawnLog, type LineageRecord, type OrphanedTask } from "./spawn-log.ts";
+import { trySessionPath } from "./session-log.ts";
 import { resolveLanesRetryMs } from "./turn-lanes.ts";
 import { makeProviderHealth, type ProviderHealth } from "./provider-health.ts";
 import { TaskScheduler } from "./task-scheduler.ts";
@@ -1003,6 +1004,52 @@ export class TaskManager {
         `[task ${entry.taskId}] delegating session ${entry.sessionId} has no bus; dropping task question`,
       );
     }
+  }
+
+  /** Tell the delegating session that a restart-adopted worker reached its
+   *  terminal; no TaskEntry backs it (the task book died with the old
+   *  process), so this message is the whole story. Three lanes: a routable
+   *  manager bus -> the harness wake a fresh completion gets; a manager
+   *  loaded only for display (`opts.quiet`) -> direct addMessage, no bus
+   *  write (the load must not burn an unrequested LLM turn); neither ->
+   *  drop with a warning (misdelivery to an unrelated session is worse).
+   *  The caller passes `wake: false` while a resumed question holds the
+   *  bus: waking a dangling call 400s. */
+  notifyAdoptedSettled(
+    parentSessionId: string,
+    taskId: string,
+    completed: boolean,
+    opts: { workerSessionId?: string; quiet?: boolean; wake?: boolean } = {},
+  ): void {
+    const outcome = completed ? "adopted-completed" : "adopted-died";
+    const logPath = opts.workerSessionId ? trySessionPath(opts.workerSessionId) : undefined;
+    const body =
+      `Task ${taskId} reached its terminal as ${outcome} in a restart-adopted session: ` +
+      "the worker ran after the old process died, outside the task book. Its engine gate " +
+      "died with that process, so nothing continues the run and this message states an " +
+      "observation, never a verdict." +
+      (logPath ? ` Worker transcript: ${logPath}.` : "") +
+      " Re-dispatch the task with run_id to get an engine gate back.";
+    const content: Array<Record<string, unknown>> = [
+      { type: "text", text: completed ? "[Task completed]\n" : "[Task ended]\n" },
+      { type: "untrusted", text: body },
+    ];
+    if (!opts.quiet && opts.wake !== false) {
+      const bus = this.#sessionManager?.getBus?.(parentSessionId);
+      if (bus) {
+        bus.enqueue(content, { source: "harness" });
+        return;
+      }
+    } else if (opts.quiet) {
+      const agent = this.#sessionManager?.getAgentBySessionId?.(parentSessionId);
+      if (agent) {
+        agent.addMessage(new Message({ role: "harness", content, source: "harness" }));
+        return;
+      }
+    }
+    logger.warn(
+      `[task ${taskId} delegating session ${parentSessionId} has no bus; dropping adopted settle`,
+    );
   }
 
   /** Cancel: queued -> terminal; running -> abort the in-flight turn; parked-idle -> terminal. */

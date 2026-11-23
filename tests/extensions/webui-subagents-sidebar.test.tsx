@@ -32,6 +32,26 @@ const taskInfoWire: TaskInfoWire = {
 // ── formatElapsed ───────────────────────────────────────────────────────────
 
 describe("formatElapsed", () => {
+  it("adoptedLive ticks the WALL clock since spawn (no turn anchor exists)", () => {
+    // turnStartedAt is null by contract (the in-flight turn started in a
+    // dead lifetime), so the clock reads now - createdAt.
+    const adoptedLive: TaskInfoWire = {
+      ...taskInfoWire,
+      status: "running",
+      durable: true,
+      adoptedLive: true,
+      createdAt: 10_000,
+      activeMs: 120_000, // the PREVIOUS lifetime's banked number must NOT ride the live tick
+      inRun: true,
+      turnStartedAt: null,
+    };
+    expect(formatElapsed(adoptedLive, 40_000)).toBe("30s");
+    expect(formatElapsed(adoptedLive, 95_000)).toBe("1m 25s");
+    // Settled: the durable reading again.
+    const settled: TaskInfoWire = { ...adoptedLive, adoptedLive: undefined, status: "adopted-completed" };
+    expect(formatElapsed(settled, 9_999_999)).toBe("2m 0s");
+  });
+
   it("ticks accumulated active time only during an in-flight turn", () => {
     const live: TaskInfoWire = {
       ...taskInfoWire,
@@ -157,6 +177,48 @@ describe("openTargetFor", () => {
 
   it("a durable row written before the agent join has NO target (no dead click)", () => {
     expect(openTargetFor({ ...taskInfoWire, status: "completed", durable: true })).toBeNull();
+  });
+
+  it("adoptedLive: the durable card whose worker is LIVE here opens the live attach", () => {
+    // Durable card, live session: switchSession, NOT viewLog.
+    expect(
+      openTargetFor({
+        ...taskInfoWire,
+        status: "running",
+        durable: true,
+        adoptedLive: true,
+        agentSessionId: "worker-live-1",
+      }),
+    ).toEqual({ sessionId: "worker-live-1" });
+    // No worker key, no target: the overlay never invents a join.
+    expect(
+      openTargetFor({ ...taskInfoWire, status: "running", durable: true, adoptedLive: true }),
+    ).toBeNull();
+  });
+
+  it("settled adopted cards fall back to the cold log (adoptedLive dropped with the row)", () => {
+    expect(
+      openTargetFor({
+        ...taskInfoWire,
+        status: "adopted-completed",
+        durable: true,
+        agentSessionId: "worker-live-1",
+      }),
+    ).toEqual({ logId: "worker-live-1" });
+  });
+});
+
+describe("SubagentStatusGlyph: adopted terminals", () => {
+  it("the adopted tokens get done/cross shapes, and the row token is never renamed", () => {
+    const done = renderToString(<SubagentStatusGlyph status="adopted-completed" />);
+    const died = renderToString(<SubagentStatusGlyph status="adopted-died" />);
+    expect(done).toContain("subagent-glyph-adopted-completed");
+    expect(died).toContain("subagent-glyph-adopted-died");
+    // Twins of the completed/failed paths, not the unknown dot.
+    expect(done).not.toContain("subagent-glyph-unknown");
+    expect(died).not.toContain("subagent-glyph-unknown");
+    expect(done).toContain('M4 12l5 5L20 6');
+    expect(died).toContain('M6 6 18 18M18 6 6 18');
   });
 });
 

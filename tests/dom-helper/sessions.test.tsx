@@ -833,6 +833,43 @@ describe("Subagents section", () => {
     expect(root.textContent).not.toContain("orphan");
   });
 
+  it("the live card unions the SESSIONS snapshot with the task feed, deduped by taskId, feed copy winning", () => {
+    const root = render({
+      sessions: [liveSession({
+        subagents: [
+          {
+            taskId: "run:snap#1",
+            description: "adopted survivor",
+            sessionId: FULL_ID,
+            status: "running",
+            createdAt: STAMP - 5000,
+            startedAt: null,
+            endedAt: null,
+            activeMs: 300_000,
+            inRun: true,
+            turnStartedAt: null,
+            durable: true,
+            adoptedLive: true,
+            agentSessionId: "w-run:snap#1",
+          },
+          subTask({ taskId: "run:both#1", description: "snapshot copy" }),
+        ],
+      })],
+      tasks: [subTask({ taskId: "run:both#1", description: "feed copy" })],
+      now: STAMP,
+    });
+    const rows = root.querySelectorAll(".subagent-row");
+    // The overlap renders once, with the feed copy winning.
+    expect(rows).toHaveLength(2);
+    expect(root.querySelector('[data-task-id="run:both#1"]')!.getAttribute("title"))
+      .toContain("feed copy");
+    // Wall-since-spawn clock, not the banked previous-lifetime number.
+    const snap = root.querySelector('[data-task-id="run:snap#1"]')!;
+    expect(snap.getAttribute("class")).toContain("status-running");
+    expect(snap.querySelector("svg")!.getAttribute("class")).toContain("subagent-glyph-running");
+    expect(snap.querySelector(".subagent-row-elapsed")!.textContent).toBe("5s");
+  });
+
   it("live tasks lead, settled ones trail newest-first; one run needs no prefix", () => {
     const root = render({
       sessions: [liveSession()],

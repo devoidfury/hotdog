@@ -9,17 +9,23 @@
 
 import { getSessionRow } from "@core/session/session-index.ts";
 import {
+  collectDurabilityFacts,
+  epochEntries,
+  readSessionEntries,
   restoreSessionIntoAgent,
+  sessionExists,
   type AgentForRestore,
   type LogEntry,
   type PendingQuestion,
 } from "@core/session/session-log.ts";
+import { formatError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
 import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import { logger } from "@utils/logger.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
 import { S2C, errorFrame } from "./protocol.ts";
+import { bumpListMembership } from "./list-gen.ts";
 import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
@@ -45,6 +51,10 @@ export async function adoptSessionLog(
   /** The FULL log read before adoption: reused for the metadata overlay so
    *  the log is not re-read for a session this call is about to grow. */
   preAdoptionEntries: LogEntry[],
+  /** QUIET load (see loadSessionQuietly): the same body with the resume
+   *  bookkeeping withheld (no resume_attempt record, no cap check), the row
+   *  stamped quietLoaded/openTurnAtLoad. Never a kick. */
+  opts: { loadOnly?: boolean } = {},
 ): Promise<{ pendingQuestions: PendingQuestion[]; openTurn: boolean; adopted: boolean; modelWarning: string | null }> {
   const inFlight = pendingAdoptions.get(sessionId);
   if (inFlight) {
@@ -92,7 +102,7 @@ export async function adoptSessionLog(
     const { pendingQuestions, profile, openTurn } = await restoreSessionIntoAgent(
       agent as unknown as AgentForRestore,
       sessionId,
-      { auto },
+      { auto, loadOnly: opts.loadOnly === true },
     );
     const meta = registry.get(sessionId)?.metadata;
     // The log may have a PROFILE_SWITCH the index row hasn't mirrored yet.
@@ -118,6 +128,10 @@ export async function adoptSessionLog(
       }
       if (createdAt > 0) meta.createdAt = createdAt;
       if (lastActivityAt > 0) meta.lastActivityAt = lastActivityAt;
+      if (opts.loadOnly) {
+        meta.quietLoaded = true;
+        meta.openTurnAtLoad = openTurn;
+      }
     }
     // Restart-adoption honesty: a log the sidecar attests as a WORKER's
     // (an ev:"agent" join minus manual promotions) must not return as a
@@ -146,6 +160,44 @@ export async function adoptSessionLog(
     return { ...result, adopted: true };
   } finally {
     pendingAdoptions.delete(sessionId);
+  }
+}
+
+/**
+ * Loads a cold session's log as an ordinary interactive row (pinnable,
+ * swept when idle) without running anything: no resume_attempt record, no
+ * cap check, no enqueue, no socket move; the replay still runs. Called
+ * from attach.ts when a client attaches a live worker whose attested
+ * manager is cold. Silent no-ops: already in the book, missing/empty log,
+ * or a resumed question is held (no client to answer it; stays a cold row).
+ * Never throws.
+ */
+export async function loadSessionQuietly(
+  sessionId: string,
+  registry: SessionRegistry,
+): Promise<boolean> {
+  try {
+    if (registry.getRow(sessionId)) return false;
+    if (!(await sessionExists(sessionId))) return false;
+    const fullEntries = await readSessionEntries(sessionId, { full: true });
+    if (epochEntries(fullEntries).length === 0) return false;
+    // Same classification the replay uses, checked before any writer exists.
+    const { asked, answered } = collectDurabilityFacts(epochEntries(fullEntries));
+    if (asked.some((q) => !answered.has(q.toolCallId))) return false;
+    const { adopted } = await adoptSessionLog(sessionId, registry, false, fullEntries, {
+      loadOnly: true,
+    });
+    if (!adopted) return false; // lost the race: the row went live
+    // Resolve the lineage board before the re-list so the fresh live row
+    // carries its subagents field.
+    await registry.ensureLineageCache();
+    const rowGen = bumpListMembership();
+    registry.broadcast({ type: S2C.LOG_ROW_REMOVED, sessionId, gen: rowGen });
+    registry.broadcast({ type: S2C.SESSIONS, sessions: registry.list() });
+    return true;
+  } catch (err) {
+    logger.warn(`[session ${sessionId}] quiet load refused: ${formatError(err)}`);
+    return false;
   }
 }
 

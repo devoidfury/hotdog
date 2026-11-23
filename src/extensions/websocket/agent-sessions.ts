@@ -29,7 +29,9 @@ import { bumpListMembership } from "./list-gen.ts";
 import type { TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { S2C } from "./protocol.ts";
-import { taskWire, taskLineageWire } from "./wire-messages.ts";
+import { taskWire, overlayAdoptedLive } from "./wire-messages.ts";
+import type { LineageRecord } from "@core/session/spawn-log.ts";
+import { resumedHeldQuestions } from "./resume.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import type { WorkerSessionStartedInfo } from "@core/session/task-types.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
@@ -130,6 +132,19 @@ export interface SessionMetadata {
    *  enter the private manager's event bus, so no deleteSession ever runs
    *  for them -- releaseWorker must clean the subscription up itself. */
   offUsage?: (() => void) | null;
+  /** Adopted rows only: unsubscribes the TURN_END settle latch. agent.hooks
+   *  is the host's shared HookSystem, so an unheld latch leaks per adoption
+   *  and any session's turn end trips it. Released when the latch fires and
+   *  by delete(). */
+  offTurnEnd?: (() => void) | null;
+  /** Interactive rows only: loaded for display by a worker attach, not a run
+   *  start (loadSessionQuietly). Holds no started turn; adopted-settle
+   *  notifications land via addMessage, not a bus wake. A manual Continue
+   *  completes the resume (record + continuation) and clears the flag. */
+  quietLoaded?: boolean;
+  /** Quietly-loaded rows: the log's openTurn captured at load. A manual
+   *  Continue on the row enqueues the continuation the load withheld. */
+  openTurnAtLoad?: boolean;
 }
 
 export interface CreateSessionOptions {
@@ -255,21 +270,56 @@ export class AgentSessions {
     return this.#taskManager;
   }
 
+  /** The sidecar lineage grouped by manager, resolved ONCE and held for the
+   *  SYNC `subagents` stamp on list() rows (SESSIONS payloads are built
+   *  synchronously; the sidecar read is I/O). SpawnLog.lineage()'s cached
+   *  records mutate in place on recordEnd(), so the groups self-update;
+   *  liveness is re-read per stamp through overlayAdoptedLive, never frozen
+   *  into the cache. Null until the first resolution: the field is omitted. */
+  #lineageByManager: Map<string, LineageRecord[]> | null = null;
+
+  /** Resolve and cache the manager-grouped lineage (idempotent; every
+   *  call site that reads lineage routes through here). */
+  async ensureLineageCache(): Promise<void> {
+    if (this.#lineageByManager !== null || !this.#taskManager) return;
+    const byManager = new Map<string, LineageRecord[]>();
+    for (const rec of await this.#taskManager.lineageTasks()) {
+      if (rec.sessionId === null) continue; // no parent, no card to nest under
+      const group = byManager.get(rec.sessionId);
+      if (group) group.push(rec);
+      else byManager.set(rec.sessionId, [rec]);
+    }
+    this.#lineageByManager = byManager;
+  }
+
+  /** Builds the sync `subagents` stamp for one live row's SESSIONS payload
+   *  (semantics: the subagents field doc on list()'s return type). */
+  #subagentsField(managerSid: string): { subagents?: Array<Record<string, unknown>> } {
+    const group = this.#lineageByManager?.get(managerSid);
+    if (group === undefined || group.length === 0) return {};
+    return {
+      subagents: group
+        .slice(-MAX_SUBAGENT_LINEAGE_ROWS)
+        .map((rec) => overlayAdoptedLive(rec, this)),
+    };
+  }
+
   /** Current subagent task snapshot for one socket (sent when it attaches to a
    * session): this lifetime's tasks, plus the sidecar-rebuilt durable rows for
    * managers whose tasks predate a restart (taskLineageWire owns their honest
-   * grammar). Awaited: the sidecar read is real I/O (once-cached per process). */
+   * grammar; overlayAdoptedLive merges restart-adopted liveness into them).
+   * Awaited: the sidecar read is real I/O (once-cached per process). */
   async sendTaskSnapshot(ws: HotdogServerSocket<unknown>): Promise<void> {
     const sessionId = ws.activeSessionId;
     if (!sessionId || !this.#taskManager) return;
+    await this.ensureLineageCache();
     const live = this.#taskManager
       .listTasks()
       .filter((t) => t.sessionId === sessionId)
       .map(taskWire);
-    const durable = (await this.#taskManager.lineageTasks())
-      .filter((r) => r.sessionId === sessionId)
+    const durable = (this.#lineageByManager?.get(sessionId) ?? [])
       .slice(-MAX_SUBAGENT_LINEAGE_ROWS)
-      .map(taskLineageWire);
+      .map((rec) => overlayAdoptedLive(rec, this));
     ChannelHub.sendSafe(ws, {
       type: S2C.TASK_LIST,
       tasks: [...live, ...durable],
@@ -565,13 +615,24 @@ export class AgentSessions {
     meta.workerTerminal = false;
     meta.getAgent = () => this.#sessionManager.getAgentBySessionId(sessionId) ?? null;
     if (link.attest && link.taskId !== null) meta.attestPending = true;
+    // Bump the watermark: every tab's next LOGS_LISTED re-reads the manager's
+    // card through the overlay. No row push (content moved, membership didn't).
+    bumpListMembership();
     const agent = this.#sessionManager.getAgentBySessionId(sessionId);
     if (!agent?.hooks || typeof agent.hooks.on !== "function") return;
-    agent.hooks.on(HOOKS.TURN_END, (data: unknown) => {
-      const p = data as { stopped?: boolean; reason?: string } | undefined;
+    // agent.hooks is shared across all agents, so every exit lands here:
+    // gate on the payload's sessionId and hold the unsubscribe on the row
+    // (an unheld handler outlives the dead meta for the whole process).
+    const off = agent.hooks.on(HOOKS.TURN_END, (data: unknown) => {
+      // One-shot: a hook map that keeps calling a removed handler must not
+      // deliver a second settle.
+      if (meta.offTurnEnd === null) return;
+      const p = data as { stopped?: boolean; reason?: string; agent?: { sessionId?: string } } | undefined;
       if (p?.stopped !== true) return;
-      this.#settleAdoption(meta, p.reason === "completion" || p.reason === "tool_return");
+      if (p.agent?.sessionId !== sessionId) return;
+      this.#settleAdoption(sessionId, meta, p.reason === "completion" || p.reason === "tool_return");
     });
+    meta.offTurnEnd = off;
   }
 
   /** The once-only writer behind registerAdoptedWorker: completed and died
@@ -580,13 +641,27 @@ export class AgentSessions {
    *  The sidecar write is owed only when the attested record was OPEN at
    *  adoption; either way the row marks terminal so the sweep may reclaim
    *  the settled session (a hookless agent never marks; its row then stays
-   *  non-terminal and escapes the sweep, exempt like any live worker). */
-  #settleAdoption(meta: SessionMetadata, completed: boolean): void {
+   *  non-terminal and escapes the sweep, exempt like any live worker).
+   *  The delegating manager learns the fact via
+   *  TaskManager.notifyAdoptedSettled; the held-resumed-question wake
+   *  refusal lives here, where the hold map is. */
+  #settleAdoption(sessionId: string, meta: SessionMetadata, completed: boolean): void {
     const owed = meta.attestPending === true;
     meta.attestPending = false;
     const taskId = meta.taskId;
     if (owed && taskId) this.#taskManager?.recordAdoptionEnd(taskId, completed ? "adopted-completed" : "adopted-died");
     meta.workerTerminal = true;
+    meta.offTurnEnd?.();
+    meta.offTurnEnd = null;
+    // Same watermark notice as the adoption stamp.
+    bumpListMembership();
+    const parent = meta.parentSessionId;
+    if (!taskId || !parent) return;
+    this.#taskManager?.notifyAdoptedSettled(parent, taskId, completed, {
+      workerSessionId: sessionId,
+      quiet: this.#metadata.get(parent)?.quietLoaded === true,
+      wake: !resumedHeldQuestions.has(parent),
+    });
   }
 
   /**
@@ -650,6 +725,11 @@ export class AgentSessions {
     /** Absolute JSONL log path (sidebar "Copy log file path"); omitted when
      *  the id fails the core path helper's safety gate. */
     logPath?: string;
+    /** Sidecar-attested subagent lineage for this manager row (spawn order,
+     *  capped), overlaid with adopted-row liveness. Omitted until the lineage
+     *  resolves and for rows without a group: no field, no section, so a
+     *  payload without lineage stays byte-identical. */
+    subagents?: Array<Record<string, unknown>>;
   }> {
     const result: Array<{
       id: string;
@@ -665,6 +745,7 @@ export class AgentSessions {
       pinned: boolean;
       questionPending: boolean;
       logPath?: string;
+      subagents?: Array<Record<string, unknown>>;
     }> = [];
     const pinnedIds = getPinnedIds();
     for (const [id, meta] of this.#metadata) {
@@ -691,6 +772,7 @@ export class AgentSessions {
         pinned: pinnedIds.has(id),
         questionPending: meta.questionPending === true,
         ...(logPath !== undefined ? { logPath } : {}),
+        ...this.#subagentsField(id),
       });
     }
     return result;
@@ -711,6 +793,10 @@ export class AgentSessions {
       meta.attestPending = false;
       this.#taskManager?.recordAdoptionEnd(meta.taskId, "adopted-died");
     }
+    // Release the latch with the row: a swept/deleted adopted row must not
+    // leave its handler bound to the dead meta.
+    meta.offTurnEnd?.();
+    meta.offTurnEnd = null;
 
     this.#closeChannels(sessionId);
 

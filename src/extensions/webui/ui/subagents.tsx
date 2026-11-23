@@ -22,13 +22,18 @@ import { IconChevron, IconKebab, SubagentStatusGlyph } from "./icons.tsx";
  * (judge running for it, waiting on a lane slot, between warm retries) sits
  * frozen at the accumulated total -- so terminal and parked tasks read the
  * same way (accumulated active time).
+ *
+ * adoptedLive: no turn anchor exists (the in-flight turn started in a dead
+ * lifetime, turnStartedAt stays null) -- tick the wall clock since spawn.
  */
 export function formatElapsed(info: TaskInfoWire, now: number): string {
   const ms =
-    info.status === "queued"
+    info.adoptedLive === true
       ? Math.max(0, now - info.createdAt)
-      : info.activeMs +
-        (info.turnStartedAt === null ? 0 : Math.max(0, now - info.turnStartedAt));
+      : info.status === "queued"
+        ? Math.max(0, now - info.createdAt)
+        : info.activeMs +
+          (info.turnStartedAt === null ? 0 : Math.max(0, now - info.turnStartedAt));
   const secs = Math.max(0, Math.floor(ms / 1000));
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
@@ -126,11 +131,15 @@ interface SectionProps {
  * that died before its agent was built) has nothing honest to open: it
  * stays informational (the menu still copies the id) -- never a dead click
  * pretending otherwise.
+ *
+ * The adoptedLive durable row is the overlay's exception: its worker session
+ * is live here, so it opens the live tail (switchSession), not the cold log.
  */
 export function openTargetFor(
   t: TaskInfoWire,
 ): { sessionId: string } | { logId: string } | null {
   if (t.agentSessionId === undefined) return null;
+  if (t.adoptedLive === true) return { sessionId: t.agentSessionId };
   const live = t.durable !== true && (t.status === "running" || t.status === "queued");
   return live ? { sessionId: t.agentSessionId } : { logId: t.agentSessionId };
 }

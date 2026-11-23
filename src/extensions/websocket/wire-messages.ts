@@ -88,6 +88,47 @@ export function taskLineageWire(rec: LineageRecord): Record<string, unknown> {
   };
 }
 
+/** What the overlay reads of the session book. Both the SessionRegistry
+ *  facade and the session book satisfy it structurally, so wire grammar
+ *  depends on no registry class. */
+export interface AdoptedLiveReader {
+  getRow(sessionId: string):
+    | { kind?: string; adoptedWorker?: boolean; workerTerminal?: boolean }
+    | null
+    | undefined;
+  getSessionManager(): { isSessionRunning(sessionId: string): boolean };
+}
+
+/** Merge a durable sidecar card whose worker session is a live,
+ *  non-terminal ADOPTED row in this book: adoptedLive: true (click opens
+ *  the live tail), status running, inRun from the row's bus
+ *  (isSessionRunning). turnStartedAt stays null; the client ticks
+ *  wall-since-spawn. Stops applying once the row settles; absence of the
+ *  field means not live here. */
+export function overlayAdoptedLive(
+  rec: LineageRecord,
+  book: AdoptedLiveReader,
+): Record<string, unknown> {
+  const row = taskLineageWire(rec);
+  const sid = rec.agentSessionId;
+  if (sid === null) return row;
+  const meta = book.getRow(sid);
+  if (
+    !meta ||
+    meta.kind !== "worker" ||
+    meta.adoptedWorker !== true ||
+    meta.workerTerminal === true
+  ) {
+    return row;
+  }
+  return {
+    ...row,
+    adoptedLive: true,
+    status: "running",
+    inRun: book.getSessionManager().isSessionRunning(sid),
+  };
+}
+
 /** Mapper options: resolves a tool's per-parameter display hints
  * (argDisplay), its title-bar keys (ToolMetadata.headerKeys), and its
  * call-level display parts (ToolMetadata.display). */

@@ -425,11 +425,15 @@ export interface AgentForRestore extends AgentForReplay {
  * and throws here. Manual resumes (CLI -s, webui Continue) are the escape
  * hatch, never refused. The check reads the log first, so a refused attempt
  * writes no resume_attempt record (a refusal is not an attempt).
+ *
+ * `opts.loadOnly`: a display load -- no resume_attempt record (passive loads
+ * would inflate resume_count and park a manager on the cap), no cap check.
+ * The replay still runs, so a later manual Continue gets a wire-valid context.
  */
 export async function restoreSessionIntoAgent(
   agent: AgentForRestore,
   explicitSessionId: string | null | undefined,
-  opts: { auto?: boolean } = {},
+  opts: { auto?: boolean; loadOnly?: boolean } = {},
 ): Promise<ReplayResult> {
   // No explicit id, or the agent did not adopt it (e.g. a subagent built
   // with its own id): never touch another session's log.
@@ -443,6 +447,16 @@ export async function restoreSessionIntoAgent(
   // FULL log: the cap's counter is an audit trail a mid-turn RESET must not
   // recharge. The epoch view is sliced from the same read for the replay.
   const fullEntries = await readSessionEntries(explicitSessionId, { full: true });
+
+  if (opts.loadOnly) {
+    agent.isRestoring = true;
+    try {
+      return replayEntriesIntoContext(agent, epochEntries(fullEntries));
+    } finally {
+      agent.isRestoring = false;
+    }
+  }
+
   const { consecutiveAutoResumes } = collectDurabilityFacts(fullEntries);
 
   if (opts.auto && consecutiveAutoResumes >= MAX_CONSECUTIVE_AUTO_RESUMES) {

@@ -50,6 +50,9 @@ export interface SessionInfo {
   logPath?: string;
   /** Server-persisted pin flag; the sidebar's pin marks hydrate from it. */
   pinned?: boolean;
+  /** Sidecar subagent board for this manager row (the SESSIONS payload's
+   *  additive field; the wire grammar lives in agent-sessions/wire-messages). */
+  subagents?: TaskInfoWire[];
 }
 
 export interface LogInfo {
@@ -601,6 +604,16 @@ function SearchPanel(p: {
   );
 }
 
+/** The live manager card's board: task-feed rows merged with the SESSIONS
+ *  snapshot, deduped by taskId, feed copy winning. */
+function subagentBoard(owned: TaskInfoWire[], snapshot?: TaskInfoWire[]): TaskInfoWire[] {
+  if (snapshot === undefined || snapshot.length === 0) return owned;
+  const byTask = new Map<string, TaskInfoWire>();
+  for (const t of snapshot) byTask.set(t.taskId, t);
+  for (const t of owned) byTask.set(t.taskId, t);
+  return [...byTask.values()];
+}
+
 export function Sidebar(p: SidebarProps) {
   // The visibility class is never absent: shown rides .open (the drawer
   // hook), collapsed rides .sidebar-hidden (out of the flex row). Joined
@@ -654,7 +667,10 @@ export function Sidebar(p: SidebarProps) {
       <div id="session-list" role={p.sessions.length > 0 ? "list" : undefined}>
         {sortPinned(p.sessions, p.pinnedIds).flatMap((s) => {
           const isWorking = p.workingMap.get(s.id) ?? false;
-          const owned = p.tasks.filter((t) => t.sessionId === s.id);
+          const board = subagentBoard(
+            p.tasks.filter((t) => t.sessionId === s.id),
+            s.subagents,
+          );
           return [
             <SidebarRow
               key={s.id}
@@ -698,14 +714,13 @@ export function Sidebar(p: SidebarProps) {
               onContextMenu={(e, rowEl) => p.onSessionMenu(e, s, rowEl)}
             />,
             // The collapsible Subagents section nests directly under the
-            // manager card. Only the attached session ever owns rows: the
-            // server scopes the task feed to it, so other cards honestly
-            // show nothing rather than an empty section.
-            owned.length > 0 ? (
+            // manager card: task-feed rows plus the SESSIONS row's sidecar
+            // snapshot (boards that predate this lifetime).
+            board.length > 0 ? (
               <SubagentsSection
                 key={`${s.id}:subagents`}
                 sid={s.id}
-                tasks={owned}
+                tasks={board}
                 now={p.now}
                 collapsed={p.subagentsCollapsed}
                 viewedSessionId={viewedSubjectId}

@@ -1248,6 +1248,12 @@ export interface TaskInfoWire {
    * glyph fallback and an inert transcript click.
    */
   durable?: boolean;
+  /** This DURABLE card's worker session is live in this process
+   *  (restart-adopted, not yet settled). Only overlayAdoptedLive emits it:
+   *  status runs "running", inRun the exact bus fact, turnStartedAt stays
+   *  null so the client ticks wall-since-spawn, and the click routes to
+   *  the live attach. Absence is authoritative for "not live here". */
+  adoptedLive?: true;
 }
 
 /**

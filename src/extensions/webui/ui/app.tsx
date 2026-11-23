@@ -690,8 +690,13 @@ function onToggleSubagents(): void {
 }
 
 function syncTaskTick(): void {
-  const tasks = chat?.tasksAtom() ?? [];
-  const hasActive = tasks.some((t) => t.status === "running" || t.status === "queued");
+  // adoptedLive cards have no TaskEntry/feed row, so the predicate scans
+  // the union the sidebar renders: task feed plus the rows' subagents boards.
+  const isLive = (t: { status: string }) => t.status === "running" || t.status === "queued";
+  const hasActive =
+    (chat?.tasksAtom() ?? []).some(isLive)
+    || sessionsAtom().some((s) => s.subagents?.some(isLive) === true)
+    || logsAtom().some((l) => l.subagents?.some(isLive) === true);
   if (hasActive && taskTickTimer === null) {
     taskTickTimer = setInterval(() => nowAtom(Date.now()), 1000);
   } else if (!hasActive && taskTickTimer !== null) {
@@ -2795,6 +2800,10 @@ function startChat(): void {
   });
   // Elapsed-time tick only while a task is live (idle sessions burn nothing).
   const stopTaskTick = chat.tasksAtom.effect(syncTaskTick);
+  // The nested boards ride the SESSIONS/log payloads, not the task feed:
+  // row arrival/settle must re-evaluate the arming.
+  const stopTaskTickRows = sessionsAtom.effect(syncTaskTick);
+  const stopTaskTickLogs = logsAtom.effect(syncTaskTick);
   syncTaskTick();
   // aria-live narration of the attached session's working run (audit 1.1).
   // The reactiveState primitive fires only on a real change, so every effect
@@ -2827,6 +2836,8 @@ function startChat(): void {
     stopModelRefresh();
     stopProfilesRefresh();
     stopTaskTick();
+    stopTaskTickRows();
+    stopTaskTickLogs();
     stopLiveAnnounce();
   };
 }

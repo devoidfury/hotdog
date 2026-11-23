@@ -27,7 +27,7 @@ import {
 } from "./history-window.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { registryArgDisplay, registryDisplay, registryHeaderKeys } from "./replay.ts";
-import { taskLineageWire, wireToolDisplay } from "./wire-messages.ts";
+import { overlayAdoptedLive, wireToolDisplay } from "./wire-messages.ts";
 import { MAX_SUBAGENT_LINEAGE_ROWS } from "./constants.ts";
 import type { LineageRecord } from "@core/session/spawn-log.ts";
 import type { LogEntry } from "@core/session/session-log.ts";
@@ -134,7 +134,9 @@ export async function coldLogRows(
       if (group === undefined) return enriched;
       return {
         ...enriched,
-        subagents: group.slice(-MAX_SUBAGENT_LINEAGE_ROWS).map(taskLineageWire),
+        subagents: group
+          .slice(-MAX_SUBAGENT_LINEAGE_ROWS)
+          .map((rec) => overlayAdoptedLive(rec, registry)),
       };
     })
     // The cursor's total order (see compareLogRowsDesc): listSessionLogs

@@ -2,7 +2,7 @@
 name: meta
 description: An agent manager with only file tools, subagent, and workflow tools.
 manager: true
-aspects: ['commit-careful', 'natural', 'verbose']
+aspects: ['commit-careful', 'natural', 'verbose', 'disagree']
 whitelist-tools:
   - plan_status
   - delegate_task

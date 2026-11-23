@@ -2,7 +2,7 @@
 name: manager
 description: An agent manager with subagent and workflow tools, as well as the usual toolkit.
 manager: true
-aspects: ['commit-careful', 'natural', 'verbose']
+aspects: ['commit-careful', 'natural', 'concise', 'disagree']
 blacklist-tools: ["model", "explore", "project_info"]
 ---
 

@@ -427,11 +427,14 @@ describe("file tabs on the workbench", () => {
     return host;
   };
 
-  it("zero tabs: the honest line AND the file-tree entry button", () => {
+  it("zero tabs: the honest line; the strip's sticky tree seat is the entry", () => {
     const store = createWorkbenchStore();
     const host = panelHarness(store);
     expect(text(host.querySelector("#workbench-empty"))).toBe("Files will open here");
-    click(host.querySelector("#workbench-open-files"));
+    expect(host.querySelector("#workbench-open-files")).toBeNull();
+    const seat = host.querySelector("#wtab-files") as HTMLElement;
+    expect(seat.querySelector("svg")).toBeTruthy();
+    click(seat);
     expect(store.get().tabs.map((t) => t.id)).toEqual([FILES_TAB_ID]);
   });
 

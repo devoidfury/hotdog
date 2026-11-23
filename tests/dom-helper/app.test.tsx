@@ -3153,7 +3153,7 @@ describe("subagents sidebar and main-view transcript", () => {
     // The pane is visible and the Files tab is open AND active (focus).
     expect(document.querySelector("#workbench-panel")).toBeTruthy();
     const tabs = els("#workbench-tabs [role=tab]");
-    expect(tabs.map((b) => b.textContent)).toEqual(["Files"]);
+    expect(tabs.map((b) => b.getAttribute("title"))).toEqual(["Files"]);
     expect(tabs[0]!.getAttribute("aria-selected")).toBe("true");
 
     // The reveal re-ran the tree-open machinery: roots + every expanded
@@ -5192,13 +5192,14 @@ describe("workbench pane (real app wiring)", () => {
     expect(store.has("hotdog.workbenchWidth")).toBe(false);
   });
 
-  it("tabs injected through the state module paint the strip; emptying it brings the honest line", async () => {
+  it("tabs injected through the state module paint the strip; emptying it leaves the sticky tree seat", async () => {
     workbenchStore.open({ id: "w1", kind: "placeholder", label: "a.ts", dirty: false });
     await tick();
-    expect(els("#workbench-tabs [role=tab]").map((b) => b.textContent)).toEqual(["a.ts"]);
+    expect(els("#workbench-tabs [role=tab]").map((b) => b.getAttribute("title"))).toEqual(["Files", "a.ts"]);
     workbenchStore.close("w1");
     await tick();
-    expect(document.querySelector("#workbench-tabs")).toBeNull();
+    // The sticky tree seat keeps the strip; the body keeps the honest line.
+    expect(els("#workbench-tabs [role=tab]").map((b) => b.getAttribute("title"))).toEqual(["Files"]);
     expect(el("#workbench-empty").textContent).toBe("Files will open here");
   });
 
@@ -5463,10 +5464,11 @@ describe("chat/editor mode (top-band toggle)", () => {
     // No column, no handle for a column that is not there.
     expect(document.querySelector("#tree-col-resize")).toBeNull();
     // The store never learned the tab in this suite, so the freed workspace
-    // shows the honest empty line -- WITH its entry button back (unpinned).
+    // shows the honest empty line -- and the strip's sticky tree seat is
+    // the entry back (the store's seat arrives on the click).
     expect(el("#workbench-empty").textContent).toBe("Files will open here");
     clearSent();
-    el("#workbench-open-files").click();
+    el("#wtab-files").click();
     await tick();
     expect(sent("listDir")).toHaveLength(1); // opening the tree re-requests (doctrine)
     expect(el("#wtab-files").getAttribute("aria-selected")).toBe("true");
@@ -6826,7 +6828,7 @@ describe("workbench file tree (real app wiring)", () => {
     for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
     await tick();
   };
-  const tabLabels = (): string[] => els("#workbench-tabs [role=tab]").map((b) => b.textContent ?? "");
+  const tabLabels = (): string[] => els("#workbench-tabs [role=tab]").map((b) => b.getAttribute("title") ?? "");
 
   afterEach(async () => {
     await closeTabs();
@@ -6841,7 +6843,7 @@ describe("workbench file tree (real app wiring)", () => {
     await openPane();
     await closeTabs();
     clearSent();
-    el("#workbench-open-files").click();
+    el("#wtab-files").click();
     await tick();
     expect(tabLabels()).toEqual(["Files"]);
     expect(el(".file-tree")).toBeTruthy();
@@ -6917,7 +6919,7 @@ describe("workbench file tree (real app wiring)", () => {
     await openPane();
     await closeTabs();
     clearSent();
-    el("#workbench-open-files").click();
+    el("#wtab-files").click();
     await tick();
     // The tree atom may carry expanded dirs from an earlier test (open then
     // re-requests the roots AND them): address requests by shape, not count.
@@ -7102,7 +7104,7 @@ describe("workbench file-tree row menu (write ops)", () => {
     }
     await closeTabs();
     clearSent();
-    el("#workbench-open-files").click();
+    el("#wtab-files").click();
     await tick();
     for (const r of sent<{ requestId: number; path?: string }>("listDir")) {
       ws.fireMessage(
@@ -7328,7 +7330,7 @@ describe("workbench tab persistence (real app wiring)", () => {
     await attach();
     await openPane();
     clearSent();
-    el("#workbench-open-files").click();
+    el("#wtab-files").click();
     await tick();
     expect(storedTabs()).toEqual({ tabs: [{ id: "files", kind: "files", label: "Files" }], activeId: "files" });
     // Land a file listing through the real tree flow (shape-addressed: the
@@ -7378,8 +7380,10 @@ describe("workbench tab persistence (real app wiring)", () => {
     els("#workbench-tabs [role=tab]")[0]!.click();
     await tick();
     expect(storedTabs().activeId).toBe("files");
-    // Closing the tree tab records the survivor set...
-    els(".workbench-tab-close")[0]!.click();
+    // The tree tab is sticky -- no close button -- so the store seam
+    // retires it, and the survivor set persists the same way.
+    expect(els(".workbench-tab-close")).toHaveLength(2);
+    workbenchStore.close("files");
     await tick();
     expect(storedTabs().tabs.map((t) => t.id)).toEqual(["/rootA/persist-a.txt", "/rootA/persist-b.txt"]);
     // ...and closing EVERYTHING persists an EMPTY list under a LIVE key
@@ -7418,7 +7422,7 @@ describe("workbench tab persistence (real app wiring)", () => {
     expect(reads.map((r) => r.path)).toEqual(["/rootA/reloaded.txt", "/rootA/vanished.txt"]);
     expect(reads.every((r) => r.offset === 0)).toBe(true);
     await openPane();
-    expect(els("#workbench-tabs [role=tab]").map((b) => b.textContent)).toEqual([
+    expect(els("#workbench-tabs [role=tab]").map((b) => b.getAttribute("title"))).toEqual([
       "Files",
       "reloaded.txt",
       "vanished.txt",
@@ -7542,7 +7546,7 @@ describe("workbench editor (real app wiring)", () => {
     for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
     await tick();
     clearSent();
-    el("#workbench-open-files").click();
+    el("#wtab-files").click();
     await tick();
     for (const r of sent<{ requestId: number; path?: string }>("listDir")) {
       ws.fireMessage(
@@ -8830,9 +8834,12 @@ describe("workbench editor (real app wiring)", () => {
     await openFile(FIND6_PATH);
     await loadComplete(FIND6_PATH, "sibling file\n");
     expect(document.querySelector(".editor-find")).toBeNull();
-    // Back to the FIRST tab: the strip is open again, query intact, count
-    // re-derived against ITS buffer.
-    els("#workbench-tabs [role=tab]")[0]!.click();
+    // Back to the FIRST file tab (the sticky tree seat owns index 0): the
+    // strip is open again, query intact, count re-derived against ITS
+    // buffer.
+    els("#workbench-tabs [role=tab]")
+      .find((b) => b.getAttribute("title") === FIND7_PATH.split("/").pop())!
+      .click();
     await tick();
     expect(el(".editor-find")).toBeTruthy();
     expect((el(".editor-find-query") as unknown as { value: string }).value).toBe("session");

@@ -74,6 +74,19 @@ export function Glyph({ size = 16, strokeWidth = 1.8, viewBox = "0 0 24 24", cla
   );
 }
 
+/** The workspace tree's shape for the sticky Files tab: one root node above
+ *  two children on a connector bus. */
+export function IconTreeRoot(): JsxChild {
+  return (
+    <Glyph>
+      <rect x="9.5" y="3.5" width="5" height="5" rx="1" />
+      <rect x="3.5" y="16" width="5" height="5" rx="1" />
+      <rect x="15.5" y="16" width="5" height="5" rx="1" />
+      <path d="M12 8.5v3.5M6 16v-4h12v4" />
+    </Glyph>
+  );
+}
+
 /** Artist's palette for the theme switcher: rounded blob with the thumb
  *  bite at the lower right and four paint dots at r=2. The blob fills the
  *  whole 24 grid, so at equal px it would read bigger than its stroke-icon

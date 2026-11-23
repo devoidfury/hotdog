@@ -3015,15 +3015,13 @@ body.logs-resizing .sidebar-header-resize {
     pointer-events: none;
 }
 
-/* Jump-to-bottom (message-list's jumpHost button): hangs over the seam,
-   centered above the composer (same bottom: calc(100% + 6px) anchor as
-   .completion-menu; center because the right edge belongs to send/cancel).
+/* Jump-to-end (message-list's jumpHost button): hangs over the seam's right
+   edge (same bottom: calc(100% + 6px) anchor as .completion-menu).
    z-index 10: over the scrim, under the completion popup (20). */
 .jump-to-bottom {
     position: absolute;
     bottom: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
+    right: 30px;
     z-index: 10;
     height: 28px;
     display: flex;
@@ -3522,7 +3520,7 @@ body.sidebar-resizing #tree-col-resize {
 
 .workbench-tab {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     min-width: 0;
     max-width: 200px;
     border-right: 1px solid var(--border);
@@ -3537,7 +3535,7 @@ body.sidebar-resizing #tree-col-resize {
     align-items: center;
     gap: 6px;
     min-width: 0;
-    padding: 5px 10px;
+    padding: 5px 0 5px 8px;
     background: transparent;
     border: none;
     color: var(--text-secondary);
@@ -3558,8 +3556,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .workbench-tab-close {
-    padding: 6px 8px;
-    margin-right: 4px;
+    padding: 5px 8px;
     background: transparent;
     border: none;
     color: var(--text-muted);
@@ -3571,6 +3568,11 @@ body.sidebar-resizing #tree-col-resize {
 .workbench-tab-close:hover {
     color: var(--text-primary);
     background: var(--bg-hover);
+}
+
+/* The sticky tree seat (glyph-only) carries its own breathing room. */
+#wtab-files {
+    padding: 5px 12px;
 }
 
 #workbench-body {

@@ -77,6 +77,7 @@ function harness(opts: {
   wireTree?: boolean;
   treePin?: PinOpt;
   treeResize?: boolean;
+  onOpenFiles?: () => void;
 } = {}): H {
   const storage = opts.throwing ? new ThrowingStorage() : new FakeStorage();
   const resizeCounts = { start: 0, reset: 0 };
@@ -144,6 +145,7 @@ function harness(opts: {
             ? { tree: emptyFileTree(), onToggleDir: () => {}, onOpenFile: () => {}, onRefresh: () => {}, onContextMenu: () => {} }
             : undefined
         }
+        onOpenFiles={opts.onOpenFiles}
         treePin={opts.treePin}
         treeResize={
           opts.treeResize
@@ -724,6 +726,53 @@ describe("workspace-tree dock pin (shell projection)", () => {
     bare.panel.toggle();
     bare.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
     expect(bare.q("#tree-col-resize")).toBeNull(); // the shell mounts it ONLY when the app wires the seam
+  });
+});
+
+// ── Sticky tree tab (wired, unpinned) ──────────────────────────────────────
+
+describe("sticky tree tab (wired, unpinned)", () => {
+  it("zero tabs: the strip carries the glyph seat; the click runs the opener", () => {
+    let opened = 0;
+    const h = harness({ wireTree: true, onOpenFiles: () => opened++ });
+    h.panel.toggle();
+    const tab = h.q("#wtab-files") as HTMLElement;
+    expect(tab).toBeTruthy();
+    expect(tab.getAttribute("aria-selected")).toBe("false");
+    expect(tab.getAttribute("aria-controls")).toBeNull(); // no panel behind it yet
+    expect(tab.getAttribute("title")).toBe("Files");
+    expect(tab.querySelector("svg")).toBeTruthy(); // the glyph speaks, not text
+    expect(tab.textContent).toBe("");
+    expect(h.q(".workbench-tab-close")).toBeNull(); // sticky: no X
+    expect(h.q("#workbench-open-files")).toBeNull(); // the seat IS the entry
+    expect(h.q("#workbench-empty")).toBeTruthy(); // the body line stays honest
+    tab.click();
+    expect(opened).toBe(1); // the shell owns no state: it only calls
+  });
+
+  it("the stored files tab keeps the glyph seat with no close; file tabs keep theirs", () => {
+    const h = harness({ wireTree: true, onOpenFiles: () => {} });
+    h.panel.toggle();
+    h.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    h.tabs.open({ id: "/a.ts", kind: "file", label: "a.ts", dirty: false });
+    const wrappers = Array.from(h.q("#workbench-tabs")!.querySelectorAll(".workbench-tab"));
+    expect(wrappers).toHaveLength(2); // no synthetic twin beside the stored seat
+    const filesBtn = h.q("#wtab-files") as HTMLElement;
+    expect(filesBtn.getAttribute("aria-controls")).toBe("wpanel-files");
+    expect(filesBtn.querySelector("svg")).toBeTruthy();
+    expect(wrappers[0]!.querySelector(".workbench-tab-close")).toBeNull();
+    expect(wrappers[1]!.querySelector(".workbench-tab-close")).toBeTruthy();
+  });
+
+  it("pinned: no seat at all; the docked column is the tree", () => {
+    const h = harness({
+      wireTree: true,
+      treePin: { pinned: true, available: true, onToggle: () => {} },
+      onOpenFiles: () => {},
+    });
+    h.panel.toggle();
+    expect(h.q("#wtab-files")).toBeNull();
+    expect(h.q("#workbench-tabs")).toBeNull();
   });
 });
 

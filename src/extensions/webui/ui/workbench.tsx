@@ -8,8 +8,9 @@
 // anything else.
 //
 // - ZERO TABS HIDES THE STRIP: with nothing to select or close, a tablist
-//   would be an empty widget; the body shows one muted line instead (plus
-//   the file-tree entry-point button when the app wires one).
+//   would be an empty widget; the body shows one muted line instead. A
+//   wired tree overrides this (the sticky seat below); the file-tree
+//   entry-point button serves only shapes without one.
 // - COLLAPSED UNMOUNTS the panel (returns null): a default-closed pane
 //   costs nothing at rest, and a detached handle cannot be dragged anyway
 //   (the seam's enabled() gate is the second lock).
@@ -27,6 +28,12 @@
 //   close/activate/persistence untouched); releasing the pin restores every
 //   tab to its seat. The width gate lives in app.tsx.
 //
+// - STICKY TREE TAB (wired + unpinned): the "files" seat never leaves the
+//   strip -- glyph-only, no close button; when the store does not hold it,
+//   the shell renders a synthetic one whose click runs the app's opener
+//   (open + request roots), owning no state of its own. Pinned, the docked
+//   column is its seat: it leaves the strip (the TREE DOCK PIN rule).
+//
 // Storage doctrine rides the seam (panel-resize.ts): blocked storage costs
 // the reload, never the interaction.
 
@@ -37,8 +44,16 @@ import {
   type WorkbenchTabState,
 } from "./workbench-state.ts";
 import type { JsxChild } from "@utils/jsx";
-import { FileTree, type FileTreePin, type FileTreeProps, type FileTreeState } from "./file-tree.tsx";
+import {
+  FILES_TAB_ID,
+  FileTree,
+  filesTab,
+  type FileTreePin,
+  type FileTreeProps,
+  type FileTreeState,
+} from "./file-tree.tsx";
 import { FileView, type FileViewEntry } from "./file-view.tsx";
+import { IconTreeRoot } from "./icons.tsx";
 
 /** Body wiring for the two real tab kinds; app.tsx owns the state and the
  *  socket, the bodies are dumb projections. Optional: without wiring the
@@ -269,7 +284,20 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
   // store never sees any of this -- pure projection.
   const treePin = p.treePin && p.fileTree ? p.treePin : undefined;
   const pinned = treePin?.pinned === true;
-  const stripTabs = pinned ? tabs.filter((t) => t.kind !== "files") : tabs;
+  const hasFilesTab = tabs.some((t) => t.kind === "files");
+  // The sticky seat (see the header): wired + unpinned, the tree's tab is
+  // always there; when the store does not hold it, a synthetic one fronts
+  // the strip and its click runs the app's opener.
+  const syntheticFiles = !pinned && !hasFilesTab && p.fileTree !== undefined && p.onOpenFiles !== undefined;
+  const stripTabs = pinned
+    ? tabs.filter((t) => t.kind !== "files")
+    : syntheticFiles
+      ? [filesTab(), ...tabs]
+      : tabs;
+  const activate = (id: string): void => {
+    if (syntheticFiles && id === FILES_TAB_ID) p.onOpenFiles?.();
+    else p.onActivate(id);
+  };
   const bodyTab = pinned && active?.kind === "files" ? null : active;
 
   return (
@@ -338,7 +366,12 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
         // zero tabs -> strip hidden, the empty line speaks). Drag-reorder
         // deferred -- see the header.
         <div id="workbench-tabs" role="tablist" aria-label="Workbench tabs" aria-orientation="horizontal">
-          {stripTabs.map((t, i) => (
+          {stripTabs.map((t, i) => {
+            const isFiles = t.kind === "files";
+            // The synthetic seat has no panel to point aria-controls at, and
+            // with zero real tabs it is the ring's only member -- focusable.
+            const seated = !isFiles || hasFilesTab;
+            return (
             <div key={t.id} className={`workbench-tab${t.id === p.state.activeId ? " active" : ""}`}>
               <button
                 type="button"
@@ -348,14 +381,15 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
                 // both DOM ids (openTab uniqueness keeps them collision-free;
                 // producers keep ids DOM-safe).
                 id={`wtab-${t.id}`}
-                aria-controls={`wpanel-${t.id}`}
+                aria-controls={seated ? `wpanel-${t.id}` : undefined}
                 aria-selected={t.id === p.state.activeId ? "true" : "false"}
-                tabindex={t.id === p.state.activeId ? "0" : "-1"}
+                tabindex={t.id === p.state.activeId || !seated ? "0" : "-1"}
                 title={t.label}
-                onClick={() => p.onActivate(t.id)}
-                onKeydown={(e: KeyboardEvent) => onTabKeydown(e, stripTabs, i, p.onActivate)}
+                aria-label={isFiles ? t.label : undefined}
+                onClick={() => activate(t.id)}
+                onKeydown={(e: KeyboardEvent) => onTabKeydown(e, stripTabs, i, activate)}
               >
-                {t.label}
+                {isFiles ? <IconTreeRoot /> : t.label}
                 {/* Visual dirty marker; the meaning arrives with real tabs
                     (writers: setTabDirty). Decorative for readers for now. */}
                 {t.dirty ? (
@@ -364,6 +398,8 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
                   </span>
                 ) : null}
               </button>
+              {/* The tree tab is sticky: no close button. */}
+              {isFiles ? null : (
               <button
                 type="button"
                 className="workbench-tab-close"
@@ -373,8 +409,10 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
               >
                 ×
               </button>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : null}
       <div id="workbench-body">
@@ -427,9 +465,9 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
             <p id="workbench-empty" className="workbench-empty">
               Files will open here
             </p>
-            {p.onOpenFiles && !pinned ? (
-              // Entry point for the first real tab kind: docks the "files"
-              // tab (the app opens it and re-requests the roots).
+            {p.onOpenFiles && !pinned && !p.fileTree ? (
+              // Entry for shapes without a wired tree (nothing else can
+              // render the seat); with one, the strip's sticky tab is it.
               <button type="button" id="workbench-open-files" className="workbench-empty-btn" onClick={p.onOpenFiles}>
                 Open the workspace file tree
               </button>

@@ -68,9 +68,6 @@ export interface ToolBlockState {
   /** Declared display parts (TOOL_CALL frame `display`), rendered in order. */
   display?: ToolDisplayWire[];
   result?: ToolResultData;
-  expanded: boolean;
-  /** Args shown as the raw wire string instead of pretty-printed JSON. */
-  raw: boolean;
   /** Result preview replaced by the full text. */
   fullResult: boolean;
   /** Explicit box overrides (file parts "f<i>", generic "g"); absent means
@@ -96,6 +93,10 @@ export { MAX_DIFF_LINES };
 export const MAX_INLINE_DIFF_LINES = 30;
 /** Cap on rendered file-part text; past it a "… N more — show full" button shows. */
 export const FILE_RENDER_CAP_CHARS = 100_000;
+/** Chars of a COLLAPSED file body that reach the DOM: the clamp shows four
+ *  lines; the rest stays out until expanded, so a huge read stays lazy even
+ *  while its preview shows. */
+export const FOLD_PREVIEW_CHARS = 2_000;
 /** Bodies under this many lines auto-open when they arrive (owner ruling
  *  2026-11-05): a small result is not worth a click. Strictly fewer; empty
  *  bodies stay closed, and so does anything past the preview cap -- a
@@ -266,15 +267,6 @@ export function argsSummary(args: string): string {
   }
   const keys = Object.keys(parsed);
   return keys.length > 0 ? `{${keys.slice(0, 3).join(", ")}}` : "";
-}
-
-/** Pretty args for the collapsed body; unparseable strings pass through. */
-export function prettyArgs(args: string): string {
-  try {
-    return JSON.stringify(JSON.parse(args), null, 2);
-  } catch {
-    return args;
-  }
 }
 
 // The diff algorithm (prefix/suffix trim, two-gutter numbering, per-side cap,
@@ -583,48 +575,20 @@ function CopyPath({ path }: { path: string }): JsxChild {
  * The declared-path header (GitHub's file header, typographic): the verbatim
  * path with its directory portion muted and the basename primary, the copy
  * button immediately right of it, the part's meta far right. NOT a slab -- the
- * block fill stays the only surface, and an open body is separated by a single
- * hairline. `onToggle` is what makes this row the file part's fold (the
- * centered summary used to be); the diff part passes none, because its body is
- * inline primary content and the line fold stays its only fold.
+ * block fill stays the only surface, and the body is separated by a single
+ * hairline. The header is static text: the fold lives in the box's foot row
+ * (.tool-box-fold-toggle), same as the generic result box.
  */
-function PartHeader({
-  path,
-  meta,
-  onToggle,
-}: {
-  path: string;
-  meta: JsxChild;
-  onToggle?: () => void;
-}): JsxChild {
+function PartHeader({ path, meta }: { path: string; meta: JsxChild }): JsxChild {
   const { dir, base } = splitPath(path);
-  // The fold was a <button>; it is a row now, so the button semantics are
-  // restated by hand (role/tabIndex/Enter+Space) rather than regressed.
-  const onKey = onToggle
-    ? (e: KeyboardEvent): void => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault(); // Space toggles, it never scrolls the row
-          onToggle();
-        }
-      }
-    : undefined;
   return (
-    <div
-      className={onToggle ? "part-head part-head-toggle" : "part-head"}
-      role={onToggle ? "button" : undefined}
-      tabIndex={onToggle ? 0 : undefined}
-      onClick={onToggle}
-      onKeyDown={onKey}
-    >
+    <div className="part-head">
       <span className="part-path">
         {dir === "" ? null : <span className="part-path-dir">{dir}</span>}
         <span className="part-path-base">{base}</span>
       </span>
       <CopyPath path={path} />
       <span className="part-meta">{meta}</span>
-      {/* Fold chevron (only when the row IS a toggle): the open attestation
-          stays :has(+ pre) on the row, CSS rotates this. */}
-      {onToggle ? <IconChevron className="fold-chevron" /> : null}
     </div>
   );
 }
@@ -640,28 +604,33 @@ function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChil
       const open = state.boxes[key] ?? underAutoExpand(view.text);
       const full = state.unfolded[openKey] === true;
       const capped = !full && view.text.length > FILE_RENDER_CAP_CHARS;
+      // The body always renders (the foot row toggles it); collapsed it is
+      // clamped to its first lines AND capped at the fold-preview size in
+      // the DOM -- the lazy property a huge read had stays true.
+      const shown = open
+        ? capped
+          ? view.text.slice(0, FILE_RENDER_CAP_CHARS)
+          : view.text
+        : view.text.slice(0, FOLD_PREVIEW_CHARS);
       return (
         <div className="tool-file" key={key}>
-          <PartHeader path={view.path} meta={view.meta} onToggle={() => onToggleBox(key, open)} />
-          {open ? (
-            <>
-              <pre className="tool-file-pre">
-                {capped ? view.text.slice(0, FILE_RENDER_CAP_CHARS) : view.text}
-              </pre>
-              {capped ? (
-                <button
-                  type="button"
-                  className="tool-raw-toggle"
-                  onClick={() => onUnfold(openKey)}
-                >
-                  {`… ${view.text.length - FILE_RENDER_CAP_CHARS} more — show full`}
-                </button>
-              ) : null}
-              {view.envelope ? (
-                <div className="tool-file-meta">{view.envelope}</div>
-              ) : null}
-            </>
+          <PartHeader path={view.path} meta={view.meta} />
+          <pre className={"tool-file-pre" + (open ? "" : " file-folded")}>{shown}</pre>
+          {capped && open ? (
+            <button type="button" className="tool-raw-toggle" onClick={() => onUnfold(openKey)}>
+              {`… ${view.text.length - FILE_RENDER_CAP_CHARS} more — show full`}
+            </button>
           ) : null}
+          {view.envelope ? <div className="tool-file-meta">{view.envelope}</div> : null}
+          <button
+            type="button"
+            className="tool-box-fold-toggle"
+            aria-expanded={open ? "true" : "false"}
+            aria-label={open ? "Collapse file" : "Expand file"}
+            onClick={() => onToggleBox(key, open)}
+          >
+            <IconChevron className="fold-chevron" />
+          </button>
         </div>
       );
     }
@@ -776,8 +745,6 @@ function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChil
 
 interface BlockProps {
   state: ToolBlockState;
-  onToggle: () => void;
-  onToggleRaw: () => void;
   onShowFull: () => void;
   /** Toggle a body; `current` is the EFFECTIVE open state (auto-expand
    *  included), so the first click on an auto-opened body collapses it. */
@@ -787,7 +754,7 @@ interface BlockProps {
   onToggleEnvelope: () => void;
 }
 
-export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBox, onUnfold, onToggleEnvelope }: BlockProps) {
+export function ToolBlock({ state, onShowFull, onToggleBox, onUnfold, onToggleEnvelope }: BlockProps) {
   const status = statusOf(state);
   const result = state.result;
   const specs = state.display ?? [];
@@ -818,25 +785,29 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBo
 
   const genericBox = showGenericBox ? (
     <div className={"tool-result-box" + (status === "error" ? " tool-result-error" : "")}>
-      <button type="button" className="tool-box-summary" onClick={() => onToggleBox("g", boxOpen)}>
-        {genericResultSummary(result)}
+      <div className="tool-box-summary">{genericResultSummary(result)}</div>
+      {/* The body always renders; collapsed it clamps to its first lines
+          (the user-prompt fold grammar). The foot row is the toggle. */}
+      <pre className={"tool-result-pre" + (boxOpen ? "" : " result-folded")}>
+        {truncated
+          ? resultText.slice(0, RESULT_PREVIEW_CHARS) +
+            `\n\n… ${resultText.length - RESULT_PREVIEW_CHARS} more chars`
+          : resultText}
+      </pre>
+      {truncated && boxOpen ? (
+        <button type="button" className="tool-raw-toggle" onClick={onShowFull}>
+          show full result
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="tool-box-fold-toggle"
+        aria-expanded={boxOpen ? "true" : "false"}
+        aria-label={boxOpen ? "Collapse result" : "Expand result"}
+        onClick={() => onToggleBox("g", boxOpen)}
+      >
         <IconChevron className="fold-chevron" />
       </button>
-      {boxOpen ? (
-        <>
-          <pre className="tool-result-pre">
-            {truncated
-              ? resultText.slice(0, RESULT_PREVIEW_CHARS) +
-                `\n\n… ${resultText.length - RESULT_PREVIEW_CHARS} more chars`
-              : resultText}
-          </pre>
-          {truncated ? (
-            <button type="button" className="tool-raw-toggle" onClick={onShowFull}>
-              show full result
-            </button>
-          ) : null}
-        </>
-      ) : null}
     </div>
   ) : null;
 
@@ -862,7 +833,7 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBo
         aria-expanded={state.envelope ? "true" : "false"}
         onClick={onToggleEnvelope}
       >
-        {state.envelope ? "hide envelope" : "envelope"}
+        {state.envelope ? "hide raw metadata" : "raw metadata"}
       </button>
       {state.envelope ? (
         <pre className="tool-meta-envelope">{JSON.stringify(result?.meta, null, 2)}</pre>
@@ -871,34 +842,21 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBo
   ) : null;
 
   if (prosePosture) {
-    // Slim raw disclosure so the wire JSON stays reachable under prose.
+    // Reads as an agent message row: the prose IS the message, no raw-args
+    // disclosure (the envelope strip above still carries the wire facts).
     return (
       <div className={`tool-call-block posture-prose status-${status}`}>
         {parts}
         {genericBox}
         {metaStrip}
-        <div className="tool-prose-raw">
-          <button type="button" className="tool-raw-toggle" onClick={onToggle}>
-            {state.expanded ? "hide json" : "json"}
-          </button>
-          {state.expanded ? (
-            <>
-              <pre className="tool-args">{state.raw ? state.args : prettyArgs(state.args)}</pre>
-              <button type="button" className="tool-raw-toggle" onClick={onToggleRaw}>
-                {state.raw ? "pretty json" : "raw json"}
-              </button>
-            </>
-          ) : null}
-        </div>
         {images}
       </div>
     );
   }
 
   const header = state.argsSummary ?? argsSummary(state.args);
-  // The header is a static row: the summary is the whole story, and the raw
-  // args box it used to disclose is gone (prose posture keeps its explicit
-  // "json" disclosure; the framed header never needs one).
+  // The header is a static row: the summary is the whole story; no posture
+  // discloses raw args.
   return (
     <div className={`tool-call-block status-${status}`}>
       <div className="tool-call-header" title={state.name}>
@@ -927,7 +885,7 @@ export class ToolBlockController {
     host: DomNode,
     init: { name: string; args: string; argsSummary?: string; display?: ToolDisplayWire[] },
   ) {
-    this.#state = { ...init, expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {}, envelope: false };
+    this.#state = { ...init, fullResult: false, boxes: {}, unfolded: {}, envelope: false };
     this.#mounted = mount(this.#el(), host);
   }
 
@@ -935,8 +893,6 @@ export class ToolBlockController {
     return (
       <ToolBlock
         state={this.#state}
-        onToggle={this.#toggle}
-        onToggleRaw={this.#toggleRaw}
         onShowFull={this.#showFull}
         onToggleBox={this.#toggleBox}
         onUnfold={this.#unfold}
@@ -944,16 +900,6 @@ export class ToolBlockController {
       />
     );
   }
-
-  #toggle = (): void => {
-    this.#state = { ...this.#state, expanded: !this.#state.expanded };
-    this.#mounted.render(this.#el());
-  };
-
-  #toggleRaw = (): void => {
-    this.#state = { ...this.#state, raw: !this.#state.raw };
-    this.#mounted.render(this.#el());
-  };
 
   #showFull = (): void => {
     this.#state = { ...this.#state, fullResult: true };

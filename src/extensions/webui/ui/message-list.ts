@@ -74,10 +74,11 @@ interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ pat
  * prose is structured markdown, and attachments already ride details boxes.
  */
 const USER_PROMPT_FOLD_LINES = 4;
-/** Fold-toggle chevron: the jump-button glyph in the .fold-chevron family
- *  (open state rotates 180°, CSS-attested by aria-expanded). */
+/** Fold-toggle chevron: the jump-button glyph in the .fold-chevron family,
+ *  sized to the sidebar header chevron (#logs-toggle). Open state rotates
+ *  180°, CSS-attested by aria-expanded. */
 const ICON_CHEVRON_FOLD =
-  '<svg class="fold-chevron" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" tabindex="-1">' +
+  '<svg class="fold-chevron" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" tabindex="-1">' +
   '<path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 /**
  * A committed assistant message. The optional footer meta is data the wire
@@ -1136,8 +1137,8 @@ export function createMessageList(
     const folded = content.split("\n").length > USER_PROMPT_FOLD_LINES;
     if (folded) contentEl.classList.add("prompt-folded");
     bubble.appendChild(contentEl);
-    appendImages(bubble, images);
-    appendAttachments(bubble, files);
+    // The toggle rides directly under the clamped text, above the images
+    // and attachment boxes: it owns the prompt, not the boxes below it.
     if (folded) {
       const toggle = document.createElement("button");
       toggle.type = "button";
@@ -1150,6 +1151,8 @@ export function createMessageList(
       );
       bubble.appendChild(toggle);
     }
+    appendImages(bubble, images);
+    appendAttachments(bubble, files);
     el.appendChild(bubble);
 
     container.appendChild(el);
@@ -1860,8 +1863,9 @@ export function createMessageList(
   // it mid-anchoring). The click pins INSTANTLY, no smooth scroll: a native
   // animation emits intermediate scroll events whose distFromBottom > 150
   // would flip followBottom off mid-flight, killing the very follow it seeks.
+  // Same glyph and size as the sidebar header chevron (#logs-toggle).
   const ICON_CHEVRON_DOWN =
-    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" tabindex="-1">' +
+    '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" tabindex="-1">' +
     '<path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   let jumpButton: HTMLButtonElement | null = null;
   function syncJumpButton(): void {

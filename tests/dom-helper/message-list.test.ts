@@ -25,9 +25,11 @@ function texts(sel: string): string[] {
 /** The generic result box collapses to a summary line; auto-expand (owner
  *  ruling 2026-11-05) already opens short bodies, so only click when the
  *  body is not in the DOM yet. */
+/** Open a collapsed generic result box through its foot-row fold toggle
+ *  (the pre always renders, clamped; aria-expanded is the open attestation). */
 function openResult(block: Element): void {
-  const summary = block.querySelector(".tool-result-box .tool-box-summary");
-  if (summary && !block.querySelector(".tool-result-pre")) (summary as HTMLElement).click();
+  const toggle = block.querySelector(".tool-result-box .tool-box-fold-toggle");
+  if (toggle && toggle.getAttribute("aria-expanded") === "false") (toggle as HTMLElement).click();
 }
 
 describe("user / assistant messages", () => {

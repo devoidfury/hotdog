@@ -8,7 +8,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   argsSummary,
-  prettyArgs,
   computeDiffLines,
   diffStat,
   fileSummary,
@@ -23,6 +22,7 @@ import {
   MAX_DIFF_LINES,
   RESULT_PREVIEW_CHARS,
   FILE_RENDER_CAP_CHARS,
+  FOLD_PREVIEW_CHARS,
   type ToolDisplayWire,
 } from "@extensions/webui/ui/tool-block.tsx";
 import { renderToString, type DomNode } from "@utils/jsx";
@@ -48,13 +48,6 @@ describe("argsSummary", () => {
   it("truncates long values", () => {
     const summary = argsSummary(JSON.stringify({ command: "x".repeat(200) }));
     expect(summary.length).toBeLessThanOrEqual(81); // 80 + ellipsis
-  });
-});
-
-describe("prettyArgs", () => {
-  it("pretty-prints valid JSON and passes garbage through", () => {
-    expect(prettyArgs('{"a":1}')).toBe('{\n  "a": 1\n}');
-    expect(prettyArgs("nope")).toBe("nope");
   });
 });
 
@@ -467,30 +460,36 @@ describe("proseHtml", () => {
 });
 
 describe("auto-expand (owner ruling 2026-11-05)", () => {
-  it("a generic result under 20 lines is open on arrival; exactly 20 lines stays closed", () => {
+  it("a generic result under 20 lines is open on arrival; exactly 20 lines arrives clamped", () => {
     const small = mountBlock({ name: "cat", args: "{}" });
     small.ctrl.setResult({ output: Array.from({ length: 19 }, (_, i) => `l${i}`).join("\n") });
     expect(small.block.querySelector(".tool-result-pre")!.textContent).toContain("l18");
+    expect(small.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(false);
 
     const at20 = mountBlock({ name: "cat", args: "{}" });
     at20.ctrl.setResult({ output: Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n") });
-    expect(at20.block.querySelector(".tool-result-pre")).toBeNull();
+    // Collapsed is a clamp, not an absence: the body rides with the fold
+    // class, and the foot-row toggle attests the state on aria-expanded.
+    expect(at20.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(true);
     expect(at20.block.querySelector(".tool-box-summary")!.textContent).toContain("20 lines");
+    expect(at20.block.querySelector(".tool-box-fold-toggle")!.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("empty output stays closed; a past-cap one-line blob stays closed and still toggles", () => {
     const empty = mountBlock({ name: "touch", args: "{}" });
     empty.ctrl.setResult({ output: "" });
-    expect(empty.block.querySelector(".tool-result-pre")).toBeNull();
+    expect(empty.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(true);
 
     const blob = mountBlock({ name: "blob", args: "{}" });
     blob.ctrl.setResult({ output: "x".repeat(RESULT_PREVIEW_CHARS + 1) });
-    expect(blob.block.querySelector(".tool-result-pre")).toBeNull();
-    blob.click(".tool-result-box .tool-box-summary");
+    expect(blob.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(true);
+    blob.click(".tool-result-box .tool-box-fold-toggle");
+    expect(blob.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(false);
     expect(blob.block.querySelector(".tool-result-pre")!.textContent).toContain("more chars");
+    expect(blob.block.querySelector(".tool-box-fold-toggle")!.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("a result-sourced file body under 20 lines auto-opens; the first click collapses it", () => {
+  it("a result-sourced file body under 20 lines is open on arrival; the foot toggle collapses it to a clamp", () => {
     const { block, ctrl, click } = mountBlock({
       name: "read",
       args: JSON.stringify({ path: "/p/small.md" }),
@@ -498,20 +497,19 @@ describe("auto-expand (owner ruling 2026-11-05)", () => {
     });
     ctrl.setResult({ output: "a\nb\nc" });
     expect(block.querySelector(".tool-file-pre")!.textContent).toBe("a\nb\nc");
-    click(".tool-file .part-head");
-    expect(block.querySelector(".tool-file-pre")).toBeNull();
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(false);
+    click(".tool-file .tool-box-fold-toggle");
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
   });
 });
 
 describe("ToolBlock SSR", () => {
-  const base = { expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {}, envelope: false };
+  const base = { fullResult: false, boxes: {}, unfolded: {}, envelope: false };
 
   it("renders the static header row with pending status and no args box", () => {
     const html = renderToString(
       ToolBlock({
         state: { name: "read", args: '{"path":"a.ts"}', argsSummary: "a.ts (lines 1-5)", ...base },
-        onToggle: () => {},
-        onToggleRaw: () => {},
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
@@ -530,8 +528,6 @@ describe("ToolBlock SSR", () => {
       renderToString(
         ToolBlock({
           state: { name: "read", args: '{"path":"src/deep/x.ts"}', ...base, ...state } as never,
-          onToggle: () => {},
-          onToggleRaw: () => {},
           onShowFull: () => {},
           onToggleBox: () => {},
           onUnfold: () => {},
@@ -548,8 +544,6 @@ describe("ToolBlock SSR", () => {
     const html = renderToString(
       ToolBlock({
         state: { name: "read", args: '{"path":"a.ts"}', argsSummary: "", ...base },
-        onToggle: () => {},
-        onToggleRaw: () => {},
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
@@ -566,8 +560,6 @@ describe("ToolBlock SSR", () => {
     const html = renderToString(
       ToolBlock({
         state: { name: "evil", args: '{"path":"<img src=x onerror=alert(1)>"}', ...base },
-        onToggle: () => {},
-        onToggleRaw: () => {},
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
@@ -588,8 +580,6 @@ describe("ToolBlock SSR", () => {
           boxes: { g: true },
           result: { error: "boom" },
         },
-        onToggle: () => {},
-        onToggleRaw: () => {},
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
@@ -613,8 +603,6 @@ describe("ToolBlock SSR", () => {
           boxes: { g: true },
           result: { output: "series" },
         },
-        onToggle: () => {},
-        onToggleRaw: () => {},
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
@@ -647,7 +635,7 @@ function mountBlock(init: MountInit) {
 describe("file part (DOM)", () => {
   const spec: ToolDisplayWire = { kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" };
 
-  it("waits while pending, then shows the path header; body populates on open", () => {
+  it("waits while pending, then shows the path header; the foot toggle opens the clamped body", () => {
     const { block, ctrl, click } = mountBlock({
       name: "read",
       args: JSON.stringify({ path: "/x/y/readme.md", offset: 0, limit: 50 }),
@@ -666,13 +654,17 @@ describe("file part (DOM)", () => {
     expect(head.querySelector(".part-path-dir")!.textContent).toBe("/x/y/");
     expect(head.querySelector(".part-path-base")!.textContent).toBe("readme.md");
     expect(head.querySelector(".part-meta")!.textContent).toBe("lines 1–50 of 100");
-    // Collapsed: one header row, no body bytes in the DOM (lazy).
-    expect(box.querySelector(".tool-file-pre")).toBeNull();
-    expect(box.children).toHaveLength(1);
+    // Collapsed: header + clamped preview + foot toggle. The DOM carries at
+    // most a fold-preview slice (the lazy property of a huge read).
+    const folded = box.querySelector(".tool-file-pre")!;
+    expect(folded.classList.contains("file-folded")).toBe(true);
+    expect(folded.textContent!.length).toBeLessThanOrEqual(FOLD_PREVIEW_CHARS);
+    expect(box.children).toHaveLength(3);
     // The file part consumed the result: no generic result box.
     expect(block.querySelector(".tool-result-box")).toBeNull();
 
-    click(".tool-file .part-head");
+    click(".tool-file .tool-box-fold-toggle");
+    expect(box.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(false);
     expect(box.querySelector(".tool-file-pre")!.textContent).toBe(out);
   });
 
@@ -683,7 +675,12 @@ describe("file part (DOM)", () => {
       display: [{ kind: "file", pathArg: "path" }],
     });
     ctrl.setResult({ output: "q".repeat(FILE_RENDER_CAP_CHARS + 50_000) });
-    click(".tool-file .part-head");
+    // Arrives folded with only the preview slice in the DOM; the foot opens.
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
+    expect(block.querySelector(".tool-file-pre")!.textContent!.length).toBeLessThanOrEqual(
+      FOLD_PREVIEW_CHARS,
+    );
+    click(".tool-file .tool-box-fold-toggle");
     const pre = block.querySelector(".tool-file-pre")!;
     expect(pre.textContent).toHaveLength(FILE_RENDER_CAP_CHARS);
     const more = block.querySelector(".tool-file .tool-raw-toggle")!;
@@ -709,11 +706,12 @@ describe("file part (DOM)", () => {
       expect(box.querySelector(".tool-file-pre")!.textContent).toBe("line one\nline two");
       // No envelope exists yet, so the box has no footer line.
       expect(box.querySelector(".tool-file-meta")).toBeNull();
-      // The user toggle overrides auto-expand in both directions.
-      click(".tool-file .part-head");
-      expect(box.querySelector(".tool-file-pre")).toBeNull();
-      click(".tool-file .part-head");
+      // The foot-row toggle overrides auto-expand in both directions.
+      click(".tool-file .tool-box-fold-toggle");
+      expect(box.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
+      click(".tool-file .tool-box-fold-toggle");
       expect(box.querySelector(".tool-file-pre")!.textContent).toBe("line one\nline two");
+      expect(box.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(false);
     });
 
     it("the ok envelope is a quiet footer line inside the box, never a second box", () => {
@@ -727,9 +725,11 @@ describe("file part (DOM)", () => {
       expect(meta.textContent).toBe('{"path":"/srv/notes.md","bytes_appended":17}');
       expect(meta.textContent).not.toContain("\n");
       expect(Array.from(block.querySelector(".tool-file")!.children).indexOf(meta)).toBe(2);
-      // Collapsed face (user toggle): the envelope text is nowhere to see.
-      click(".tool-file .part-head");
-      expect(block.textContent).not.toContain("bytes_appended");
+      // Folding the body keeps the envelope footer (it is meta, not body);
+      // the fold rides the foot-row toggle.
+      click(".tool-file .tool-box-fold-toggle");
+      expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
+      expect(block.querySelector(".tool-file-meta")!.textContent).toContain("bytes_appended");
     });
 
     it("an error result is never swallowed by the file part", () => {
@@ -781,7 +781,7 @@ describe("file part (DOM)", () => {
         args: JSON.stringify({ path: "big.md", content: big }),
         display: [argsSpec],
       });
-      click(".tool-file .part-head");
+      click(".tool-file .tool-box-fold-toggle");
       expect(block.querySelector(".tool-file-pre")!.textContent).toHaveLength(FILE_RENDER_CAP_CHARS);
       expect(block.querySelector(".tool-file .tool-raw-toggle")!.textContent).toContain("1000 more — show full");
     });
@@ -912,8 +912,8 @@ describe("path header + copy (DOM)", () => {
     }
   });
 
-  it("the header toggles the body; the copy button does not", () => {
-    // 25 lines: past the auto-expand ceiling, so the body starts closed and
+  it("the foot toggle folds the body; the header (and its copy button) never does", () => {
+    // 25 lines: past the auto-expand ceiling, so the body starts folded and
     // both clicks have an unambiguous effect to compare.
     const { block, ctrl, click } = mountBlock({
       name: "read",
@@ -921,18 +921,20 @@ describe("path header + copy (DOM)", () => {
       display: [spec],
     });
     ctrl.setResult({ output: Array.from({ length: 25 }, (_, i) => `l${i}`).join("\n") });
-    expect(block.querySelector(".tool-file-pre")).toBeNull();
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
 
+    (block.querySelector(".part-head") as HTMLElement).click();
     block.querySelector<HTMLElement>(".part-copy")!.click();
-    expect(block.querySelector(".tool-file-pre")).toBeNull(); // stopPropagation: no fold
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
 
-    click(".tool-file .part-head");
+    click(".tool-file .tool-box-fold-toggle");
     expect(block.querySelector(".tool-file-pre")!.textContent).toContain("l24");
-    click(".tool-file .part-head");
-    expect(block.querySelector(".tool-file-pre")).toBeNull();
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(false);
+    click(".tool-file .tool-box-fold-toggle");
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
   });
 
-  it("the keyboard folds the file part too (div fold restates the button semantics)", () => {
+  it("the header is static; the fold is a real button (keyboard comes native)", () => {
     const { block, ctrl } = mountBlock({
       name: "read",
       args: JSON.stringify({ path: "notes.md" }),
@@ -940,16 +942,16 @@ describe("path header + copy (DOM)", () => {
     });
     ctrl.setResult({ output: Array.from({ length: 25 }, (_, i) => `l${i}`).join("\n") });
     const head = block.querySelector<HTMLElement>(".part-head")!;
-    expect(head.getAttribute("role")).toBe("button");
-    expect(head.getAttribute("tabindex")).toBe("0");
-    // dispatchEvent returns !defaultPrevented: Enter/Space toggle AND swallow
-    // (Space must never scroll the row), a stray key does neither.
-    expect(head.dispatchEvent({ type: "keydown", key: "Enter" } as unknown as Event)).toBe(false);
+    expect(head.getAttribute("role")).toBeNull();
+    expect(head.getAttribute("tabindex")).toBeNull();
+    (head as HTMLElement).click(); // static: a header press changes nothing
+    expect(block.querySelector(".tool-file-pre")!.classList.contains("file-folded")).toBe(true);
+    const toggle = block.querySelector<HTMLElement>(".tool-file .tool-box-fold-toggle")!;
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    toggle.click();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(block.querySelector(".tool-file-pre")!.textContent).toContain("l24");
-    expect(head.dispatchEvent({ type: "keydown", key: "x" } as unknown as Event)).toBe(true);
-    expect(block.querySelector(".tool-file-pre")).not.toBeNull();
-    expect(head.dispatchEvent({ type: "keydown", key: " " } as unknown as Event)).toBe(false);
-    expect(block.querySelector(".tool-file-pre")).toBeNull();
   });
 });
 
@@ -1272,19 +1274,12 @@ describe("prose part (DOM)", () => {
     expect(unknown.block.querySelector(".tool-prose-md")!.textContent).toContain("done");
   });
 
-  it("keeps raw args reachable via the slim disclosure", () => {
-    const { block, ctrl, click } = mountProse("hourglass");
+  it("renders no raw-args disclosure: the prose is the message", () => {
+    const { block, ctrl } = mountProse("hourglass");
     ctrl.setResult({ output: "done" });
+    expect(block.querySelector(".tool-prose-raw")).toBeNull();
     expect(block.querySelector(".tool-args")).toBeNull();
-    click(".tool-prose-raw .tool-raw-toggle"); // "json" opens the disclosure
-    const pre = block.querySelector(".tool-args")!;
-    expect(pre.textContent).toContain('"seconds": 30'); // pretty
-    const toggles = block.querySelectorAll<HTMLElement>(".tool-prose-raw .tool-raw-toggle");
-    expect(toggles).toHaveLength(2); // [hide json, raw json]
-    toggles[1]!.click();
-    expect(block.querySelector(".tool-args")!.textContent).toBe('{"seconds":30}');
-    toggles[0]!.click(); // "hide json" folds it back away
-    expect(block.querySelector(".tool-args")).toBeNull();
+    expect(block.textContent).not.toContain("json");
   });
 });
 
@@ -1392,19 +1387,23 @@ describe("code part (DOM)", () => {
 });
 
 describe("generic posture and fallbacks (DOM)", () => {
-  it("collapsed-with-huge-result costs one summary line and populates on open", () => {
+  it("collapsed-with-huge-result costs a clamped preview only; full bytes stay out until shown", () => {
     const { block, ctrl, click } = mountBlock({ name: "cat", args: "{}" });
     const huge = "z".repeat(500_000);
     ctrl.setResult({ output: huge });
     const box = block.querySelector(".tool-result-box")!;
     expect(box.querySelector(".tool-box-summary")!.textContent).toBe(`result — 1 lines · ${huge.length} chars`);
-    // Collapsed: the body bytes never reach the DOM.
-    expect(block.querySelector(".tool-result-pre")).toBeNull();
+    // Collapsed is a clamp, not an absence: the body renders, but only the
+    // capped preview bytes enter the DOM -- never the full result.
+    const folded = block.querySelector(".tool-result-pre")!;
+    expect(folded.classList.contains("result-folded")).toBe(true);
+    expect(folded.textContent!.length).toBeLessThan(RESULT_PREVIEW_CHARS + 100);
     expect(block.innerHTML.length).toBeLessThan(5_000);
-    expect(box.children).toHaveLength(1);
+    expect(box.children).toHaveLength(3); // summary, folded pre, foot toggle
 
-    click(".tool-result-box .tool-box-summary");
+    click(".tool-result-box .tool-box-fold-toggle");
     const pre = block.querySelector(".tool-result-pre")!;
+    expect(pre.classList.contains("result-folded")).toBe(false);
     expect(pre.textContent).toContain(`${huge.length - RESULT_PREVIEW_CHARS} more chars`);
     expect(pre.textContent!.startsWith("zzz")).toBe(true);
     block.querySelector<HTMLElement>(".tool-result-box .tool-raw-toggle")!.click(); // show full

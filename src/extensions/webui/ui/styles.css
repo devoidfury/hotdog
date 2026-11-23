@@ -372,10 +372,9 @@ body {
 }
 
 /* House inset-outline focus WITHOUT the accent-soft fill, for controls whose
-   rest state already owns its surface (the sidebar chevron, tool part-heads
-   -- divs with role=button, the goto pair, the subagents disclosure). */
+   rest state already owns its surface (the sidebar chevron, the goto pair,
+   the subagents disclosure). */
 .logs-toggle:focus-visible,
-.part-head-toggle:focus-visible,
 .editor-goto-btn:focus-visible,
 .editor-goto-input:focus-visible,
 .subagents-toggle:focus-visible {
@@ -442,9 +441,7 @@ body {
 .logs-toggle-glyph-up,
 .subagents-toggle-glyph-up,
 .user-fold-toggle[aria-expanded="true"] .fold-chevron,
-.tool-box-summary:has(+ .tool-file-pre) .fold-chevron,
-.tool-box-summary:has(+ .tool-result-pre) .fold-chevron,
-.part-head-toggle:has(+ .tool-file-pre) .fold-chevron {
+.tool-box-fold-toggle[aria-expanded="true"] .fold-chevron {
     transform: rotate(180deg);
 }
 
@@ -1746,8 +1743,8 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message .bubble {
-    padding: 8px 12px;
-    border-radius: var(--radius-lg);
+    padding: 0;
+    border-radius: var(--radius-sm);
     line-height: 1.55;
     font-size: 1.045rem;
     position: relative;
@@ -1762,12 +1759,11 @@ body.logs-resizing .sidebar-header-resize {
         var(--accent-hover) 100%
     );
     color: var(--text-inverse);
-    border-bottom-right-radius: 4px;
-    box-shadow: 0 2px 8px var(--accent-glow);
 }
 
 .message .content {
     white-space: pre-wrap;
+    padding: 8px 12px;
 }
 
 /* Long user prompts fold to ~4 lines (message-list USER_PROMPT_FOLD_LINES).
@@ -1782,24 +1778,30 @@ body.logs-resizing .sidebar-header-resize {
     max-height: calc(4 * 1.55em);
 }
 
-/* The fold disclosure: a quiet chevron at the foot of the amber bubble,
-   .fold-chevron family (180° rotation attested by aria-expanded, hover
-   lifts to full -- on the accent gradient the lift IS the accent step). */
+/* The fold disclosure: a quiet full-width chevron strip under the clamped
+   text, above the images/attachment boxes; the header-chevron size and shape
+   (#logs-toggle). Hover/focus swaps the bubble's ink and surface: a band in
+   the text color with an accent glyph (180° rotation attested by
+   aria-expanded). */
 .user-fold-toggle {
     display: block;
     border: none;
     background: none;
-    padding: 4px 0 0;
-    margin: 0 auto;
+    padding: 4px;
+    margin: 0;
+    width: 100%;
     color: inherit;
     opacity: 0.7;
     line-height: 0;
     cursor: pointer;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
 }
 
 .user-fold-toggle:hover,
 .user-fold-toggle:focus-visible {
     opacity: 1;
+    background: var(--text-inverse);
+    color: var(--accent);
 }
 
 .user-fold-toggle .fold-chevron {
@@ -2069,7 +2071,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .tool-call-header {
-    padding: 6px 12px;
+    padding: 2px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2112,15 +2114,6 @@ body.logs-resizing .sidebar-header-resize {
 .tool-call-status.status-ok { color: var(--success); }
 .tool-call-status.status-error { color: var(--error); }
 
-/* The prose posture's json disclosure pre (the class's only renderer). */
-.tool-args {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: 0.905rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
 /* ── In-flight Tool Call (live-only streamingToolCall frame) ───────────────
    The committed block's posture carries the frame and header, so the
    in-progress tell is the shared .spinner in the status slot (currentColor,
@@ -2148,38 +2141,32 @@ body.logs-resizing .sidebar-header-resize {
     overflow: hidden;
 }
 
-/* The generic result posture's collapsed disclosure: one muted centered
-   summary line until opened. NOT a box: the block behind is the surface. */
+/* The generic result posture's head: one muted centered summary line, static
+   text now -- the toggle moved to the box's foot (.tool-box-fold-toggle) and
+   the collapsed body clamps to its first lines instead of vanishing.
+   NOT a box: the block behind is the surface. */
 .tool-file,
 .tool-result-box {
-    margin: var(--space-xs) var(--space-lg);
+    margin: var(--space-xs);
 }
 
 .tool-box-summary {
     display: block;
     width: 100%;
     text-align: center;
-    background: none;
-    border: none;
     padding: 6px 10px;
     font-family: var(--font-mono);
     font-size: 0.875rem;
     color: var(--text-muted);
-    cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.tool-box-summary:hover {
-    color: var(--text-secondary);
-}
-
 /* Expand/collapse affordance: a chevron svg (.fold-chevron, icons.tsx)
-   rides right of the summary label / at the part-row's end (currentColor,
-   so the error posture's red carries in); pops to accent on hover/focus.
-   Inline over clipped: a long summary scrolls the chevron with the text.
-   Open state: the body is the summary's following <pre> (:has(+ pre)). */
+   rides the tool boxes' foot fold rows (currentColor, so the error
+   posture's red carries in; the fold toggle's hover band owns the accent
+   lift). Open state rides the foot toggle's aria-expanded. */
 .fold-chevron {
     flex: 0 0 auto;
     margin-left: 6px;
@@ -2189,11 +2176,34 @@ body.logs-resizing .sidebar-header-resize {
         color 0.15s var(--ease-out);
 }
 
-.tool-box-summary:hover .fold-chevron,
-.tool-box-summary:focus-visible .fold-chevron,
-.part-head-toggle:hover .fold-chevron,
-.part-head-toggle:focus-visible .fold-chevron {
+/* The result box's foot toggle: the .user-fold-toggle grammar -- a
+   full-width chevron row of its own; hover/focus swaps the band's ink to
+   the box's foreground with an accent glyph. */
+.tool-box-fold-toggle {
+    display: block;
+    width: 100%;
+    border: none;
+    background: none;
+    padding: 4px;
+    margin: 0;
+    color: var(--text-muted);
+    line-height: 0;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.tool-box-fold-toggle:hover,
+.tool-box-fold-toggle:focus-visible {
+    background: var(--text-primary);
     color: var(--accent);
+}
+
+.tool-box-fold-toggle .fold-chevron {
+    margin-left: 0;
+}
+
+.tool-result-box.tool-result-error .tool-box-fold-toggle {
+    color: var(--error);
 }
 
 /* Part header (declared-path parts -- read's file box and both diff
@@ -2214,13 +2224,8 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .tool-diff .part-head,
-.part-head-toggle:has(+ .tool-file-pre) {
+.tool-file .part-head {
     border-bottom: 1px solid var(--border);
-}
-
-.part-head-toggle {
-    cursor: pointer;
-    user-select: none;
 }
 
 /* The path: dir then basename, one mono string that re-joins byte-identical to
@@ -2246,10 +2251,6 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-primary);
     white-space: pre;
     flex: none;
-}
-
-.part-head-toggle:hover .part-path-dir {
-    color: var(--text-secondary);
 }
 
 /* Copy-path button: the footer-copy family at header scale -- quiet, lifts on
@@ -2301,12 +2302,25 @@ body.logs-resizing .sidebar-header-resize {
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-secondary);
-    max-height: 40vh;
+    max-height: 70vh;
     overflow-y: auto;
 }
 
-/* Quiet envelope line under an open args-sourced body (append/overwrite
-   return a size confirmation) and under an all-add diff body. */
+/* Collapsed box bodies (generic result and file parts): clamps to the first
+   lines (the user-prompt fold grammar) instead of vanishing; the foot row
+   opens them. */
+.tool-result-pre.result-folded,
+.tool-file-pre.file-folded {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    max-height: calc(4 * 1.5em);
+}
+
+/* Quiet envelope line under an args-sourced body (append/overwrite
+   return a size confirmation) and under an all-add diff body; it is meta,
+   so it shows folded or open. */
 .tool-file-meta {
     margin: 0;
     padding: 4px 10px 6px;
@@ -2348,7 +2362,7 @@ body.logs-resizing .sidebar-header-resize {
 /* The result meta strip: one muted line under the result block in the
    assistant-footer register (quiet mono, no surface). Curated envelope
    facts only; a failing fact (nonzero exit) takes the house error tint;
-   the FULL raw envelope stays behind the "envelope" disclosure. */
+   the FULL raw envelope stays behind the "raw metadata" disclosure. */
 .tool-result-meta {
     display: flex;
     flex-wrap: wrap;
@@ -2374,6 +2388,15 @@ body.logs-resizing .sidebar-header-resize {
     margin-top: 0;
 }
 
+/* Separator in front of the disclosure: a mid-dot dividing it from the
+   curated facts that precede it. inline-block keeps the button's hover
+   underline from propagating across the dot. */
+.tool-result-meta .tool-raw-toggle::before {
+    content: "·";
+    display: inline-block;
+    margin-right: 8px;
+}
+
 .tool-result-meta .tool-meta-envelope {
     flex-basis: 100%;
     margin: 2px 0 0;
@@ -2386,7 +2409,7 @@ body.logs-resizing .sidebar-header-resize {
    near-identically so the rail never breaks (big deltas read as bricks),
    the line text stays near-default (whole-line tint reads as noise). */
 .tool-diff {
-    margin: var(--space-xs) var(--space-lg);
+    margin: var(--space-xs);
     font-family: var(--font-mono);
     font-size: 0.905rem;
     overflow: hidden;
@@ -2611,10 +2634,6 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-primary);
 }
 
-.tool-prose-raw {
-    margin: 0 var(--space-lg);
-}
-
 /* ── Thinking Blocks ──────────────────────────────────────────────────────── */
 
 .thinking-block {
@@ -2743,14 +2762,15 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
-    padding: 6px 12px;
-    margin: 4px 0;
+    padding: 4px 2px;
+    margin: 1px;
     font-size: 0.975rem;
 }
 
 .attachment-box summary {
     cursor: pointer;
     color: var(--accent);
+    padding: 0 4px;
 }
 
 .attachment-box .attachment-content {
@@ -2990,7 +3010,7 @@ body.logs-resizing .sidebar-header-resize {
     left: 0;
     right: 0;
     bottom: 100%;
-    height: 24px;
+    height: 8px;
     background: linear-gradient(to bottom, transparent, var(--bg-primary));
     pointer-events: none;
 }
@@ -4246,9 +4266,6 @@ body.sidebar-resizing #tree-col-resize {
         max-height: 30vh;
     }
 
-    .tool-file,
-    .tool-result-box,
-    .tool-diff,
     .tool-code {
         margin-left: var(--space-md);
         margin-right: var(--space-md);

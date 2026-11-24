@@ -127,10 +127,17 @@ function fsErrorMessage(err: unknown, display: string): string {
   return errorText(err);
 }
 
-/** EscapeError -> its honest message; anything else rethrows (the
- *  caller's catch logs formatError and sends errorFrame). */
-function rejectionsAreHonest(e: unknown): { error: string } | never {
+/** EscapeError -> its honest message; an fs permission refusal caught
+ *  INSIDE resolveSafe (a mode-000 ancestor: macOS denies realpath on it,
+ *  workspace.ts's walk) -> the same honest permission line the readdir
+ *  catch uses, when the caller passes the display spelling. Anything else
+ *  rethrows (the caller's catch logs formatError and sends errorFrame). */
+function rejectionsAreHonest(e: unknown, display?: string): { error: string } | never {
   if (e instanceof PathEscapeError) return { error: e.message };
+  if (display !== undefined) {
+    const code = (e as { code?: string } | null)?.code;
+    if (code === "EACCES" || code === "EPERM") return { error: `permission denied: ${display}` };
+  }
   throw e;
 }
 
@@ -154,13 +161,13 @@ export async function listDirPayload(
   workspace: Workspace,
   rawPath: unknown,
 ): Promise<Partial<ListDirResultWire>> {
+  const display = String(rawPath);
   let resolved: string;
   try {
     resolved = workspace.resolveSafe(rawPath as string);
   } catch (e) {
-    return rejectionsAreHonest(e);
+    return rejectionsAreHonest(e, display);
   }
-  const display = String(rawPath);
   let dirStat: Awaited<ReturnType<typeof fsPromises.stat>>;
   try {
     dirStat = await fsPromises.stat(resolved);
@@ -337,13 +344,13 @@ export async function readPayload(
   offset: number,
   limit: number,
 ): Promise<Partial<ReadFileResultWire>> {
+  const display = String(rawPath);
   let resolved: string;
   try {
     resolved = workspace.resolveSafe(rawPath as string);
   } catch (e) {
-    return rejectionsAreHonest(e);
+    return rejectionsAreHonest(e, display);
   }
-  const display = String(rawPath);
   let st: Awaited<ReturnType<typeof fsPromises.stat>>;
   try {
     st = await fsPromises.stat(resolved);
@@ -481,13 +488,13 @@ export async function createPayload(
   rawPath: unknown,
   kind: "file" | "dir",
 ): Promise<Partial<FileOpResultWire>> {
+  const display = String(rawPath);
   let resolved: string;
   try {
     resolved = workspace.resolveSafe(rawPath as string);
   } catch (e) {
-    return rejectionsAreHonest(e);
+    return rejectionsAreHonest(e, display);
   }
-  const display = String(rawPath);
   const landing = gateLandingDir(workspace, resolved);
   if (landing !== null) return landing;
   try {
@@ -570,13 +577,13 @@ export async function deletePayload(
   workspace: Workspace,
   rawPath: unknown,
 ): Promise<Partial<FileOpResultWire>> {
+  const display = String(rawPath);
   let resolved: string;
   try {
     resolved = workspace.resolveSafe(rawPath as string);
   } catch (e) {
-    return rejectionsAreHonest(e);
+    return rejectionsAreHonest(e, display);
   }
-  const display = String(rawPath);
   if (workspace.roots.includes(resolved)) {
     return { error: `cannot delete a workspace root: ${display}` };
   }
@@ -631,13 +638,13 @@ export async function saveFilePayload(
   if (byteLen > MAX_FILE_WRITE_BYTES) {
     return { error: `content is ${byteLen} bytes, over the ${MAX_FILE_WRITE_BYTES}-byte write cap` };
   }
+  const display = String(rawPath);
   let resolved: string;
   try {
     resolved = workspace.resolveSafe(rawPath as string);
   } catch (e) {
-    return rejectionsAreHonest(e);
+    return rejectionsAreHonest(e, display);
   }
-  const display = String(rawPath);
   // Landing-dir gate (see gateLandingDir): a NEW file at a free path is a
   // non-existent final component, so the target's resolveSafe never fires its
   // real-spelling deny recheck -- an in-root link (`w -> .ssh`) would swallow

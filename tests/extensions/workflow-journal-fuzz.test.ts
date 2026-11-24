@@ -244,15 +244,29 @@ function fold(recs: unknown[]): Folded {
 
 // ── Consumer harness ────────────────────────────────────────────────
 
-const SCAN_ROOT = join(ROOT, "sweep");
-const SWEEP_DIR = join(SCAN_ROOT, "r");
-const JOURNAL = join(SWEEP_DIR, "run.jsonl");
-mkdirSync(SWEEP_DIR, { recursive: true });
+// One isolated scan root per harness: bun's test timeout does NOT cancel an
+// abandoned async loop, and the 2026-11-24 mac run proved why shared paths
+// are a trap -- the CRLF sweep timed out (5s default on a loaded runner)
+// and its zombie loop kept writeFileSync'ing the journal while the NEXT
+// test ran, landing writes between g1/g2 probes ("scan unstable across
+// repeats" was the zombie, not the reader). Every block owns its bytes.
+interface Harness {
+  scanRoot: string;
+  dir: string;
+  journal: string;
+}
 
-async function probe(dir: string): Promise<{ sum: unknown; scan: unknown; recon: unknown }> {
+function makeHarness(name: string): Harness {
+  const scanRoot = join(ROOT, name);
+  const dir = join(scanRoot, "r");
+  mkdirSync(dir, { recursive: true });
+  return { scanRoot, dir, journal: join(dir, "run.jsonl") };
+}
+
+async function probe(h: Harness, dir: string = h.dir): Promise<{ sum: unknown; scan: unknown; recon: unknown }> {
   const [sum, scan, recon] = await Promise.all([
     readRunSummary(dir),
-    scanInterruptedRuns(SCAN_ROOT, DEAD).then((v) => {
+    scanInterruptedRuns(h.scanRoot, DEAD).then((v) => {
       const mine = v.filter((x) => x.runDir === dir)[0];
       return mine ? { runId: mine.runId, workflow: mine.workflow, nodes: mine.nodes, nodeActivity: mine.nodeActivity, marked: mine.marked } : null;
     }),
@@ -310,7 +324,7 @@ function variantCrlf(base: Buffer): Buffer {
   return Buffer.from(base.toString("utf8").replace(/\n/g, "\r\n"), "utf8");
 }
 
-async function sweep(label: string, buf: Buffer, failures: string[]): Promise<void> {
+async function sweep(label: string, buf: Buffer, failures: string[], h: Harness): Promise<void> {
   const N = buf.length;
   const recs = splitRecords(buf);
   const vals = recs.map((r) => r.val);
@@ -322,11 +336,11 @@ async function sweep(label: string, buf: Buffer, failures: string[]): Promise<vo
   let midUtf8 = 0;
   let midCrlf = 0;
   for (let k = 0; k <= N && failures.length < 8; k++) {
-    writeFileSync(JOURNAL, buf.subarray(0, k));
+    writeFileSync(h.journal, buf.subarray(0, k));
     try {
       const m = recs.reduce((acc, r) => acc + (r.end <= k ? 1 : 0), 0);
       const exp = fold(vals.slice(0, m));
-      const got = await probe(SWEEP_DIR);
+      const got = await probe(h);
       const diff = diffExpect(got, exp);
       if (diff) failures.push(`${label} k=${k}: ${diff}`);
 
@@ -358,17 +372,20 @@ async function sweep(label: string, buf: Buffer, failures: string[]): Promise<vo
 }
 
 describe("workflow journal exhaustive truncation sweep", () => {
+  // Generous explicit timeouts: these sweeps are thousands of write+probe
+  // rounds and on a loaded mac runner the default 5s got hit once -- and an
+  // abandoned sweep is exactly the zombie the isolated harnesses defang.
   it("every prefix scans/summarizes/reconciles with pinned classification (LF)", async () => {
     const failures: string[] = [];
-    await sweep("lf", fixture, failures);
+    await sweep("lf", fixture, failures, makeHarness("sweep-lf"));
     expect(failures).toEqual([]);
-  });
+  }, 60_000);
 
   it("every prefix of the CRLF-converted journal agrees (CR/LF cut class)", async () => {
     const failures: string[] = [];
-    await sweep("crlf", variantCrlf(fixture), failures);
+    await sweep("crlf", variantCrlf(fixture), failures, makeHarness("sweep-crlf"));
     expect(failures).toEqual([]);
-  });
+  }, 60_000);
 });
 
 // ── Seeded single-byte corruption ───────────────────────────────────
@@ -395,6 +412,7 @@ describe("workflow journal single-byte corruption", () => {
   const TERMINATOR_PROBES = 14;
 
   it("hit-replacement fold holds: neighbors survive exactly, scans are stable", async () => {
+    const h = makeHarness("mut");
     const failures: string[] = [];
     for (const v of VARIANTS) {
       const buf = v.build(fixture);
@@ -414,11 +432,11 @@ describe("workflow journal single-byte corruption", () => {
         const pos = inRecord[rng.int(inRecord.length)]!;
         const L = recAt[pos]!;
         const mutated = mutate(rng, buf, pos);
-        writeFileSync(JOURNAL, mutated);
+        writeFileSync(h.journal, mutated);
         const label = `${v.name} pos=${pos} rec=${L}`;
         try {
-          const g1 = await probe(SWEEP_DIR);
-          const g2 = await probe(SWEEP_DIR);
+          const g1 = await probe(h);
+          const g2 = await probe(h);
           if (JSON.stringify(g1) !== JSON.stringify(g2)) {
             failures.push(`${label}: scan unstable across repeats`);
             continue;
@@ -448,11 +466,11 @@ describe("workflow journal single-byte corruption", () => {
       // and unfinished), not per-record survival.
       for (let t = 0; t < TERMINATOR_PROBES && failures.length < 8; t++) {
         const pos = terminator[rng.int(terminator.length)]!;
-        writeFileSync(JOURNAL, mutate(rng, buf, pos));
+        writeFileSync(h.journal, mutate(rng, buf, pos));
         const label = `${v.name} term pos=${pos}`;
         try {
-          const g1 = await probe(SWEEP_DIR);
-          const g2 = await probe(SWEEP_DIR);
+          const g1 = await probe(h);
+          const g2 = await probe(h);
           if (JSON.stringify(g1) !== JSON.stringify(g2)) failures.push(`${label}: scan unstable`);
           const surfaced = g1.scan !== null;
           const incomplete = g1.sum !== null && (g1.sum as Folded["sum"])!.outcome === null;
@@ -464,25 +482,26 @@ describe("workflow journal single-byte corruption", () => {
       }
     }
     expect(failures).toEqual([]);
-  });
+  }, 60_000);
 });
 
 // ── Edge inputs ─────────────────────────────────────────────────────
 
 describe("workflow journal edge inputs", () => {
+  const H = makeHarness("edge");
   async function check(label: string, bytes: Buffer | null): Promise<void> {
     if (bytes === null) {
       // dir exists but holds no journal at all
-      const empty = join(SCAN_ROOT, "empty");
+      const empty = join(H.scanRoot, "empty");
       mkdirSync(empty, { recursive: true });
-      const got = await probe(empty);
+      const got = await probe(H, empty);
       expect({ label, got }).toEqual({ label, got: { sum: null, scan: null, recon: "THROWS" } });
       return;
     }
-    writeFileSync(JOURNAL, bytes);
+    writeFileSync(H.journal, bytes);
     const recs = splitRecords(bytes);
     const exp = fold(recs.map((r) => r.val));
-    const got = await probe(SWEEP_DIR);
+    const got = await probe(H);
     const diff = diffExpect(got, exp);
     expect({ label, diff }).toEqual({ label, diff: "" });
   }
@@ -516,10 +535,10 @@ describe("workflow journal edge inputs", () => {
     for (let t = 0; t < 12; t++) {
       const n = 1 + rng.int(400);
       const b = Buffer.from(rng.bytes(n));
-      writeFileSync(JOURNAL, b);
+      writeFileSync(H.journal, b);
       const recs = splitRecords(b);
       const exp = fold(recs.map((r) => r.val));
-      const got = await probe(SWEEP_DIR);
+      const got = await probe(H);
       const diff = diffExpect(got, exp);
       expect({ t, diff }).toEqual({ t, diff: "" });
     }

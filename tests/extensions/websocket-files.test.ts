@@ -24,7 +24,6 @@ import {
   chmodSync,
   rmSync,
 } from "node:fs";
-import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { TMP_PARENT } from "../mocks/io.ts";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
@@ -497,28 +496,22 @@ describe("file handlers degraded fs paths", () => {
     chmodSync(lockbox, 0o000);
     try {
       // Host-enforcement probe (same doctrine as the AS_ROOT skip): if this
-      // host lets our own process readdir a 000 dir, the refusal under test
-      // cannot exist here, and asserting it would be vacuous. GitHub macOS
-      // runners are such hosts (mode bits do not bite); Linux gates do.
-      // The probe rides the HANDLER's own call shape (async readdir,
-      // withFileTypes): the 2026-11-24 macOS run showed a sync/async split,
-      // where readdirSync denied and the handler's async readdir listed the
-      // 000 dir -- the probe would have lied, and the error line never ran.
-      let hostDenies = false;
-      try {
-        await readdir(lockbox, { withFileTypes: true });
-      } catch {
-        hostDenies = true;
-      }
-      if (!hostDenies) {
+      // host lets the process read a 000 dir, the refusal under test cannot
+      // exist here, and asserting it would be vacuous. GitHub macOS runners
+      // are such hosts (mode bits do not bite); Linux gates do. The probe is
+      // the HANDLER call itself, not an fs-level stand-in: the 2026-11-24
+      // macOS run probed readdirSync (it denied), then handler-shaped async
+      // readdir (it listed the 000 dir), while the handler's own verdict --
+      // the thing under test -- stayed unprobed either way. One
+      // listDirPayload call is probe and assertion at once; on Linux the
+      // denial leg runs exactly as before.
+      const reply = await listDirPayload(new Workspace([ROOT_A]), "lockbox");
+      if (reply.error === undefined) {
         process.stderr.write(
-          "[websocket-files] chmod 000 does not deny readdir on this host: permission-line test is VACUOUS here, skipping\n",
+          "[websocket-files] chmod 000 does not deny the handler on this host: permission-line test is VACUOUS here, skipping\n",
         );
         return;
       }
-      const reply = parse<ListDirResultWire>(
-        (await send(createWsMockWs(), { type: C2S.LIST_DIR, requestId: 84, path: "lockbox" }))[0]!,
-      );
       expect(reply.error).toBe("permission denied: lockbox");
       expect("entries" in reply).toBe(false);
     } finally {

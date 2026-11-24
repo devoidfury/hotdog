@@ -907,9 +907,16 @@ describe("sweepStaleTmpDirs", () => {
   });
 
   it("broker construction sweeps old own-prefix dirs off the critical path", async () => {
-    // The janitor runs in an unref'd deferred timer reading tmpdir() AT FIRE
-    // TIME, so TMPDIR points at the sandbox for the construction window only;
-    // inside it, only old `hotdog-exec-*` entries are food.
+    // Construction schedules exactly one unref'd deferred sweep (pinned by
+    // the setTimeout swap below). The closure is FIRED (it must not throw)
+    // but its deletion effect is NOT asserted: the fire's sweep base comes
+    // from tmpdir(), and CI runs `bun test --parallel` -- one process env
+    // shared across workers, where handoff-tool.test.ts restores TMPDIR
+    // key-by-key in its afterEach. That restore can clobber this test's
+    // TMPDIR between the write and the fire (CI run 123048544897: the fire
+    // swept another base and oldExec survived; no local serial run
+    // reproduces). Sweep semantics therefore ride the parameterized seam,
+    // explicit base/now, race-free by construction.
     const base = mkdtempSync(join(TMP_PARENT, "hotdog-sweep-boot-"));
     const savedTmpDir = process.env.TMPDIR;
     const oldExec = join(base, `hotdog-exec-unit-boot-${process.pid}`);
@@ -945,8 +952,11 @@ describe("sweepStaleTmpDirs", () => {
         expect(captured.length).toBe(1); // construction defers exactly one sweep
         expect(unrefd).toBe(1); // ...unref'd: never a reason the host stays alive
         expect(existsSync(oldExec)).toBe(true); // ...and off the construction path
-        captured[0]!(); // fire it while TMPDIR still points at the sandbox
-        expect(existsSync(oldExec)).toBe(false); // the janitor's sweep lands
+        captured[0]!(); // fires clean; its sweep BASE can race env restores
+        // Sweep semantics ride the parameterized seam (base/now explicit):
+        // old own-prefix dir reaped, young dir spared, deterministically.
+        sweepStaleTmpDirs("hotdog-exec-", base, Date.now());
+        expect(existsSync(oldExec)).toBe(false);
         expect(existsSync(young)).toBe(true);
         await broker.close();
       } finally {

@@ -160,30 +160,43 @@ static BOOL urlIsSameOrigin(NSURL *url) {
   return NO;
 }
 
+/* The open APIs churn with every SDK refresh: -openURL:completionHandler:
+ * is gone from the macOS 26 headers, and -openURL:configuration:completion
+ * Handler: now takes NSWorkspaceOpenConfiguration (a macOS 15+ runtime
+ * class) with an app/error callback -- older SDK generations spelled the
+ * same selector NSDictionary + BOOL. Ask the runtime instead of the
+ * headers: config-object API where the class exists (macOS 15+), the
+ * legacy synchronous -openURL: on 11-14, honest stderr refusal otherwise.
+ * Compiles against any SDK, visible declarations or not. */
+@protocol HotdogOpenConfigProviding <NSObject>
++ (instancetype)configuration;
+@end
+
 static void openExternal(NSURL *url) {
   if (!url) return;
-  void (^report)(BOOL) = ^(BOOL success) {
-    if (!success)
-      fprintf(stderr, "[desktop shim] the system browser refused: %s\n",
-              (url.absoluteString ?: @"?").UTF8String);
+  NSWorkspace *ws = [NSWorkspace sharedWorkspace];
+  void (^refused)(void) = ^{
+    fprintf(stderr, "[desktop shim] the system browser refused: %s\n",
+            (url.absoluteString ?: @"?").UTF8String);
   };
-  /* -openURL:completionHandler: is gone from the macOS 26 SDK headers; the
-   * replacement -openURL:configuration:completionHandler: is macOS 12+. The
-   * 11.x fallback rides the legacy synchronous -openURL: through
-   * objc_msgSend, so this compiles even where newer SDKs dropped the
-   * declaration, and runs everywhere in the deployment range. */
-  if (@available(macOS 12.0, *)) {
-    [[NSWorkspace sharedWorkspace] openURL:url
-                             configuration:@{}
-                         completionHandler:report];
+  Class cfgCls = NSClassFromString(@"NSWorkspaceOpenConfiguration");
+  SEL modern = @selector(openURL:configuration:completionHandler:);
+  if (cfgCls && [ws respondsToSelector:modern]) {
+    id cfg = [(Class<HotdogOpenConfigProviding>)cfgCls configuration];
+    void (^handler)(NSRunningApplication *_Nullable, NSError *_Nullable) =
+        ^(NSRunningApplication *_Nullable app, NSError *_Nullable error) {
+      (void)app;
+      if (error) refused();
+    };
+    ((void (*)(id, SEL, id, id, id))objc_msgSend)(ws, modern, url, cfg, handler);
     return;
   }
-  NSWorkspace *ws = [NSWorkspace sharedWorkspace];
-  if ([ws respondsToSelector:@selector(openURL:)]) {
-    report(((BOOL (*)(id, SEL, id))objc_msgSend)(ws, @selector(openURL:), url));
-  } else {
-    report(NO);
+  SEL legacy = @selector(openURL:);
+  if ([ws respondsToSelector:legacy]) {
+    if (!((BOOL (*)(id, SEL, id))objc_msgSend)(ws, legacy, url)) refused();
+    return;
   }
+  refused();
 }
 
 /* SHA-256 of the leaf DER, openssl-style "AA:BB:..." uppercase -- the same
@@ -565,19 +578,24 @@ static void showFailurePage(NSString *reason) {
                                                NSURLCredential *_Nullable))completionHandler {
   (void)download;
   NSString *method = challenge.protectionSpace.authenticationMethod;
-  SecTrustRef _Nullable maybeTrust =
-      (__bridge SecTrustRef _Nullable)challenge.protectionSpace.serverTrust;
-  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !maybeTrust) {
+  /* CFBridgingRetain, never __bridge: SDK 26 rejects any __bridge cast on
+   * this property ("incompatible types ... with a __bridge cast"), and the
+   * +1 we take here is what keeps the trust alive across the hop to the
+   * main queue. The block below always runs and releases; the refuse path
+   * exits the process inside tofuDecideTrust. */
+  SecTrustRef trust = (SecTrustRef)CFBridgingRetain(challenge.protectionSpace.serverTrust);
+  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !trust) {
+    if (trust) CFRelease(trust);
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
     return;
   }
-  SecTrustRef trust = maybeTrust; /* flow-guarded: nonnull past the nil check */
   NSString *where = [self challengeWhere:challenge];
   dispatch_async(dispatch_get_main_queue(), ^{
     if (tofuDecideTrust(trust, where)) {
       completionHandler(NSURLSessionAuthChallengeUseCredential,
                         [NSURLCredential credentialForTrust:trust]);
     } /* refusal exits in tofuDecideTrust */
+    CFRelease(trust);
   });
 }
 
@@ -608,13 +626,13 @@ static void showFailurePage(NSString *reason) {
                                                NSURLCredential *_Nullable))completionHandler {
   (void)webView;
   NSString *method = challenge.protectionSpace.authenticationMethod;
-  SecTrustRef _Nullable maybeTrust =
-      (__bridge SecTrustRef _Nullable)challenge.protectionSpace.serverTrust;
-  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !maybeTrust) {
+  /* Same CFBridgingRetain posture as the download delegate above. */
+  SecTrustRef trust = (SecTrustRef)CFBridgingRetain(challenge.protectionSpace.serverTrust);
+  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !trust) {
+    if (trust) CFRelease(trust);
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
     return;
   }
-  SecTrustRef trust = maybeTrust; /* flow-guarded: nonnull past the nil check */
   NSString *where = [self challengeWhere:challenge];
   dispatch_async(dispatch_get_main_queue(), ^{
     if (tofuDecideTrust(trust, where)) {
@@ -625,6 +643,7 @@ static void showFailurePage(NSString *reason) {
       gSelfLoad = YES;
       [gWebView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:gUrl]]];
     } /* refusal exits in tofuDecideTrust */
+    CFRelease(trust);
   });
 }
 
@@ -656,7 +675,8 @@ static void showFailurePage(NSString *reason) {
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = message ?: @"";
   [alert addButtonWithTitle:@"OK"];
-  [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse) {
+  [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+    (void)response;
     completionHandler();
   }];
 }
@@ -756,7 +776,7 @@ int main(int argc, char **argv) {
   delegate.window = window;
 
   WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
-  config.dataStore = [WKWebsiteDataStore nonPersistentDataStore]; /* v1 ephemerality,
+  config.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore]; /* v1 ephemerality,
       parity with the Linux shim's non-persistent web context: local mode re-mints
       the #tok= handoff every boot; remote mode re-logs in every launch (ceiling). */
   WKWebView *webView = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 800)

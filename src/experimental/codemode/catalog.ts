@@ -128,11 +128,16 @@ export function policyFilteredNames(
 }
 
 /**
- * Keep-direct table: the tools the shadow layer never hides (human
- * channel, turn-contract tools, manager/orchestration class, the skills
- * preamble partner, session config). shadow.ts consumes this same list for
- * the PROVIDER_REQUEST filter; the prompt chunk needs it to name the
- * shadow inventory.
+ * Keep-direct table: the tools the shadow layer never hides. Two classes:
+ * conversation-contract tools that cannot ride a script leg (human channel,
+ * turn-contract tools, manager/orchestration class, the skills preamble
+ * partner, session config), and the file-mutation ops, where the content
+ * crosses context as the ARGUMENT either way, so a script buys no filtering
+ * and charges escaping hazards plus whole-content replay after a mid-script
+ * failure (shadow.ts's scope note carries the same split). Reads stay
+ * shadowed: their OUTPUT is the expensive, filterable side.
+ * shadow.ts consumes this same list for the PROVIDER_REQUEST filter; the
+ * prompt chunk needs it to name the shadow inventory.
  */
 export const KEEP_DIRECT_TOOL_NAMES: readonly string[] = [
   "question",
@@ -151,6 +156,10 @@ export const KEEP_DIRECT_TOOL_NAMES: readonly string[] = [
   "workflow_followup",
   "workflow_control",
   "review",
+  // File-mutation ops: argument-size writes are better direct (see above).
+  "edit",
+  "overwrite",
+  "append",
 ];
 
 /**

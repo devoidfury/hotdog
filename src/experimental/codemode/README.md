@@ -149,6 +149,7 @@ servers' tools wholesale):
 | manager class: `delegate_task`, `task_status`, `task_followup`, `task_interrupt`, `plan_status`, `workflow_validate/dispatch/status/followup/control`, `review` | Lifecycle/orchestration turn contracts, not data ops. |
 | `load_skill` | The skills preamble chunk gates on the def set and is blind to a payload shadow. |
 | `model` | Session config surface; nothing to script. |
+| file-mutation ops: `edit`, `overwrite`, `append` | Argument-size writes: the content crosses context as the argument on either surface, so a script buys zero filtering and charges escaping hazards plus whole-file replay after a mid-script failure. Reads stay shadowed -- their output is the expensive, filterable side. |
 | anything `pinned` | Run-contract tools (structural rule via registry metadata; the exemption covers the hook leg only). |
 | `codemode` | The entry point (also self-excluded from the callable table). |
 

@@ -19,8 +19,9 @@
 //
 // Scope: everything not on the keep-direct table (human channel,
 // turn-contract tools, the manager class, the skills preamble partner,
-// session config), not registry-pinned, and not codemode itself is
-// shadowed while this extension is loaded: the file tools, bash,
+// session config, the file-mutation ops edit/overwrite/append),
+// not registry-pinned, and not codemode itself is shadowed
+// while this extension is loaded: `read`, bash,
 // grep/find/explore/project_info, fetch, web_search, agent_browser,
 // string_length, show_me, head/tail, and other extensions' / MCP servers'
 // tools wholesale.

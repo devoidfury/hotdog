@@ -42,6 +42,9 @@ const KEEP_DIRECT = [
   "workflow_followup",
   "workflow_control",
   "review",
+  "edit",
+  "overwrite",
+  "append",
 ];
 
 // The shadow inventory, incl. head/tail (the filter is list-based, so

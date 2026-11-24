@@ -24,10 +24,6 @@
 
 - **webui - one named view state, honest chrome, and the raw META envelope retires.** Search hits never silently attach -- live hits peek read-only with an explicit Take over. The raw `META:` line is gone from every chat surface; the facts render as one muted strip with the full envelope behind a disclosure. Failed subagent attaches render a fallback card, client/daemon build skew gets a dismissible warning, and long user prompts fold at 4 lines with expand-on-click.
 
-- **webui - the Subagents sidebar survives its own selection.** Viewing a live worker no longer wipes the parent's Subagents list, and a cold (settled) subagent row carries the same selected mark the live rows use.
-
-- **ci - suite green again.** The stt fake-server poison, a silently-failing coverage threshold, two macOS-runner assumptions, and three sleep-timed flakes fixed at the roots; test/CI-only, zero shipped-code changes.
-
 - **webui - Ctrl/Cmd+C actually reaches the clipboard.** Copy staged the selection into a hidden textarea and then cleared it before the browser could read it, so real browsers copied nothing; copy now writes through the shared clipboard seam (the cut path already did).
 
 - **webui - the editor's foot bar reads the caret and jumps.** A `row:col` chip tracks the primary caret; click it, type `N` (keeps the column) or `N:M`, Enter. Line and column clamp honestly, an invalid spec refuses and stays open for the fix, Escape cancels.

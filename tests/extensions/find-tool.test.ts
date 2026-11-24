@@ -47,7 +47,10 @@ describe("FindTool.execute — basic find", () => {
     expect(getDisplay(result)).toContain("hello.txt");
     expect(getDisplay(result)).toContain("world.txt");
     expect(getDisplay(result)).not.toContain("data.json");
-  });
+  },
+  // spawn-bound (fd miss, then the find fallback): the 2026-11-24 macOS CI
+  // run hit the bare 5 s default under full-suite load, not a hang.
+  20_000);
 
   it("finds files recursively", async () => {
     fsSync.mkdirSync(path.join(dir, "sub"), { recursive: true });

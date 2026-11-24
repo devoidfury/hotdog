@@ -22,9 +22,9 @@ import {
   writeFileSync,
   symlinkSync,
   chmodSync,
-  readdirSync,
   rmSync,
 } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { TMP_PARENT } from "../mocks/io.ts";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
@@ -500,9 +500,13 @@ describe("file handlers degraded fs paths", () => {
       // host lets our own process readdir a 000 dir, the refusal under test
       // cannot exist here, and asserting it would be vacuous. GitHub macOS
       // runners are such hosts (mode bits do not bite); Linux gates do.
+      // The probe rides the HANDLER's own call shape (async readdir,
+      // withFileTypes): the 2026-11-24 macOS run showed a sync/async split,
+      // where readdirSync denied and the handler's async readdir listed the
+      // 000 dir -- the probe would have lied, and the error line never ran.
       let hostDenies = false;
       try {
-        readdirSync(lockbox);
+        await readdir(lockbox, { withFileTypes: true });
       } catch {
         hostDenies = true;
       }

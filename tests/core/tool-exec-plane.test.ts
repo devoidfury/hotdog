@@ -921,15 +921,32 @@ describe("sweepStaleTmpDirs", () => {
       utimesSync(oldExec, old, old);
       process.env.TMPDIR = base;
       try {
-        const broker = new ToolExecBroker({ fence: "off" });
-        // Poll for the janitor's fire instead of assuming 50 ms is enough:
-        // the deferred timer is unref'd, and CI coverage instrumentation can
-        // starve it past any fixed sleep (this sleep flaked at 926).
-        const deadline = Date.now() + 3000;
-        while (existsSync(oldExec) && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 25));
+        // Capture the janitor instead of racing it: the deferred unref'd
+        // timer starved past even the 3 s poll under coverage
+        // instrumentation (flaked 2026-11-24 at the full window). The
+        // setTimeout swap covers the synchronous constructor only, so
+        // `captured` holds exactly what construction scheduled -- and no
+        // real timer is armed, so a late fire can never sweep the real
+        // tmpdir on a slow host either.
+        const realSetTimeout = globalThis.setTimeout;
+        const captured: Array<() => void> = [];
+        let unrefd = 0;
+        globalThis.setTimeout = ((fn: unknown, ms?: unknown, ...rest: unknown[]) =>
+          ms === 0
+            ? ((captured.push(fn as () => void),
+               { unref: () => { unrefd++; } }) as never)
+            : (realSetTimeout as (...a: unknown[]) => unknown)(fn, ms, ...rest)) as unknown as typeof globalThis.setTimeout;
+        let broker: ToolExecBroker;
+        try {
+          broker = new ToolExecBroker({ fence: "off" });
+        } finally {
+          globalThis.setTimeout = realSetTimeout;
         }
-        expect(existsSync(oldExec)).toBe(false); // the deferred janitor lands
+        expect(captured.length).toBe(1); // construction defers exactly one sweep
+        expect(unrefd).toBe(1); // ...unref'd: never a reason the host stays alive
+        expect(existsSync(oldExec)).toBe(true); // ...and off the construction path
+        captured[0]!(); // fire it while TMPDIR still points at the sandbox
+        expect(existsSync(oldExec)).toBe(false); // the janitor's sweep lands
         expect(existsSync(young)).toBe(true);
         await broker.close();
       } finally {

@@ -1527,7 +1527,13 @@ describe("nested_tool_result records and parented question events", () => {
     expect(deriveSessionState(collectDurabilityFacts(crashed))).toBe(SESSION_STATE.INTERRUPTED);
   });
 
-  it("syncSessionFromLog rebuild: closed inner pair, no phantom open call", async () => {
+  // The rebuild forces an index reopen -- the same poisoned -shm leg the
+  // WAL_REOPEN_OK-gated describes ride (bun:sqlite stale -shm remap,
+  // oven-sh/bun#45171 family; hit this ungated test on the 2026-11-24 run).
+  it.skipIf(!WAL_REOPEN_OK)(
+    "syncSessionFromLog rebuild: closed inner pair, no phantom open call" +
+      (WAL_REOPEN_OK ? "" : SKIP_WHY_REOPEN),
+    async () => {
     // The row-rebuild leg (boot reconcile / index loss / rewind all route
     // through here): the same log must rebuild idle with an empty
     // open_calls mirror, while a control log without the inner rows

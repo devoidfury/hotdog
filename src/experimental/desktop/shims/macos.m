@@ -82,6 +82,7 @@
 #import <Security/Security.h>
 #import <WebKit/WebKit.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <objc/message.h> /* the legacy -openURL: msgSend (see openExternal) */
 
 #define URL_MAX 8192
 
@@ -161,13 +162,28 @@ static BOOL urlIsSameOrigin(NSURL *url) {
 
 static void openExternal(NSURL *url) {
   if (!url) return;
-  [[NSWorkspace sharedWorkspace]
-      openURL:url
-      completionHandler:^(BOOL success) {
-        if (!success)
-          fprintf(stderr, "[desktop shim] the system browser refused: %s\n",
-                  (url.absoluteString ?: @"?").UTF8String);
-      }];
+  void (^report)(BOOL) = ^(BOOL success) {
+    if (!success)
+      fprintf(stderr, "[desktop shim] the system browser refused: %s\n",
+              (url.absoluteString ?: @"?").UTF8String);
+  };
+  /* -openURL:completionHandler: is gone from the macOS 26 SDK headers; the
+   * replacement -openURL:configuration:completionHandler: is macOS 12+. The
+   * 11.x fallback rides the legacy synchronous -openURL: through
+   * objc_msgSend, so this compiles even where newer SDKs dropped the
+   * declaration, and runs everywhere in the deployment range. */
+  if (@available(macOS 12.0, *)) {
+    [[NSWorkspace sharedWorkspace] openURL:url
+                             configuration:@{}
+                         completionHandler:report];
+    return;
+  }
+  NSWorkspace *ws = [NSWorkspace sharedWorkspace];
+  if ([ws respondsToSelector:@selector(openURL:)]) {
+    report(((BOOL (*)(id, SEL, id))objc_msgSend)(ws, @selector(openURL:), url));
+  } else {
+    report(NO);
+  }
 }
 
 /* SHA-256 of the leaf DER, openssl-style "AA:BB:..." uppercase -- the same
@@ -175,7 +191,16 @@ static void openExternal(NSURL *url) {
  * fingerprint, so one `openssl x509 -fingerprint -sha256` output works on
  * both platforms, and HOTDOG_DESKTOP_TRUST means the same thing here. */
 static NSString *tlsFingerprint(SecTrustRef trust) {
-  CFArrayRef chain = SecTrustCopyCertificateChain(trust); /* macOS 11+ */
+  /* SecTrustCopyCertificateChain is macOS 12+ while this binary deploys to
+   * 11.3: an unguarded call is a null-symbol crash on 11.x. Only the leaf
+   * is ever read, so the legacy count/index pair covers the fallback. */
+  CFArrayRef chain = NULL;
+  if (@available(macOS 12.0, *)) {
+    chain = SecTrustCopyCertificateChain(trust);
+  } else if (SecTrustGetCertificateCount(trust) > 0) {
+    const void *leafOnly[1] = { SecTrustGetCertificateAtIndex(trust, 0) };
+    chain = CFArrayCreate(NULL, leafOnly, 1, &kCFTypeArrayCallBacks);
+  }
   if (!chain) return nil;
   NSString *fp = nil;
   if (CFArrayGetCount(chain) > 0) {
@@ -322,7 +347,8 @@ static void showFailurePage(NSString *reason) {
 
 /* ── the window's delegate: navigation, downloads, TOFU, failure ───────── */
 
-@interface HotdogDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate>
+@interface HotdogDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate,
+                                       WKDownloadDelegate>
 @property(strong) NSWindow *window;
 @end
 
@@ -417,14 +443,14 @@ static void showFailurePage(NSString *reason) {
   NSURL *url = navigationResponse.response.URL;
   if (!urlIsSameOrigin(url)) {
     decisionHandler(WKNavigationResponsePolicyCancel);
-    if (navigationResponse.isMainFrame) {
+    if (navigationResponse.forMainFrame) {
       fprintf(stderr, "[desktop shim] off-origin response -> system browser: %s\n",
               (url.absoluteString ?: @"?").UTF8String);
       openExternal(url);
     }
     return;
   }
-  if (navigationResponse.canShowMIMEType || !navigationResponse.isMainFrame) {
+  if (navigationResponse.canShowMIMEType || !navigationResponse.forMainFrame) {
     decisionHandler(WKNavigationResponsePolicyAllow);
     return;
   }
@@ -539,11 +565,13 @@ static void showFailurePage(NSString *reason) {
                                                NSURLCredential *_Nullable))completionHandler {
   (void)download;
   NSString *method = challenge.protectionSpace.authenticationMethod;
-  SecTrustRef trust = (__bridge SecTrustRef)challenge.protectionSpace.serverTrust;
-  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !trust) {
+  SecTrustRef _Nullable maybeTrust =
+      (__bridge SecTrustRef _Nullable)challenge.protectionSpace.serverTrust;
+  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !maybeTrust) {
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
     return;
   }
+  SecTrustRef trust = maybeTrust; /* flow-guarded: nonnull past the nil check */
   NSString *where = [self challengeWhere:challenge];
   dispatch_async(dispatch_get_main_queue(), ^{
     if (tofuDecideTrust(trust, where)) {
@@ -555,9 +583,9 @@ static void showFailurePage(NSString *reason) {
 
 - (NSString *)challengeWhere:(NSURLAuthenticationChallenge *)challenge {
   NSString *host = challenge.protectionSpace.host ?: @"(unknown host)";
-  NSNumber *port = challenge.protectionSpace.port;
-  return (port && port.integerValue != 443)
-      ? [NSString stringWithFormat:@"https://%@:%@", host, port]
+  NSInteger port = challenge.protectionSpace.port; /* NSURLProtectionSpace: 0 = unknown */
+  return (port != 0 && port != 443)
+      ? [NSString stringWithFormat:@"https://%@:%ld", host, (long)port]
       : [NSString stringWithFormat:@"https://%@", host];
 }
 
@@ -580,11 +608,13 @@ static void showFailurePage(NSString *reason) {
                                                NSURLCredential *_Nullable))completionHandler {
   (void)webView;
   NSString *method = challenge.protectionSpace.authenticationMethod;
-  SecTrustRef trust = (__bridge SecTrustRef)challenge.protectionSpace.serverTrust;
-  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !trust) {
+  SecTrustRef _Nullable maybeTrust =
+      (__bridge SecTrustRef _Nullable)challenge.protectionSpace.serverTrust;
+  if (![method isEqualToString:NSURLAuthenticationMethodServerTrust] || !maybeTrust) {
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
     return;
   }
+  SecTrustRef trust = maybeTrust; /* flow-guarded: nonnull past the nil check */
   NSString *where = [self challengeWhere:challenge];
   dispatch_async(dispatch_get_main_queue(), ^{
     if (tofuDecideTrust(trust, where)) {

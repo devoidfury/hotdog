@@ -297,22 +297,28 @@ describe("createLauncher rungs (fake probe + fake binaries)", () => {
     handle.close(); // idempotent: the second kill lands on an already-gone child
   });
 
-  it("browser rung refused by the machine: a macOS candidate path that cannot spawn falls to print", async () => {
-    // Deterministic everywhere: planLauncher (darwin posture) picks the
-    // FIRST existing .app candidate, the launcher spawns that absolute path,
-    // and no Linux/dev/CI host can exec /Applications/... -- the refusal
-    // must fall through to print, not throw. (A Mac with Chrome installed
-    // would really launch it; that is the dogfood path, not the CI one.)
-    process.env.CC = "";
-    const launcher = createLauncher({
-      probe: probeOver({
-        platform: "darwin",
-        exists: async (p) => p === BROWSER_CANDIDATES_MACOS[0],
-      }),
-    });
-    const handle = await launcher.open("http://127.0.0.1:5/");
-    expect(handle.kind).toBe("print");
-  });
+  // The fake answers exists() only -- the launcher SPAWNS the absolute
+  // candidate path, so a host that ships Chrome at candidate[0] (GitHub
+  // macOS runners do) really launches it and answers "browser": the
+  // refusal under test cannot exist there, and the honest answer is the
+  // skip. Linux/dev hosts (no /Applications) run it every push.
+  const hostChromeAt0 =
+    BROWSER_CANDIDATES_MACOS[0] !== undefined && existsSync(BROWSER_CANDIDATES_MACOS[0]);
+  it.skipIf(hostChromeAt0)(
+    "browser rung refused by the machine: a macOS candidate path that cannot spawn falls to print" +
+      (hostChromeAt0 ? " [SKIPPED: this host has a browser at the candidate path]" : ""),
+    async () => {
+      process.env.CC = "";
+      const launcher = createLauncher({
+        probe: probeOver({
+          platform: "darwin",
+          exists: async (p) => p === BROWSER_CANDIDATES_MACOS[0],
+        }),
+      });
+      const handle = await launcher.open("http://127.0.0.1:5/");
+      expect(handle.kind).toBe("print");
+    },
+  );
 
   it("print rung: no shim, no browser -> the URL is the output, exited never settles", async () => {
     process.env.CC = "";
@@ -328,9 +334,14 @@ describe("createLauncher rungs (fake probe + fake binaries)", () => {
 });
 
 describe("realProbe fallback (default createLauncher, no fake machine)", () => {
-  // bun's PATH lookup runs on the startup snapshot, so on a host that HAS a
-  // Chromium-family browser this test would really launch it; skip there.
-  const hostHasBrowser = BROWSER_CANDIDATES.some((c) => Bun.which(c));
+  // A host that HAS a Chromium-family browser would really launch one; skip
+  // there. Darwin plans on the ABSOLUTE .app candidates (which() sees PATH
+  // only), and GitHub macOS runners ship Chrome in /Applications -- the
+  // which()-only guard let the 2026-11-24 CI run launch a real browser.
+  const hostHasBrowser =
+    process.platform === "darwin"
+      ? BROWSER_CANDIDATES_MACOS.some((c) => existsSync(c))
+      : BROWSER_CANDIDATES.some((c) => Bun.which(c));
 
   it.skipIf(hostHasBrowser)(
     "doomed CC, no frameworks, no browser on PATH -> plan nothing, fall to print without throwing",

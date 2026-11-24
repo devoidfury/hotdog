@@ -482,6 +482,13 @@ describe("settings categories", () => {
     expect(categoryOf("workflows", row("workflows.enabled"))).toBe("Workflows");
     expect(categoryOf("prompts", row("prompts.displayPrompt"))).toBe("Prompts");
     expect(categoryOf("bash-tool", row("bashTool.env"))).toBe("Bash Tool");
+    // Experimental extension namespaces get real categories too -- their
+    // `*.enabled` toggles must not pile into Other as identical "Enabled"
+    // rows (owner report 2026-11-24: fileWatch.enabled, showMe.enabled).
+    expect(categoryOf("file-watch", row("fileWatch.enabled"))).toBe("File Watch");
+    expect(categoryOf("show-me", row("showMe.enabled"))).toBe("Show Me");
+    expect(categoryOf("codemode", row("codeMode.enabled"))).toBe("Code Mode");
+    expect(categoryOf("agent-browser", row("agentBrowser.allowLoopback"))).toBe("Agent Browser");
     // INDEXED provider paths belong to Providers, not to a per-index bucket.
     expect(categoryOf("providers", row("providers[0].url"))).toBe("Providers");
     expect(categoryOf("providers", row("providers.slow.apiKey"))).toBe("Providers");

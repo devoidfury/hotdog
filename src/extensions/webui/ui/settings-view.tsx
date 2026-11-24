@@ -646,7 +646,8 @@ export function clearProviderFocus(s: SettingsPanelState): SettingsPanelState {
 // General. A file-only unknown whose namespace the map does not know falls
 // into Other. The map below lists the REAL namespaces of the running schema
 // (the top-level CONFIG_SCHEMA containers + every bundled extension's
-// extension.json configSchema keys + the providers passthrough).
+// extension.json configSchema keys + the @experimental extensions' keys +
+// the providers passthrough).
 
 export const GENERAL_CATEGORY = "General";
 export const OTHER_CATEGORY = "Other";
@@ -663,6 +664,13 @@ export const CATEGORY_TITLES: Record<string, string> = {
   workflows: "Workflows",
   prompts: "Prompts",
   bashTool: "Bash Tool",
+  // Experimental extension namespaces (loaded only via @experimental, but
+  // their schema keys are real and their file-only rows still land here,
+  // not in Other -- "Enabled" rows need a home to be identifiable).
+  codeMode: "Code Mode",
+  fileWatch: "File Watch",
+  showMe: "Show Me",
+  agentBrowser: "Agent Browser",
   // Core containers (top-level CONFIG_SCHEMA objects).
   workspace: "Workspace",
   profiles: "Profiles",

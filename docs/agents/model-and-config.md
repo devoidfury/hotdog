@@ -97,6 +97,7 @@ Tool profiles control which tools are available to the agent. Profiles are defin
 - **`group`**: Model-group name (config `modelGroups`) binding task-worker placement to group fanout. Mutually exclusive with `model` (group wins, warned at spawn). Worker-only: session turns ignore it with a warning.
 - **`manager`**: When true, enables manager-specific tools (`metadata.managerOnly` filtering, applied per-request before whitelist/blacklist).
 - **`aspects`**: List of aspect names to include (loaded from `config/aspects/<name>.aspect.md`).
+- **`codeMode`**: Experimental (`@experimental` tier). Opt this profile in to (`true`) or out of (`false`) the codemode extension's global `codeMode.enabled` default. Absent means the global default decides; non-boolean values are ignored.
 
 **Profile Selection Priority**: `--profile` CLI flag > config `profile` > `"default"`
 
@@ -112,6 +113,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 - **`model`**: Override model
 - **`group`**: Model-group name for task-worker fanout (mutually exclusive with `model`; worker-only)
 - **`aspects`**: List of aspect names
+- **`codeMode`**: Opt in/out of codemode (experimental); overrides the global `codeMode.enabled` default for this profile
 - **`manager`**: Enable manager tools
 - **`visible-worker`**: Mark as visible worker profile
 

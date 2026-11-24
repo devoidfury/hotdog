@@ -2,14 +2,18 @@
 // sequence of model<->tool round trips; its `tools.<name>()` calls ride the
 // ordinary host pipeline (gate, logs, caps).
 //
-// The experimental tier IS the opt-in (AGENTS.md): loaded only when the user
-// adds `@experimental` to extensionPaths, and loaded == on -- so there is no
-// config key and no activation state.
+// The experimental tier is the outer opt-in (AGENTS.md): loaded only when the
+// user adds `@experimental` to extensionPaths. Once loaded, enablement is a
+// chain (enablement.ts): the profile's `codeMode` bool beats the global
+// `codeMode.enabled` config default (true), per agent. Registration is
+// unconditional -- the PROVIDER_REQUEST filter and this prompt chunk resolve
+// enablement at each fire, so a profile switch lands on the next request.
 //
 // What lands here: the `codemode` tool (tool.ts) and the head/tail readers
 // (files-tools.ts), the fenced host bridge tool.execute() hands off to
 // (bridge.ts, one instance per loaded extension == per process), the
-// PROVIDER_REQUEST shadow handler (shadow.ts), and this system-prompt chunk.
+// PROVIDER_REQUEST gate + shadow handler (shadow.ts), and this system-prompt
+// chunk.
 
 import { HOOKS } from "@core/hooks.ts";
 import { formatError } from "@core/error.ts";
@@ -17,6 +21,7 @@ import { logger } from "@utils/logger.ts";
 import type { ToolDef } from "@core/extensions/tool-registry.ts";
 import type { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { shadowedNames } from "./catalog.ts";
+import { codeModeEnabledFor } from "./enablement.ts";
 import { createHeadTool, createTailTool, HEAD_TOOL_NAME, TAIL_TOOL_NAME } from "./files-tools.ts";
 import { createShadowHandler } from "./shadow.ts";
 import { CODEMODE_TOOL_NAME, CodeModeTool } from "./tool.ts";
@@ -74,9 +79,11 @@ export function create(core: CoreContext): ExtensionInstance {
        * the same trigger shadow.ts applies to the wire: an agent whose
        * profile filtered codemode out is never shadowed, so it gets no
        * inventory claim. With no agent handle (test hosts) the rule stands
-       * on its own without an inventory.
+       * on its own without an inventory. No chunk at all for an agent
+       * codemode is disabled for (profile `codeMode` / `codeMode.enabled`).
        */
       [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
+        if (!codeModeEnabledFor(core, agent)) return undefined;
         let shadowed: string[] | null = null;
         const getDefs = (
           agent as { getToolDefs?: () => Promise<ToolDef[]> } | undefined

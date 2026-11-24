@@ -1197,6 +1197,7 @@ The `profiles` key allows you to define profile configurations directly in `defa
 | `whitelistTools` | `array` | `null` | If set, only these tools are available. `null` means no restriction. |
 | `manager` | `boolean` | `false` | Whether this profile enables subagent management. |
 | `aspects` | `array` | `[]` | Aspect names to activate. |
+| `codeMode` | `boolean` | — | Opt this profile in to (`true`) or out of (`false`) the codemode extension's global `codeMode.enabled` default. Experimental (`@experimental`); absent means the global default decides. Non-boolean values are ignored. |
 
 ### Example Profiles Configuration
 
@@ -1304,6 +1305,18 @@ Extensions register their own configuration namespaces. Each extension's config 
 
 ```json
 { "agentBrowser": { "allowLoopback": true } }
+```
+
+### `codeMode`
+
+[Codemode](../src/experimental/codemode) — **Experimental**: not loaded by default; add `@experimental` to `extensionPaths` (keeping `@extensions` too — the setting replaces the default). The `codemode` tool runs a model-authored JavaScript program whose `tools.<name>()` calls ride the ordinary tool pipeline; while enabled it shadows the direct tool set (keep-direct tools exempt). The caps are code constants, not config keys — see the extension README.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Global default for the codemode surface (tool, shadow, prompt chunk). A profile's `codeMode` bool overrides it per agent, in both directions: `codeMode: false` opts one profile out of an on-by-default session, `codeMode: true` opts one profile back into a session with the global default off. Off per agent means the `codemode`/`head`/`tail` defs leave the wire and no prompt chunk renders; resolved per request, so a profile switch lands immediately. |
+
+```json
+{ "codeMode": { "enabled": false } }
 ```
 
 ### `handoffTool`

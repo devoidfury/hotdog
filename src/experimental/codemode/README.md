@@ -14,13 +14,28 @@ adds `@experimental` to `extensionPaths` (which **replaces** the default
 { "extensionPaths": ["@extensions", "@experimental"] }
 ```
 
-Loading *is* the opt-in: no `enabled` key, no activation state, **no config
-key of any kind** (the caps are code constants in `options.ts`, absent from
-`docs/config-reference.md`). Unloaded means byte-identical tool defs.
+Loading is the outer opt-in; **enablement** is a chain: a profile's
+`codeMode` bool (front matter / in-config profile) beats the global
+`codeMode.enabled` config default (**true**), per agent. `enabled: false`
+with no opting-in profile means the `codemode`/`head`/`tail` defs leave the
+wire, no prompt chunk renders, and the shadow never fires -- per-request, so
+a profile switch lands on the next turn. Non-boolean profile values are
+ignored (a typo'd `codeMode: "yes"` never reads as false). Unloaded means
+byte-identical tool defs.
+
+```json
+{ "codeMode": { "enabled": false } }
+```
+```markdown
+---
+codeMode: true
+---
+```
 
 Three tools register: `codemode` (the runner) and `head` / `tail` (below). A
 `SYSTEM_PROMPT_BUILD` chunk carries the usage guidance and the shadow
-inventory; nothing renders when the extension is not loaded.
+inventory; nothing renders for a disabled agent or when the extension is not
+loaded.
 
 ## The envelope
 

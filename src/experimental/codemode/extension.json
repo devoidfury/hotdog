@@ -2,5 +2,22 @@
   "name": "codemode",
   "provides": [],
   "loadOrder": 10,
-  "description": "codemode (experimental, full-tilt): run a model-authored JavaScript program whose tools.<name>() calls ride the ordinary tool pipeline (gate, logs, caps); while loaded, shadows the direct tool set (keep-direct list exempt), with in-script discovery (searchTools/describeTool) and head/tail utilities. Opt-in tier: loaded == on, no config keys."
+  "description": "codemode (experimental, full-tilt): run a model-authored JavaScript program whose tools.<name>() calls ride the ordinary tool pipeline (gate, logs, caps); while enabled, shadows the direct tool set (keep-direct list exempt), with in-script discovery (searchTools/describeTool) and head/tail utilities. Opt-in tier: add @experimental to extensionPaths; then codeMode.enabled is the global default (on) and a profile's codeMode bool overrides it per agent.",
+  "configSchema": {
+    "codeMode": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Global default for the codemode surface (tool, shadow, prompt chunk); a profile's codeMode bool overrides it per agent"
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "codeMode" },
+        { "default": {} }
+      ]
+    }
+  }
 }

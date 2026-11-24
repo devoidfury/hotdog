@@ -98,14 +98,18 @@ describe("codemode manifest", () => {
     expect(proc.stdout.toString()).toContain("No problems found.");
   });
 
-  it("discovers through the kit with an empty provides and NO configSchema", async () => {
+  it("discovers through the kit with an empty provides and the codeMode configSchema", async () => {
     const discovered = await discoverExtensions([EXT_DIR]);
     expect(discovered).toHaveLength(1);
     const meta = discovered[0]!;
     expect(meta.name).toBe("codemode");
     expect(meta.manifestError).toBeUndefined();
     expect(meta.provides).toEqual([]);
-    expect(meta.configSchema).toBeNull();
+    // codeMode.enabled (global default true): the profile `codeMode` bool
+    // overrides it per agent (enablement.ts).
+    expect(Object.keys((meta.configSchema ?? {}) as Record<string, unknown>)).toEqual([
+      "codeMode",
+    ]);
     expect(meta.loadOrder).toBe(10);
   });
 });

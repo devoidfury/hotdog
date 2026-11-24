@@ -355,8 +355,10 @@ function formatStatusTokens(n: number): string {
   return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
 }
 
-/** Per-call wall time (mirrors formatCallDuration: a 4.2s call is not a 4s call). */
-function formatStatusCall(ms: number): string {
+/** Per-call wall time (mirrors formatCallDuration: a 4.2s call is not a 4s call).
+ *  Exported for the nested inner-call rows (nested-rows.ts) -- one duration
+ *  vocabulary for the whole terminal surface. */
+export function formatStatusCall(ms: number): string {
   if (ms < 10_000) return `${(ms / 1_000).toFixed(1)}s`;
   return formatStatusWorked(ms);
 }
@@ -373,8 +375,10 @@ function formatStatusWorked(ms: number): string {
 }
 
 /** The live elapsed timer: zero-padded mm:ss, h:mm:ss past an hour. FLOOR,
- *  never round -- a turn that has not crossed a second never shows it. */
-function formatStatusElapsed(ms: number): string {
+ *  never round -- a turn that has not crossed a second never shows it.
+ *  Exported for the nested inner-call rows' live tail (same machinery,
+ *  painted at frame time from the same reading basis). */
+export function formatStatusElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1_000));
   const s = String(total % 60).padStart(2, "0");
   const m = String(Math.floor(total / 60) % 60).padStart(2, "0");
@@ -520,6 +524,13 @@ export class OutputBridge {
   #chipText: string | null = null;
   /** In-flight tool-call rows by wire index (streaming-call display). */
   #inflightCalls = new Map<number, string>();
+  /**
+   * The nested inner-call row source (nested-rows.ts):
+   * polled at paint time, so open rows' elapsed tails advance on THIS
+   * bridge's 1s working tick -- no second timer anywhere. Null when no view
+   * is wired (every non-codemode session, and the whole legacy path).
+   */
+  #nestedRows: (() => string[] | null) | null = null;
   /**
    * True once the live streaming attempt has put bytes on screen via a
    * streaming event (the event glue calls markAttemptOutput on every chunk /
@@ -861,6 +872,33 @@ export class OutputBridge {
     if (this.#inflightCalls.size === 0) return;
     this.#inflightCalls.clear();
     this.#repaint();
+  }
+
+  /**
+   * The nested inner-call tree (split mode, parented tool events): a paint-
+   * time source returning the current rows or null for nothing to draw.
+   * Rows compose between the in-flight rows and the status row; the source
+   * is re-read on EVERY paint, which is what lets open rows' elapsed tails
+   * ride the working tick instead of owning a timer. Policy (what renders,
+   * when to commit) lives in nested-rows.ts; the bridge only wraps and draws.
+   */
+  setNestedRows(source: (() => string[] | null) | null): void {
+    this.#nestedRows = source;
+    this.#repaint();
+  }
+
+  /** The view's repaint seam: recompose only while a source is installed. */
+  refreshNestedRows(): void {
+    if (this.#nestedRows !== null) this.#repaint();
+  }
+
+  /** Nested rows composed for the frame (null source / empty tree = none). */
+  #nestedFrameRows(width: number): string[] {
+    const source = this.#nestedRows;
+    if (!source) return [];
+    const rows: string[] = [];
+    for (const text of source() ?? []) rows.push(...wrapToWidth(text, width));
+    return rows;
   }
 
   /**
@@ -1217,13 +1255,16 @@ export class OutputBridge {
     const status = statusText ? styleStatusRow(statusText, width, this.#statusPalette) : [];
     const chip = this.#chipText;
     const inflight = this.#inflightRows(width);
+    const nested = this.#nestedFrameRows(width);
     const popup = editor.popupRows(width);
     const chrome =
-      stream.length + inflight.length + popup.length + status.length + (chip ? 1 : 0);
+      stream.length + inflight.length + nested.length + popup.length + status.length +
+      (chip ? 1 : 0);
     const block = editor.view(width, Math.max(1, this.opts.terminal.rows - chrome));
     const rows = [
       ...stream,
       ...inflight,
+      ...nested,
       ...status,
       ...popup,
       ...block.rows,
@@ -1231,7 +1272,8 @@ export class OutputBridge {
     ];
     this.#lastBlockRows = block.rows;
     this.#setFrame(rows, {
-      row: stream.length + inflight.length + status.length + popup.length + block.cursorRow,
+      row: stream.length + inflight.length + nested.length + status.length + popup.length +
+        block.cursorRow,
       col: block.cursorCol,
     });
   }
@@ -1239,9 +1281,10 @@ export class OutputBridge {
   #paintFrame(rows: string[]): void {
     const stream = this.#streamingRows(this.opts.terminal.columns);
     const inflight = this.#inflightRows(this.opts.terminal.columns);
+    const nested = this.#nestedFrameRows(this.opts.terminal.columns);
     const capture = this.capture.cursor();
-    this.#setFrame([...stream, ...inflight, ...rows], {
-      row: capture.row + stream.length + inflight.length,
+    this.#setFrame([...stream, ...inflight, ...nested, ...rows], {
+      row: capture.row + stream.length + inflight.length + nested.length,
       col: capture.col,
     });
   }

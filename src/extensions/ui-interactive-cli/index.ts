@@ -36,6 +36,7 @@ import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
 import { DictationInterceptor, DictationCore, type CaptureFactory } from "./dictation.ts";
 import { EditorPasteMarkers } from "./paste-markers.ts";
 import { mountSplitRenderer, type OutputBridge } from "./split-bridge.ts";
+import { NestedRowsView, attachNestedRows, parentOf } from "./nested-rows.ts";
 import { StdinKeySource, type KeySource } from "@utils/cli/renderer/index.ts";
 import { resolveSttTarget } from "@core/config/stt.ts";
 import {
@@ -692,7 +693,26 @@ export async function runInteractiveSession(
           statusPalette: palette,
         });
   uiBridge = bridge;
-  if (bridge) {
+  // The nested inner-call view: tool_call/tool_result events carrying a
+  // parentToolCallId (the nested dispatcher's attribution) render as indented
+  // ↳ rows under the open parent row instead of top-level
+  // rows. Mounted ONLY in split mode -- the legacy path keeps rendering
+  // those events exactly as before (byte-identical), and an unparented event
+  // on either path never reaches this view's logic at all.
+  const nested = bridge
+    ? new NestedRowsView({
+        now: () => Date.now(),
+        repaint: () => bridge.refreshNestedRows(),
+        // Orphan history rows ride the sink's own newline/mode machinery:
+        // the leading "\n" closes whatever row the pipeline left open.
+        commit: (rows) => {
+          if (rows.length > 0) sink._processContent(`\n${rows.join("\n")}`);
+        },
+      })
+    : null;
+  if (bridge && nested) {
+    bridge.setNestedRows(() => nested.snapshot());
+    attachNestedRows(sink, nested);
     sink.logRouter = (message: string) => bridge.commitText(message + "\n");
     // Markdown prose highlighting (split renderer only, default-on; colors-off
     // stays on the plain byte path). The sink stops washing Default-mode text
@@ -1087,6 +1107,9 @@ export async function runInteractiveSession(
             if (ev.value === false) {
               bridge.clearInflightCalls();
               bridge.endAttemptOutput();
+              // Same dead-stream rule for the nested tree: nothing will
+              // answer an open inner row after the turn stops.
+              nested?.clearAll();
             }
           } else if (ev.key === "model") {
             pricedModel = String(ev.value ?? "");
@@ -1118,6 +1141,10 @@ export async function runInteractiveSession(
           bridge.markAttemptOutput();
           return;
         case OUTPUT_EVENT.TOOL_CALL:
+          // A PARENTED call is inner activity: its ↳ rows are the nested
+          // view's state, not frame chrome -- the in-flight row belongs to
+          // the model's own streaming and must survive inner events.
+          if (parentOf(ev) !== null) return;
           // The committed line is about to print through the sink; the
           // in-flight row would duplicate it -- clear first (idempotent).
           bridge.clearInflightCalls();
@@ -1126,6 +1153,9 @@ export async function runInteractiveSession(
           bridge.endAttemptOutput();
           return;
         case OUTPUT_EVENT.TOOL_RESULT:
+          // Parented answers stay the nested view's business too (the sink
+          // wrap commits their rows; nothing here to settle).
+          if (parentOf(ev) !== null) return;
           // Covers the paths that answer a call without ever emitting
           // TOOL_CALL (invalid name, unavailable tool). Idempotent after
           // the TOOL_CALL clear.

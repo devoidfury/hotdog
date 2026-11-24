@@ -60,6 +60,15 @@ export interface ApprovalCall {
    * itself is the target an allow rule must name.
    */
   bailOnToolAllow?: boolean;
+  /**
+   * Session-memo identity override: when set, the "allow for session" memo
+   * keys on this canonical JSON of the WHOLE argument envelope instead of
+   * the matched-target fold, because the consent covered the entire
+   * execution envelope, not just the rule-matchable target -- a same-payload
+   * call under a changed envelope is a new ask. Canonical (top-level keys
+   * sorted): two spellings of one envelope key as one entry.
+   */
+  envelopeKey?: string;
 }
 
 export interface ApprovalRule {

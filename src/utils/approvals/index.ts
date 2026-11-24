@@ -2,7 +2,8 @@
 //
 // `extractTargets` knows three things and nothing else:
 //   1. bash, whose command line goes through ./bash.ts (triage, not parsing);
-//   2. a handful of hotdog tools whose interesting argument has a name (`fetch.url`, `web_search.query`);
+//   2. a handful of hotdog tools whose interesting argument has a name (`fetch.url`, `web_search.query`),
+//      and the two model-authored-code cases whose script IS the target (`agent_browser` evaluate, `codemode`);
 //   3. the path-shaped-parameter heuristic -- any tool with `path`, `paths`, `file_path`, `filePath`, `dir` or `directory` argument is a file tool,
 //      makes some MCP/extension file tools recognized too.
 //
@@ -41,6 +42,16 @@ const MAX_LISTED_TARGETS = 6;
 
 function isPathLikeParam(name: string): boolean {
   return PATH_PARAM_NAMES.has(name);
+}
+
+/** Canonical JSON of the call's argument envelope (top-level keys sorted --
+ *  the envelope that carries an envelopeKey is flat, so nested key order
+ *  cannot vary). Same envelope, one memo entry; any envelope change, a new
+ *  ask. */
+function canonicalEnvelope(args: Record<string, unknown>): string {
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(args).sort()) sorted[key] = args[key];
+  return JSON.stringify(sorted);
 }
 
 /** Extra tools declared in userGate.tools: params to treat as targets. */
@@ -105,6 +116,34 @@ export function extractTargets(
       call.targets.push({ param: "script", value: args.script });
     } else {
       call.bailReason = "evaluate was called with no script string to inspect";
+    }
+    return call;
+  }
+
+  // The `codemode` case mirrors evaluate (model-authored code is the target,
+  // `codemode.script=...` is the only rule shape that admits it), with one
+  // difference: the consent covers the whole execution ENVELOPE,
+  // so the session memo keys on canonical JSON of the whole argument object
+  // (`code` + `timeout_ms`/`max_output_chars` as requested). A same-script
+  // call with a changed deadline or output cap is a new ask -- any envelope
+  // change re-prompts once. (The tool clamps over-ceiling options down at run
+  // time; keying the REQUESTED envelope is strictly stricter than keying the
+  // executed one, and this layer must not reach into the runner's ceilings.)
+  // Display stays a truncated echo; the full text lives in the memo key and
+  // the rule match, so two scripts sharing a visible prefix are separate
+  // asks with separate grants.
+  if (toolName === "codemode") {
+    const call: ApprovalCall = {
+      tool: toolName,
+      recognized: true,
+      targets: [],
+      bailOnToolAllow: true,
+      envelopeKey: canonicalEnvelope(args),
+    };
+    if (typeof args.code === "string" && args.code !== "") {
+      call.targets.push({ param: "script", value: args.code });
+    } else {
+      call.bailReason = "codemode was called with no code string to inspect";
     }
     return call;
   }

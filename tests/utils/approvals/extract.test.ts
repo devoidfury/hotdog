@@ -5,7 +5,7 @@
 import { describe, it, expect } from "bun:test";
 import { Workspace } from "@utils/workspace.ts";
 import { extractTargets, suggestRuleLine } from "@utils/approvals/index.ts";
-import { compileApprovalRules } from "@utils/approvals/rules.ts";
+import { compileApprovalRules, decide } from "@utils/approvals/rules.ts";
 
 const ws = new Workspace("/ws");
 const rules = compileApprovalRules({ default: "ask" });
@@ -122,5 +122,53 @@ describe("agent_browser evaluate (model-authored page JS)", () => {
   it("the persistence hint names the script rule that would actually admit it", () => {
     const call = extract("agent_browser", { action: "evaluate", script: "document.title" });
     expect(suggestRuleLine(call)).toContain("agent_browser.script=document.title");
+  });
+});
+
+describe("codemode (whole-script gate, envelope-keyed memo)", () => {
+  it("makes the script the target and flags the call so a tool-level allow cannot admit it", () => {
+    const call = extract("codemode", { code: "return await tools.read({path:'a'})" });
+    expect(call.recognized).toBe(true);
+    expect(call.bailOnToolAllow).toBe(true);
+    expect(call.targets).toEqual([{ param: "script", value: "return await tools.read({path:'a'})" }]);
+    expect(call.bailReason).toBeUndefined();
+  });
+
+  it("bails when the call carries no code string to inspect", () => {
+    const call = extract("codemode", { timeout_ms: 5000 });
+    expect(call.bailOnToolAllow).toBe(true);
+    expect(call.targets).toEqual([]);
+    expect(call.bailReason).toContain("no code string");
+  });
+
+  it("the persistence hint names the script rule that would actually admit it", () => {
+    const call = extract("codemode", { code: "return 1" });
+    expect(suggestRuleLine(call)).toContain("codemode.script=return 1");
+  });
+
+  it("keys the memo on the WHOLE envelope: options change the key, key order does not", () => {
+    const base = extract("codemode", { code: "return 1" });
+    const longer = extract("codemode", { code: "return 1", timeout_ms: 60000 });
+    const biggerOut = extract("codemode", { code: "return 1", max_output_chars: 100 });
+    const reordered = extract("codemode", { timeout_ms: 60000, code: "return 1" });
+    expect(base.envelopeKey).toBeDefined();
+    expect(longer.envelopeKey).not.toBe(base.envelopeKey);
+    expect(biggerOut.envelopeKey).not.toBe(base.envelopeKey);
+    // Canonical: one envelope, one key, whatever spelling order it arrived in.
+    expect(reordered.envelopeKey).toBe(longer.envelopeKey);
+    // A near-identical script is a different key (and a different ask).
+    const near = extract("codemode", { code: "return 2" });
+    expect(near.envelopeKey).not.toBe(base.envelopeKey);
+  });
+
+  it("an explicit script rule admits under the allowlist default; a tool-level allow does not", () => {
+    const onlyTool = compileApprovalRules({ default: "deny", allow: ["codemode"] });
+    const call = extract("codemode", { code: "return 1" });
+    expect(decide(call, onlyTool).verdict).toBe("deny");
+    const withScript = compileApprovalRules({ default: "deny", allow: ["codemode.script=return 1"] });
+    expect(decide(call, withScript).verdict).toBe("allow");
+    // Permissive default is not consent either (bailOnToolAllow bails past it).
+    const permissive = compileApprovalRules({ default: "allow", allow: ["codemode"] });
+    expect(decide(call, permissive).verdict).toBe("ask");
   });
 });

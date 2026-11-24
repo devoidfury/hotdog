@@ -429,6 +429,8 @@ describe("codemode description budget pass (B5, §5 final shape)", () => {
     expect(desc).toContain("`console.log(...)`");
     expect(desc).toContain("`exit()`");
     expect(desc).toContain("`store(key, value)` / `load(key)`");
+    // callsRemaining() + the cap it reports (plan batches up front).
+    expect(desc).toContain("`callsRemaining()` (tool calls left of the 255-per-script cap)");
     // Calls apply as dispatched (the batch is not atomic): one sentence, no
     // new promises.
     expect(desc).toContain("a mid-script failure does not roll back");

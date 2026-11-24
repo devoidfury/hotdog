@@ -9,7 +9,8 @@
 //
 // The script executes as the body of an async function (AsyncFunction):
 // top-level `await` and `return` work. Globals handed in as parameters:
-// tools, searchTools, describeTool, text, exit, store, load, console.
+// tools, searchTools, describeTool, text, exit, store, load, callsRemaining,
+// console.
 
 import { formatError } from "@core/error.ts";
 import { format } from "node:util";
@@ -168,6 +169,11 @@ async function main(): Promise<void> {
   const run = await runFrame;
   if (run.calls > 0) callsCap = run.calls;
 
+  // Budget observable from the script: calls left against the cap. A call
+  // charges at call time (in-flight counts), meta/store/load frames never do;
+  // past the cap the floor is 0, never negative.
+  const callsRemaining = (): number => Math.max(0, callsCap - callsUsed);
+
   // The callable table: one async fn per name from the run frame, enumerable
   // without a query frame. The name list is built host-side and never
   // contains `codemode` -- the ban is structural, not a runtime check. Null-
@@ -179,7 +185,12 @@ async function main(): Promise<void> {
     tools[name] = async (args?: unknown): Promise<string> => {
       callsUsed += 1;
       if (callsUsed > callsCap) {
-        throw new Error(`inner call limit reached (${callsCap} per script)`);
+        // The failing attempt never dispatched; caught-and-retried attempts
+        // must not fake an over-cap applied count.
+        const applied = Math.min(callsUsed - 1, callsCap);
+        throw new Error(
+          `inner call limit reached (${applied} applied of ${callsCap} per script)`,
+        );
       }
       const callFrame: CallFrame = { t: "call", id: nextId++, name, args };
       const payload = await sendRequest(callFrame);
@@ -277,10 +288,21 @@ async function main(): Promise<void> {
       "exit",
       "store",
       "load",
+      "callsRemaining",
       "console",
       run.src,
     );
-    const value = await fn(tools, searchTools, describeTool, text, exit, store, load, outConsole);
+    const value = await fn(
+      tools,
+      searchTools,
+      describeTool,
+      text,
+      exit,
+      store,
+      load,
+      callsRemaining,
+      outConsole,
+    );
     done = { t: "done", ok: true, value: value === undefined ? null : value };
   } catch (e) {
     done =

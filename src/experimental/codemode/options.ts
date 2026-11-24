@@ -10,7 +10,7 @@ export const WALL_DEFAULT_MS = 60_000;
 export const WALL_CEILING_MS = 300_000;
 
 /** Inner tool calls per script; not parameter-tunable. */
-export const MAX_INNER_CALLS = 64;
+export const MAX_INNER_CALLS = 255;
 
 /** Script-output characters kept (head + tail keep); max_output_chars can
  *  only lower it -- default and ceiling coincide. */
@@ -44,7 +44,7 @@ export const STORE_KEY_MAX_BYTES = 1024;
 export const STORE_MAX_ENTRIES = 4096;
 
 /** Per-script in-flight inner dispatch clamp: keeps the gate queue sane --
- *  overlap is allowed, a 64-way fan-out at the gate is not. */
+ *  overlap is allowed, a 255-way fan-out at the gate is not. */
 export const INNER_CALL_CONCURRENCY = 4;
 
 /** searchTools default result count: a result list feeds a script, not a

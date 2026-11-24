@@ -346,7 +346,7 @@ describe("meta ops through the real bridge (§3.8 + §4.3)", () => {
     const outcome = await bridge.run({
       code: [
         "let over = '';",
-        "for (let i = 0; i < 64; i++) { await tools.echo({ i }); }",
+        `for (let i = 0; i < ${MAX_INNER_CALLS}; i++) { await tools.echo({ i }); }`,
         "const found = await searchTools('echo');", // meta after the budget is spent
         "try { await tools.echo({ over: 1 }); } catch (e) { over = e.message; }",
         "return JSON.stringify({ n: found.length, over });",
@@ -358,7 +358,7 @@ describe("meta ops through the real bridge (§3.8 + §4.3)", () => {
     });
     expect(outcome.error).toBeNull();
     const value = JSON.parse(String(outcome.value)) as { n: number; over: string };
-    expect(value.n).toBe(1); // searchTools answers fine at 64/64 calls: no charge
+    expect(value.n).toBe(1); // searchTools answers fine at a spent budget: no charge
     expect(value.over).toContain("inner call limit reached");
     expect(seamCalls).toBe(MAX_INNER_CALLS);
     expect(outcome.digest.filter((d) => d.kind === "call")).toHaveLength(MAX_INNER_CALLS);

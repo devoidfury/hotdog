@@ -305,6 +305,44 @@ describe("codemode bridge dispatch (B3 §3.4)", () => {
     expect(outcome.digest).toHaveLength(MAX_INNER_CALLS);
   });
 
+  it("callsRemaining(): full when unused, charges at call time, floors at 0; the cap error names applied-vs-limit", async () => {
+    const state = freshState();
+    const outcome = await bridge.run({
+      code: [
+        "const seen = [callsRemaining()];", // full budget, nothing spent
+        "await tools.echo({ msg: 1 });",
+        "seen.push(callsRemaining());", // one less
+        "const inflight = tools.echo({ msg: 2 });", // in-flight counts immediately
+        "seen.push(callsRemaining());",
+        "await inflight;",
+        `for (let i = 0; i < ${MAX_INNER_CALLS} - 2; i++) await tools.echo({ i });`,
+        "seen.push(callsRemaining());", // spent exactly
+        "let over = '';",
+        "try { await tools.echo({ over: 1 }); } catch (e) { over = e.message; }",
+        "seen.push(callsRemaining());", // floored at 0, never negative
+        "return JSON.stringify({ seen, over });",
+      ].join("\n"),
+      toolNames: ["echo"],
+      timeoutMs: 30_000,
+      dispatch: makeSeam(state),
+    });
+    expect(outcome.error).toBeNull();
+    const got = JSON.parse(String(outcome.value)) as { seen: number[]; over: string };
+    expect(got.seen).toEqual([
+      MAX_INNER_CALLS,
+      MAX_INNER_CALLS - 1,
+      MAX_INNER_CALLS - 2,
+      0,
+      0,
+    ]);
+    // The hard limit still fires, and the message counts applied vs limit.
+    expect(got.over).toContain("inner call limit reached");
+    expect(got.over).toContain(`${MAX_INNER_CALLS} applied of ${MAX_INNER_CALLS} per script`);
+    // The over-cap attempt never reached the pipeline.
+    expect(state.calls).toHaveLength(MAX_INNER_CALLS);
+    expect(outcome.digest).toHaveLength(MAX_INNER_CALLS);
+  });
+
   it("a raw-frame-forging child stays inside the cap AND the callable table", async () => {
     const state = freshState();
     // process.stdout is ambient in the child realm, so raw call frames
@@ -313,7 +351,7 @@ describe("codemode bridge dispatch (B3 §3.4)", () => {
     const outcome = await bridge.run({
       code: [
         "const w = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
-        "for (let i = 0; i < 70; i++) w({ t: 'call', id: 5000 + i, name: 'echo', args: { i } });",
+        `for (let i = 0; i < ${MAX_INNER_CALLS + 6}; i++) w({ t: 'call', id: 5000 + i, name: 'echo', args: { i } });`,
         "w({ t: 'call', id: 6000, name: 'codemode', args: {} });",
         "return 'flooded';",
       ].join("\n"),

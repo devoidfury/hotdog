@@ -33,6 +33,7 @@ import {
   DIGEST_ARGS_TOTAL_MAX_CHARS,
   DIGEST_ERROR_MAX_CHARS,
   DIGEST_MAX_ROWS,
+  MAX_INNER_CALLS,
   OUTPUT_KEEP_CHARS,
   WALL_CEILING_MS,
   WALL_DEFAULT_MS,
@@ -167,8 +168,9 @@ function buildDescription(domainIndex: string): string {
     "(resolves to a string; rejects on failure), `searchTools(query)` and " +
     "`describeTool(name)` for detail on demand, `text(v)`, `console.log(...)`, " +
     "`exit()`, `store(key, value)` / `load(key)` (JSON values; writes commit " +
-    "only on script success). Inner calls apply as dispatched: a mid-script " +
-    "failure does not roll back the calls that already ran. Options " +
+    "only on script success), `callsRemaining()` (tool calls left of the " +
+    `${MAX_INNER_CALLS}-per-script cap). Inner calls apply as dispatched: a ` +
+    "mid-script failure does not roll back the calls that already ran. Options " +
     "`timeout_ms` and `max_output_chars` tighten the host defaults; values " +
     "above the host ceilings are clamped down, never loosened. " + domainIndex
   );

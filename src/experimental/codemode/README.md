@@ -51,6 +51,7 @@ script with a different `timeout_ms` is a fresh ask.
 | `return <value>` | The script's final value, rendered into the output tail. |
 | `exit()` | End the run early (success). |
 | `store(key, value)` / `load(key)` | JSON values in the run store; writes **commit only on script success**. Quotas below. |
+| `callsRemaining()` | Tool calls left against the 255-per-script cap: full when unused, charges at call time (in-flight counts, meta/store/load never charge), floors at 0. Plan batches up front instead of discovering the cap mid-run. |
 
 No `image()`, no `models.*`: inner-call **images are dropped** with the
 visible note `[image from read omitted: not supported inside codemode]` --
@@ -61,11 +62,11 @@ a text bridge in v1.
 | Cap | Value | Notes |
 |---|---|---|
 | Wall time | 60 s default / 300 s ceiling | `timeout_ms` may lower, ceiling clamps down. |
-| Inner tool calls | 64 per script | Not parameter-tunable; exceeding **errors the call**, not silently. |
+| Inner tool calls | 255 per script | Not parameter-tunable; exceeding **errors the call**, not silently (the error names applied-vs-limit; applied calls are not undone). `callsRemaining()` reports the budget from inside the script. |
 | Script output | 40 000 chars kept / 16 MiB streamed / 100 000 items | Kept = head + tail around one elision marker naming the run journal that holds the full bytes; streamed past the hard caps the **child is killed** (the host keeps all output until the script ends, so the child enforces). |
 | NDJSON frame | 1 MiB both directions | A quarter of the exec-wire bound `MAX_FRAME_BYTES` (4 000 000); an oversize frame kills the child with a protocol error. |
 | Live children | 2 per process | The third waits FIFO 60 s, then errors "all runners busy". |
-| Inner concurrency | 4 in-flight dispatches per script | Overlap (`Promise.all`) is allowed; a 64-way fan-out at the gate is not. |
+| Inner concurrency | 4 in-flight dispatches per script | Overlap (`Promise.all`) is allowed; a 255-way fan-out at the gate is not. |
 | `store` | 256 KiB/value, 1 MiB total, 1 KiB key, 4096 entries | JSON only; commit-on-success semantics. |
 | `searchTools` limit | default 8 | Explicit limits below 1 or non-finite fall back to 8. |
 | head/tail window | 64 KiB chunks, 8 MiB total scan | See the head/tail section. |

@@ -1,0 +1,15 @@
+{
+  "id": "003-migrate-bulk",
+  "prompt": "For every file in the directory data/, create a file of the same name under out/ whose content is the original text converted to UPPERCASE. Do not modify the originals. Then write manifest.txt in the current directory listing the migrated file names, one per line, sorted alphabetically.",
+  "fixtures": "fixture-migrate",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "file_match", "path": "out/notes.txt", "pattern": "^BRING BEER\\s*$" },
+    { "type": "file_match", "path": "out/todo.md", "pattern": "^FIX THE GRILL\\s*$" },
+    { "type": "file_match", "path": "out/log2.csv", "pattern": "^ID,NAME\\n2,BRAT\\s*$" },
+    { "type": "command", "cmd": "for f in notes.txt todo.md log1.csv log2.csv misc.conf; do grep -q '[a-z]' \"out/$f\" && exit 1; done; exit 0" },
+    { "type": "command", "cmd": "grep -c . manifest.txt | grep -qx 5" },
+    { "type": "command", "cmd": "LC_ALL=C diff <(LC_ALL=C sort manifest.txt) manifest.txt" },
+    { "type": "command", "cmd": "grep -q 'bring beer' data/notes.txt" }
+  ]
+}

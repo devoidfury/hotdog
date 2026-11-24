@@ -1,0 +1,3 @@
+{
+  "extensionPaths": ["@extensions", "@experimental"]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "001-line-tally",
+  "prompt": "The directory logs/ holds run artifacts. For every file in logs/ whose name ends in .log, write a line `<filename>: <line-count>` to a file named summary.txt in the current directory, sorted by filename, and end it with a line `TOTAL: <sum of the counted lines>`. Files not ending in .log must be neither counted nor mentioned. Example line shape: `delta.log: 9`.",
+  "fixtures": "fixture-tally",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "file_exists", "path": "summary.txt" },
+    { "type": "file_match", "path": "summary.txt", "pattern": "^alpha\\.log: 7$", "flags": "m" },
+    { "type": "file_match", "path": "summary.txt", "pattern": "^beta\\.log: 12$", "flags": "m" },
+    { "type": "file_match", "path": "summary.txt", "pattern": "^gamma\\.log: 3$", "flags": "m" },
+    { "type": "file_match", "path": "summary.txt", "pattern": "^TOTAL: 22$", "flags": "m" },
+    { "type": "command", "cmd": "grep -c . summary.txt | grep -qx 4" },
+    { "type": "command", "cmd": "! grep -q scratch summary.txt" }
+  ]
+}

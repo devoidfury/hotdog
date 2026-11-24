@@ -1,0 +1,10 @@
+{
+  "id": "004-shadow-habit",
+  "prompt": "Compute the total size in bytes of every file under data/ (all depths) and write that number to total.txt as the file's only content (a bare integer, no commas, no units). Use the bash tool for the computation.",
+  "fixtures": "fixture-habit",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "file_exists", "path": "total.txt" },
+    { "type": "file_match", "path": "total.txt", "pattern": "^25\\s*$" }
+  ]
+}

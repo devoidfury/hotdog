@@ -89,10 +89,17 @@ Every test file in this directory, one line each:
 - `ui-renderer-architecture.test.ts` — the renderer is a dependency leaf, only
   the split-bridge wiring imports it, mode bytes live in one home, and the input
   stack stays pure. Moved from the renderer test directory (`tests/utils/cli/renderer/`).
+- `no-codemode-in-core.test.ts` enforces that the string "codemode" (any case)
+  appears nowhere under `src/core/`, comments included: the two core deltas
+  name the mechanism, not the feature. Self-baselining zero-violation scan;
+  the negative probe plants the word into a temp tree, never into core.
 
 The three moved tests are self-baselining zero-violation scans (they assert the
 violation list is empty), so they have no `baselines/` entries and are not
-listed in `regenerate.ts`.
+listed in `regenerate.ts`. `no-codemode-in-core.test.ts` shares that
+no-baseline shape, with an ephemeral temp tree as its planted-violation bait
+instead of `fixtures/` (its scan target is one fixed directory, so committed
+bait would have to sit inside the scan root).
 
 The frozen entries came from the 2026-10-26 audit (`tmp/review-2026-10-26/`);
 that punch list is now fully worked off -- both baselines are empty. The

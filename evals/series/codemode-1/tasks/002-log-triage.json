@@ -1,0 +1,14 @@
+{
+  "id": "002-log-triage",
+  "prompt": "Under the directory app/ (recursively), every line containing the literal marker ERROR records a failure; the message is the text after the marker on that line. Aggregate failures by message and write report.txt in the current directory: one line per distinct message shaped `<count> <message>`, ordered by count descending (the counts here are distinct, so the order is unique). Lines without the exact uppercase marker do not count.",
+  "fixtures": "fixture-triage",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "file_exists", "path": "report.txt" },
+    { "type": "file_match", "path": "report.txt", "pattern": "^6 connection refused$", "flags": "m" },
+    { "type": "file_match", "path": "report.txt", "pattern": "^3 disk full$", "flags": "m" },
+    { "type": "file_match", "path": "report.txt", "pattern": "^2 timeout waiting for upstream$", "flags": "m" },
+    { "type": "command", "cmd": "grep -c . report.txt | grep -qx 3" },
+    { "type": "command", "cmd": "head -n 1 report.txt | grep -qx '6 connection refused'" }
+  ]
+}

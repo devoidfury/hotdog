@@ -1,0 +1,12 @@
+{
+  "id": "hotdog-codemode",
+  "command": "bun",
+  "args": [
+    "{repo}/bin/hotdog",
+    "prompt",
+    "{prompt}",
+    "--model",
+    "{model}"
+  ],
+  "env": { "HOTDOG_CONFIG_DIR": "{repo}/evals/configs/codemode" }
+}

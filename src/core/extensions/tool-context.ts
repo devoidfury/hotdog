@@ -1,5 +1,36 @@
 import { Workspace } from "@utils/workspace.ts";
 
+/** A nested call's arguments: the wire JSON string, a parsed object, or null. */
+export type NestedCallInput = string | Record<string, unknown> | null;
+
+export interface NestedCallOptions {
+  /** Attribution id ("<parentCallId>/<n>") carried on hook payloads and output events. */
+  parentToolCallId?: string;
+  /** Extra per-call cancellation; the run-scoped signal on the context still applies. */
+  signal?: AbortSignal;
+}
+
+export interface NestedCallResult {
+  ok: boolean;            // false for blocked/denied/failed/unavailable calls; never throws
+  output: string;
+  hint?: string;
+  error?: string;
+  meta?: Array<[string, string]>;
+}
+
+/**
+ * Runs exactly one tool call through the full executor pipeline (availability,
+ * TOOL_BEFORE_EXECUTE, context mounts, the fail-closed TOOL_CALL gate,
+ * validation, execution including the worker-plane fork, TOOL_AFTER_EXECUTE /
+ * TOOL_RESULT, the result cap, TOOL_METRICS) and returns the finalized result
+ * to the caller instead of appending it to the conversation.
+ */
+export type ExecuteToolCall = (
+  name: string,
+  input: NestedCallInput,
+  opts?: NestedCallOptions,
+) => Promise<NestedCallResult>;
+
 /**
  * Default tool context keys and their types.
  * Extensions can extend this interface for their own keys.
@@ -18,6 +49,13 @@ export interface DefaultToolContext extends Record<string, unknown> {
    * their work when it fires.
    */
   abortSignal?: AbortSignal;
+  /**
+   * Nested-call dispatcher, mounted by ToolExecutor on every call context:
+   * dispatch one further call as if the model had made it, under this call's
+   * attribution. Hand-built contexts (test doubles) may leave it unmounted;
+   * `ctx.get()` answers undefined there.
+   */
+  executeToolCall: ExecuteToolCall;
 }
 
 /**

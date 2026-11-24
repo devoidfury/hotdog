@@ -48,6 +48,18 @@ export const LOG_SOURCE = {
    * index costs a re-scan, never the cap. Never replayed as a message.
    */
   RESUME_ATTEMPT: "resume_attempt",
+  /**
+   * Audit record for a call dispatched BY another running call (the
+   * nested-call entry's answer): keyed by the inner tool_call_id, with
+   * `parent_tool_call_id` naming the dispatching call. Content is the
+   * finalized (capped) answer handed to the dispatcher; the conversation
+   * never sees it -- only the parent call's own tool_result enters context.
+   * It counts as the answer of its own inner call in collectDurabilityFacts
+   * (closing the inner tool_started barrier for the state derivation), while
+   * replay repair never consults the inner id (repair classifies only ids
+   * present in messages). Never replayed as a message.
+   */
+  NESTED_TOOL_RESULT: "nested_tool_result",
   /** Session header: initial model and profile. Survives index loss. Never replayed. */
   SESSION_START: "session_start",
   /** Runtime profile switch (via /profile). Records from/to. Never replayed. */
@@ -107,6 +119,8 @@ export interface LogEntry {
   reasoning_content?: string | null;
   tool_calls?: ToolCall[] | null;
   tool_call_id?: string | null;
+  /** Set on nested_tool_result records: the id of the call that dispatched this one. */
+  parent_tool_call_id?: string;
   tool_name?: string;
   /**
    * Provenance of the message content, distinct from `source` (the log
@@ -520,7 +534,8 @@ export interface ReplayResult {
 export interface DurabilityFacts {
   /** tool_call_ids with a tool_started record (execution began). */
   started: Set<string>;
-  /** tool_call_ids with a tool_result record. */
+  /** tool_call_ids whose answer landed: a tool_result, or a
+   *  nested_tool_result for a dispatched call (closes its own started). */
   answered: Set<string>;
   /** question_asked records, in log order. */
   asked: PendingQuestion[];
@@ -538,7 +553,10 @@ export interface DurabilityFacts {
   openTurn: boolean;
 }
 
-/** Log sources that count as progress (they reset the consecutive counter). */
+/** Log sources that count as progress (they reset the consecutive counter).
+ *  NESTED_TOOL_RESULT is absent: a nested answer must not reset
+ *  the livelock counter on its own -- the parent call's own tool_result is
+ *  the progress it stands for. */
 const PROGRESS_SOURCES: ReadonlySet<string> = new Set([
   LOG_SOURCE.INPUT,
   LOG_SOURCE.PROMPT,
@@ -588,12 +606,20 @@ export function collectDurabilityFacts(entries: LogEntry[]): DurabilityFacts {
     if (
       (source === LOG_SOURCE.TOOL_STARTED ||
         source === LOG_SOURCE.QUESTION_ASKED ||
-        source === LOG_SOURCE.TOOL_RESULT) &&
+        source === LOG_SOURCE.TOOL_RESULT ||
+        source === LOG_SOURCE.NESTED_TOOL_RESULT) &&
       typeof entry.tool_call_id === "string" &&
       entry.tool_call_id !== ""
     ) {
       if (source === LOG_SOURCE.TOOL_STARTED) started.add(entry.tool_call_id);
-      if (source === LOG_SOURCE.TOOL_RESULT) answered.add(entry.tool_call_id);
+      // A nested answer resolves its own call: the inner tool_started barrier
+      // closes against nested_tool_result too, so a cleanly finished
+      // dispatched run never leaves an unresolved id in started \ answered
+      // (deriveSessionState and syncSessionFromLog read exactly that set --
+      // without this, every log that dispatched an inner call would rebuild
+      // as interrupted forever).
+      if (source === LOG_SOURCE.TOOL_RESULT || source === LOG_SOURCE.NESTED_TOOL_RESULT)
+        answered.add(entry.tool_call_id);
       if (
         source === LOG_SOURCE.QUESTION_ASKED &&
         !asked.some((p) => p.toolCallId === entry.tool_call_id)
@@ -801,8 +827,11 @@ export function replayEntriesIntoContext(
 
       // Durability records are bookkeeping, not conversation: they classify
       // other entries (see the repair below) but never become messages.
+      // nested_tool_result belongs here with them: the inner answer is
+      // audit for the parent call, never a tool message of its own.
       case LOG_SOURCE.TOOL_STARTED:
       case LOG_SOURCE.QUESTION_ASKED:
+      case LOG_SOURCE.NESTED_TOOL_RESULT:
       case LOG_SOURCE.RESUME_ATTEMPT:
       case LOG_SOURCE.SESSION_START:
       case LOG_SOURCE.PROFILE_SWITCH:

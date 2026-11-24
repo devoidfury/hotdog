@@ -30,7 +30,13 @@ import type { AgentLike } from "../session/index.ts";
 import type { ImageAttachment, Message, MessageSource } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
-export type { ToolContext };
+export type {
+  ToolContext,
+  NestedCallInput,
+  NestedCallOptions,
+  NestedCallResult,
+  ExecuteToolCall,
+} from "./tool-context.ts";
 import type { StreamResult } from "../llm-client/stream-processor.ts";
 import type { LlmClient, LlmClientOptions } from "../llm-client/client.ts";
 import { logger } from "@utils/logger.ts";
@@ -108,7 +114,15 @@ export interface HookPayloads {
 
   "tools:register": ToolsRegisterPayload;
   "tool:metadata": ToolMetadataPayload;
-  "tool:beforeExecute": { toolCallId: string; toolName: string; input: string; agent: Agent };
+  // Attribution for calls dispatched through the nested-call entry: the id of
+  // the call that dispatched this one. Absent on model-issued calls.
+  "tool:beforeExecute": {
+    toolCallId: string;
+    toolName: string;
+    input: string;
+    agent: Agent;
+    parentToolCallId?: string;
+  };
   "services:register": ServiceRegistry;
   "tool:afterExecute": {
     toolCallId: string;
@@ -117,6 +131,7 @@ export interface HookPayloads {
     input: string;
     agent: Agent;
     success: boolean;
+    parentToolCallId?: string;
   };
   "loop:detected": {
     agent: Agent;
@@ -134,6 +149,7 @@ export interface HookPayloads {
     resultSize: number;
     input: string;
     agent: Agent;
+    parentToolCallId?: string;
   };
 
   "context:message": { message: Message; agent: Agent };
@@ -190,6 +206,7 @@ export interface HookPayloads {
     toolCtx?: ToolContext;
     action?: "continue" | "modify" | "block" | "handled";
     result?: unknown;
+    parentToolCallId?: string;
   },
 
   // Returns ToolResultHookResult ({ result } replaces the result).
@@ -205,6 +222,7 @@ export interface HookPayloads {
     input: string;
     agent: Agent;
     toolCtx?: ToolContext;
+    parentToolCallId?: string;
   };
 
   // messages/modelConfig/toolDefs replace their payload field

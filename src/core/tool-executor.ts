@@ -3,7 +3,7 @@ import { formatError, AssistantRetryableError, ToolError, TransientError } from 
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "@utils/logger.ts";
 import { sleep } from "@utils/promise.ts";
-import { ToolContext } from "./extensions/tool-context.ts";
+import { ToolContext, type NestedCallInput, type NestedCallOptions, type NestedCallResult } from "./extensions/tool-context.ts";
 import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import { type ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
@@ -76,10 +76,21 @@ export interface ToolExecutorDeps {
   maxToolResultChars?: number;
 }
 
+/** Per-call context for a nested dispatch: attribution + extra cancellation. */
+interface NestedRun {
+  parentToolCallId?: string;
+  signal: AbortSignal | null;
+}
+
 export class ToolExecutor {
   #deps: ToolExecutorDeps;
   /** Non-null only when toolExec is "worker" AND a link was provided: the one fork point. */
   #execPlane: { link: ToolExecLink; config: WireToolConfig } | null;
+  /** Inner-call counter per parent attribution id: ids chain as "<parentCallId>/<n>".
+   *  An entry lives only while its owning call runs (deleted at finalization,
+   *  see execute/executeToolCall). Declared TS-private so tests can watch it
+   *  drain. */
+  private nestedSeq = new Map<string, number>();
 
   constructor(deps: ToolExecutorDeps) {
     this.#deps = deps;
@@ -119,9 +130,7 @@ export class ToolExecutor {
   ): Promise<{ outcome: "continue" | "return"; toolResults: ToolResult[] }> {
     const toolResults: ToolResult[] = [];
 
-    const available = new Set(
-      availableToolNames ?? (await this.#deps.agent.getToolDefs()).map((d) => d.function.name),
-    );
+    const available = new Set(await this.#availableNames(availableToolNames));
 
     for (let i = 0; i < toolCalls.length; i++) {
       const tc = toolCalls[i]!;
@@ -135,6 +144,15 @@ export class ToolExecutor {
         logger.error(`[tool:error] ${toolName}: ${formatError(e)}`);
 
         result = await this.#writeToolResult(toolName, tc.function?.arguments || "{}", errorMsg, toolCallId);
+      } finally {
+        // Release this call's nested-call counter at finalization (success,
+        // error, and cancel all end here): ids stay unique while the call
+        // is in flight, and the map does not grow with the executor's
+        // lifetime. A dispatch arriving AFTER finalization -- a tool that
+        // never awaited its nested call -- restarts that id's counter at 1
+        // and can reuse an inner id; attribution beyond the owning call has
+        // no consumer to keep unique.
+        if (tc.id) this.nestedSeq.delete(tc.id);
       }
       toolResults.push(result);
 
@@ -160,12 +178,98 @@ export class ToolExecutor {
     return { outcome: "continue", toolResults };
   }
 
+  /**
+   * The batch availability set, resolved ONCE: the names the model was
+   * actually offered this iteration when the agent passes them, otherwise
+   * re-derived from the agent's own defs (standalone and nested dispatchers).
+   * The re-derive branch is the nested entry's source of truth: a
+   * request-layer replacement of the declared set hides names from the model
+   * only; dispatch that did not originate from the model keeps the policy-
+   * filtered registry view.
+   */
+  async #availableNames(availableToolNames?: string[]): Promise<string[]> {
+    return (
+      availableToolNames ?? (await this.#deps.agent.getToolDefs()).map((d) => d.function.name)
+    );
+  }
+
+  /**
+   * Nested-call entry: runs exactly one call through the full per-call
+   * pipeline (availability, the TOOL_BEFORE_EXECUTE barrier, the
+   * AGENT_TOOL_CONTEXT mounts, the fail-closed TOOL_CALL gate, validation,
+   * execution including the worker-plane fork, TOOL_AFTER_EXECUTE /
+   * TOOL_RESULT, the result cap, TOOL_METRICS) and differs from a
+   * model-issued call only in the finalization: the finalized result is
+   * returned to the caller and never appended to the conversation, while
+   * `parentToolCallId` rides the emitted output events and every hook payload
+   * for attribution. Availability uses the re-derived registry view (never a
+   * per-request declared set), so a name a request hook hid from the model
+   * stays dispatchable here, while anything a policy filter removed is
+   * unreachable from both routes. Never throws: blocked, denied, failed, and
+   * unavailable calls all answer ok:false with the message a model would
+   * have received. Inner ids chain as "<parentCallId>/<n>" (callers without
+   * an id dispatch under "nested").
+   */
+  async executeToolCall(
+    name: string,
+    input: NestedCallInput,
+    opts: NestedCallOptions = {},
+  ): Promise<NestedCallResult> {
+    const parent = opts.parentToolCallId || "nested";
+    const n = (this.nestedSeq.get(parent) ?? 0) + 1;
+    this.nestedSeq.set(parent, n);
+    const toolCallId = `${parent}/${n}`;
+    try {
+      const available = new Set(await this.#availableNames());
+      const tc: ToolCall = {
+        id: toolCallId,
+        type: "function",
+        function: { name, arguments: normalizeNestedInput(input) },
+      };
+      const result = await this.#runToolCall(tc, available, {
+        parentToolCallId: opts.parentToolCallId,
+        signal: opts.signal ?? null,
+      });
+      return nestedCallResult(result);
+    } catch (e: unknown) {
+      logger.error(`[tool:nested] ${name}: ${formatError(e)}`);
+      const message = `Tool execution failed: ${e instanceof Error ? e.message : String(e)}`;
+      return { ok: false, output: message, error: message };
+    } finally {
+      // This call's own id may have parented grandchild dispatches; that
+      // counter leaves with the call (see the nesting rules in execute()).
+      this.nestedSeq.delete(toolCallId);
+    }
+  }
+
   async executeSingle(tc: ToolCall, available: Set<string>): Promise<ToolResult> {
+    return this.#runToolCall(tc, available);
+  }
+
+  /**
+   * The per-call pipeline shared by model-issued and nested calls. When
+   * `nested` is set, finalization returns to the dispatcher instead of the
+   * conversation, and the attribution rides the output events and hook
+   * payloads.
+   */
+  async #runToolCall(
+    tc: ToolCall,
+    available: Set<string>,
+    nested?: NestedRun,
+  ): Promise<ToolResult> {
     const toolName = tc.function?.name;
     const toolCallId = tc.id;
     let input = tc.function?.arguments || "{}";
     const t0 = Date.now();
     const { hooks, agent } = this.#deps;
+    const attribution = nested?.parentToolCallId
+      ? { parentToolCallId: nested.parentToolCallId }
+      : null;
+    // Run-scoped cancellation merged with a nested call's per-call signal;
+    // once per call, so the context, the backoff sleep, and the plane all
+    // watch the same signal.
+    const runSignal = this.#deps.runSignal?.() ?? null;
+    const callSignal = nested?.signal ? combineSignals(runSignal, nested.signal) : runSignal;
 
     if (!toolName || typeof toolName !== "string" || toolName.trim().length === 0) {
       const result = `Tool call missing a valid name (got: ${JSON.stringify(toolName)})`;
@@ -174,14 +278,17 @@ export class ToolExecutor {
         input,
         content: result,
         toolCallId,
+        ...attribution,
       });
-      const msg = new Message({
-        role: "tool",
-        content: result,
-        toolCallId,
-        source: "tool",
-      });
-      this.#deps.agent.addMessage(msg);
+      if (!nested) {
+        const msg = new Message({
+          role: "tool",
+          content: result,
+          toolCallId,
+          source: "tool",
+        });
+        this.#deps.agent.addMessage(msg);
+      }
       return { toolName: "(invalid)", input, content: result, toolCallId: toolCallId || "" };
     }
 
@@ -191,6 +298,9 @@ export class ToolExecutor {
         input,
         unavailableToolMessage(toolName, available),
         toolCallId,
+        undefined,
+        false,
+        nested,
       );
     }
 
@@ -198,12 +308,14 @@ export class ToolExecutor {
       toolName,
       input,
       toolCallId,
+      ...attribution,
     });
     await hooks.notifyHooks(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
       toolName,
       input,
       agent,
+      ...attribution,
     });
 
     // The tool context is built (and AGENT_TOOL_CONTEXT fires) BEFORE the
@@ -212,7 +324,7 @@ export class ToolExecutor {
     // `input` seam -- the one route from an extension to the UI. Context
     // handlers only mount services on toolCtx/agent, so running them earlier
     // is order-neutral for everything else.
-    const toolCtx = this.#buildToolContext(toolCallId);
+    const toolCtx = this.#buildToolContext(toolCallId, callSignal);
     await hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
 
     // failOnError: a gate handler that throws must not be treated as a
@@ -222,7 +334,14 @@ export class ToolExecutor {
     // stops at the first one, so a later handler's `continue` can never
     // disarm an earlier block. A returned verdict is sticky by construction
     // (docs/hook-lifecycle.md, "Pipeline — Gate").
-    const gate: HookPayloads["tool:call"] = { toolCallId, toolName, input, agent, toolCtx };
+    const gate: HookPayloads["tool:call"] = {
+      toolCallId,
+      toolName,
+      input,
+      agent,
+      toolCtx,
+      ...attribution,
+    };
     const gateResult = await hooks.runHookPipeline<GateAction | undefined, "tool:call">(
       HOOKS.TOOL_CALL,
       gate,
@@ -240,7 +359,7 @@ export class ToolExecutor {
       // says status="error"), so the gate's message is part data like any
       // other result -- the request's WireFormat shapes it at the wire.
       const blockedPart = formatToolResult(gate.result, toolName, false);
-      return this.#writeToolResult(toolName, input, [blockedPart], toolCallId);
+      return this.#writeToolResult(toolName, input, [blockedPart], toolCallId, undefined, false, nested);
     }
     if (gate.action === "handled") {
       // A handler claimed the call: the tool never runs. The handler's own
@@ -254,12 +373,12 @@ export class ToolExecutor {
         toolName,
         false,
       );
-      return this.#writeToolResult(toolName, input, [handledPart], toolCallId);
+      return this.#writeToolResult(toolName, input, [handledPart], toolCallId, undefined, false, nested);
     }
 
     const tool = this.#deps.toolRegistry.get(toolName);
     if (!tool) {
-      return this.#writeToolResult(toolName, input, `Unknown tool: ${toolName}`, toolCallId);
+      return this.#writeToolResult(toolName, input, `Unknown tool: ${toolName}`, toolCallId, undefined, false, nested);
     }
 
     const validationError = await this.#deps.toolRegistry.validateToolArgs(toolName, input);
@@ -269,6 +388,9 @@ export class ToolExecutor {
         input,
         `Parameter validation error:\n${validationError}`,
         toolCallId,
+        undefined,
+        false,
+        nested,
       );
     }
 
@@ -288,7 +410,7 @@ export class ToolExecutor {
       attempts++;
       try {
         result = plane
-          ? await this.#executeViaPlane(plane, toolName, input, toolCallId)
+          ? await this.#executeViaPlane(plane, toolName, input, toolCallId, callSignal)
           : await tool.execute(input, toolCtx);
         success = true;
         // Check for stop-loop sentinel on ToolResult
@@ -308,7 +430,7 @@ export class ToolExecutor {
           );
           // Wake early if the run is cancelled: the wait is pure backoff, so
           // an abort should cut it short instead of idling out the ladder.
-          await sleep(delay, this.#deps.runSignal?.() ?? null);
+          await sleep(delay, callSignal);
           continue;
         }
 
@@ -333,6 +455,7 @@ export class ToolExecutor {
       input,
       agent,
       success,
+      ...attribution,
     });
 
     // Seam cap pass 1 (maxToolResultChars): everything the TOOL_RESULT
@@ -349,6 +472,7 @@ export class ToolExecutor {
       // Same instance the TOOL_CALL gate saw: a result-mediating handler
       // reaches the human through toolCtx.get("input").
       toolCtx,
+      ...attribution,
     };
     await hooks.runHookPipeline<ToolResultHookResult | undefined, "tool:result">(
       HOOKS.TOOL_RESULT,
@@ -380,6 +504,7 @@ export class ToolExecutor {
       resultSize,
       input,
       agent,
+      ...attribution,
     });
 
     return this.#writeToolResult(
@@ -389,6 +514,7 @@ export class ToolExecutor {
       toolCallId,
       images as ImageAttachment[] | undefined,
       stopLoop,
+      nested,
     );
   }
 
@@ -426,21 +552,22 @@ export class ToolExecutor {
    * the plane never downgrades to an inline retry.
    *
    * Cancellation: the call id is minted here because a cancel frame names it.
-   * When the run is cancelled, the frame goes out and the call settles
-   * immediately -- the runner's answer is never awaited, because `read` and
-   * `grep` cannot be interrupted and a cancelled run must not wait on a
-   * syscall. The late reply (or rejection) is dropped by the link.
+   * When the call's signal (run-scoped, merged with a nested call's own) is
+   * cancelled, the frame goes out and the call settles immediately -- the
+   * runner's answer is never awaited, because `read` and `grep` cannot be
+   * interrupted and a cancelled run must not wait on a syscall. The late
+   * reply (or rejection) is dropped by the link.
    */
   async #executeViaPlane(
     plane: { link: ToolExecLink; config: WireToolConfig },
     toolName: string,
     input: string,
     toolCallId?: string,
+    signal: AbortSignal | null = null,
   ): Promise<unknown> {
     const workspace = this.#workspaceSpec();
     const session = this.#deps.agent.sessionId;
     // A run that is already gone never dispatches: no frame, no id to cancel.
-    const signal = this.#deps.runSignal?.() ?? null;
     if (signal?.aborted) {
       throw new ToolError(`[tool-exec cancelled] ${toolName} was cancelled before dispatch`);
     }
@@ -474,7 +601,10 @@ export class ToolExecutor {
     }
   }
 
-  #buildToolContext(toolCallId?: string | null): ToolContext {
+  #buildToolContext(
+    toolCallId?: string | null,
+    callSignal: AbortSignal | null = null,
+  ): ToolContext {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this.#deps.agent);
     toolCtx.set("isSessionRestoring", this.#deps.isRestoring());
@@ -482,14 +612,26 @@ export class ToolExecutor {
     // events can tie them to the call they answer.
     if (toolCallId) toolCtx.set("toolCallId", toolCallId);
     // Cancellation reaches inline tools the same way it reaches the runner's:
-    // a run-scoped signal on the context, so inline bash kills its process
-    // group too instead of running to its timeout after the user cancelled.
-    const runSignal = this.#deps.runSignal?.() ?? null;
-    if (runSignal) toolCtx.set("abortSignal", runSignal);
+    // a live signal on the context (run-scoped, merged with a nested call's
+    // per-call signal), so inline bash kills its process group too instead of
+    // running to its timeout after the user cancelled.
+    if (callSignal) toolCtx.set("abortSignal", callSignal);
     const { roots, deny } = this.#workspaceSpec();
     toolCtx.set(
       "workspace",
       deny !== null ? new Workspace(roots, deny) : new Workspace(roots),
+    );
+    // The nested-call dispatcher: this call's tools may dispatch one further
+    // call through the full pipeline. Attribution defaults to this call's id,
+    // so inner ids chain as "<parentCallId>/<n>".
+    const boundParent = toolCallId ?? undefined;
+    toolCtx.set(
+      "executeToolCall",
+      (name: string, input: NestedCallInput, opts?: NestedCallOptions) =>
+        this.executeToolCall(name, input, {
+          ...opts,
+          parentToolCallId: opts?.parentToolCallId ?? boundParent,
+        }),
     );
 
     return toolCtx;
@@ -502,6 +644,7 @@ export class ToolExecutor {
     toolCallId: string,
     images?: ImageAttachment[],
     stopLoop = false,
+    nested?: NestedRun,
   ): Promise<ToolResult> {
     // Content goes out as-is: UI handlers decide how (or whether) to show a
     // tool result; core prescribes no rendering for them.
@@ -511,23 +654,65 @@ export class ToolExecutor {
       content,
       toolCallId,
       ...(images && images.length > 0 ? { images } : {}),
+      ...(nested?.parentToolCallId ? { parentToolCallId: nested.parentToolCallId } : {}),
     });
-    const msg = new Message({
-      role: "tool",
-      content: content as string | Array<unknown>,
-      toolCallId,
-      images: images as ImageAttachment[] | undefined,
-      source: "tool",
-    });
-    // Go through agent.addMessage() so the CONTEXT_MESSAGE hook fires and
-    // extensions (session log) record the tool result.
-    this.#deps.agent.addMessage(msg);
+    // A nested finalization answers its dispatcher: the result is not
+    // conversation, so no message is created and CONTEXT_MESSAGE never fires.
+    if (!nested) {
+      const msg = new Message({
+        role: "tool",
+        content: content as string | Array<unknown>,
+        toolCallId,
+        images: images as ImageAttachment[] | undefined,
+        source: "tool",
+      });
+      // Go through agent.addMessage() so the CONTEXT_MESSAGE hook fires and
+      // extensions (session log) record the tool result.
+      this.#deps.agent.addMessage(msg);
+    }
     return { toolName, input, content, toolCallId, stopLoop };
   }
 }
 
 export function createToolExecutor(deps: ToolExecutorDeps): ToolExecutor {
   return new ToolExecutor(deps);
+}
+
+/** Run-scoped cancellation plus a nested call's own: whichever fires wins. */
+function combineSignals(a: AbortSignal | null, b: AbortSignal | null): AbortSignal | null {
+  if (!a) return b;
+  if (!b) return a;
+  return AbortSignal.any([a, b]);
+}
+
+/** Nested args arrive as wire strings or parsed objects; both become the
+ *  string the pipeline validates and hands to the gate. */
+function normalizeNestedInput(input: NestedCallInput): string {
+  if (typeof input === "string") return input;
+  if (input === null || input === undefined) return "{}";
+  return JSON.stringify(input);
+}
+
+/**
+ * Map the finalized per-call result onto the nested envelope: the wrapper
+ * part's own fields when it has them; the harness text for the paths that
+ * never had a wrapper (availability, validation, gate blocks, executor
+ * failures), which are always failures.
+ */
+function nestedCallResult(r: ToolResult): NestedCallResult {
+  if (typeof r.content === "string") {
+    return { ok: false, output: r.content, error: r.content };
+  }
+  const part = r.content[0];
+  if (!part) return { ok: false, output: "", error: "Tool produced no result" };
+  const ok = part.status === "success";
+  return {
+    ok,
+    output: part.output,
+    ...(part.hint !== null ? { hint: part.hint } : {}),
+    ...(part.error !== null ? { error: part.error } : ok ? {} : { error: part.output }),
+    ...(part.meta.length > 0 ? { meta: part.meta } : {}),
+  };
 }
 
 /** Size of a tool result for TOOL_METRICS: the payload, not any markup. */

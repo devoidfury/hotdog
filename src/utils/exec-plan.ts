@@ -179,6 +179,13 @@ export interface PlanOptions {
   args: string[];
   execPath?: string;
   repoRoot?: string;
+  /**
+   * Extra env set INSIDE the jail (bwrap `--setenv` / the seatbelt `env`
+   * sandwich). The jail's own HOME/TMPDIR invariants are applied last and
+   * win. No backend inherits the caller's environment from here -- the
+   * spawner controls what reaches the jail binary itself.
+   */
+  setEnv?: Record<string, string>;
 }
 
 /**
@@ -233,12 +240,13 @@ export function planFor(
     binds: [[opts.scratch, "/tmp"]],
   };
   // The jail has no home; point HOME/TMPDIR at the per-entry scratch bind.
+  // Caller setEnv (see PlanOptions) rides first -- the invariants below win.
   const prefixArgv = bwrapArgv({
     binary,
     command: opts.command,
     args: opts.args,
     plan,
-    setEnv: { HOME: "/tmp", TMPDIR: "/tmp" },
+    setEnv: { ...opts.setEnv, HOME: "/tmp", TMPDIR: "/tmp" },
   });
   return { prefixArgv, probe: "bwrap" };
 }

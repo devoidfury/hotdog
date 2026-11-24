@@ -309,6 +309,9 @@ export function seatbeltPlan(opts: PlanOptions): PlanePlanResult {
       "-p",
       profile,
       "/usr/bin/env",
+      // Caller setEnv first, jail invariants last (they win) -- same merge
+      // order as the bwrap branch in exec-plan.ts.
+      ...Object.entries(opts.setEnv ?? {}).map(([k, v]) => `${k}=${v}`),
       `HOME=${scratchReal}`,
       `TMPDIR=${scratchReal}`,
       opts.command,

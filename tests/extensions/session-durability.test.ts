@@ -29,6 +29,7 @@ import {
   closeSessionIndex,
   openSessionIndex,
   deriveSessionState,
+  syncSessionFromLog,
   SESSION_STATE,
 } from "@core/session/session-index.ts";
 import {
@@ -1330,5 +1331,317 @@ describe("image sidecar vs the durability facts", () => {
         : e,
     );
     expect(collectDurabilityFacts(withImages)).toEqual(collectDurabilityFacts(base));
+  });
+});
+
+describe("nested_tool_result records and parented question events", () => {
+  it("the dispatcher's answer lands as a nested_tool_result line, never a bare tool_result", async () => {
+    const sessionId = uniqueId("nested-line");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      const part = {
+        type: "tool-result",
+        tool: "inner",
+        status: "success",
+        meta: [],
+        error: null,
+        hint: null,
+        output: "inner-finalized",
+      };
+      // A parented answer: written, keyed by the INNER id, with attribution.
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "tool_result",
+        data: {
+          toolName: "inner",
+          toolCallId: "cm-1/1",
+          parentToolCallId: "cm-1",
+          content: [part],
+        },
+        agent: { sessionId },
+      });
+      // A model-issued result (no parent): NOT this writer's business --
+      // CONTEXT_MESSAGE logs those when the message enters context.
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "tool_result",
+        data: { toolName: "bash", toolCallId: "cm-9", content: "x" },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.source).toBe(LOG_SOURCE.NESTED_TOOL_RESULT);
+      expect(entries[0]!.tool_call_id).toBe("cm-1/1");
+      expect(entries[0]!.parent_tool_call_id).toBe("cm-1");
+      expect(entries[0]!.tool_name).toBe("inner");
+      expect(entries[0]!.content).toEqual([part]);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("nested_tool_result never replays as a message and yields no pending question", () => {
+    const { agent, log } = recorder();
+    const result = replayEntriesIntoContext(agent, [
+      entry({
+        source: LOG_SOURCE.LLM,
+        content: "running a script",
+        tool_calls: [
+          { id: "cm-1", type: "function", function: { name: "codemode_host", arguments: "{}" } },
+        ],
+      }),
+      entry({ source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "cm-1", tool_name: "codemode_host" }),
+      entry({ source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "cm-1/1", tool_name: "inner" }),
+      entry({
+        source: LOG_SOURCE.NESTED_TOOL_RESULT,
+        tool_call_id: "cm-1/1",
+        parent_tool_call_id: "cm-1",
+        content: "inner answer",
+      }),
+      entry({ source: LOG_SOURCE.TOOL_RESULT, tool_call_id: "cm-1", content: "script done" }),
+    ]);
+    // Exactly the conversation: the assistant call and its own result. The
+    // inner id never surfaces -- repair stays inert to nested ids because
+    // repairToolCalls classifies only ids present in messages, and no
+    // message carries an inner tool_call (the started/answered pairing in
+    // collectDurabilityFacts serves state derivation, not replay repair).
+    expect(log).toHaveLength(2);
+    expect(log[0]!.role).toBe("assistant");
+    expect(log[1]!.role).toBe("tool");
+    expect(log[1]!.toolCallId).toBe("cm-1");
+    expect(result.replayed).toBe(2);
+    expect(result.pendingQuestions).toHaveLength(0);
+  });
+
+  it("an unanswered PARENT still synthesizes outcome-unknown; the inner started row changes nothing", () => {
+    const parentCall = entry({
+      source: LOG_SOURCE.LLM,
+      content: "running",
+      tool_calls: [
+        { id: "cm-2", type: "function", function: { name: "codemode_host", arguments: "{}" } },
+      ],
+    });
+    const withInner = replayEntriesIntoContext(recorder().agent, [
+      parentCall,
+      entry({ source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "cm-2", tool_name: "codemode_host" }),
+      entry({ source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "cm-2/1", tool_name: "inner" }),
+      entry({
+        source: LOG_SOURCE.NESTED_TOOL_RESULT,
+        tool_call_id: "cm-2/1",
+        parent_tool_call_id: "cm-2",
+        content: "answered inner",
+      }),
+    ]);
+    const bare = replayEntriesIntoContext(recorder().agent, [
+      parentCall,
+      entry({ source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "cm-2", tool_name: "codemode_host" }),
+    ]);
+    // The parent classifies exactly as without the nested rows (dispatched,
+    // outcome-unknown synthesized once): nothing is repaired for cm-2/1,
+    // because repair only ever consults ids present in messages.
+    expect(withInner.replayed).toBe(bare.replayed);
+    expect(withInner.replayed).toBe(2);
+  });
+
+  it("parented question events write NO question_asked record (separator or parentToolCallId)", async () => {
+    const sessionId = uniqueId("asked-parented");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      // The nested-entry attribution id (parent separator): skipped.
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "question",
+        data: {
+          toolCallId: "cm-1/1",
+          questions: [{ key: "go", prompt: "Proceed?" }],
+        },
+        agent: { sessionId },
+      });
+      // Attribution riding the event instead of the id: skipped.
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "question",
+        data: {
+          toolCallId: "elicit-9",
+          parentToolCallId: "cm-1",
+          questions: [{ key: "elicit", prompt: "MCP elicits" }],
+        },
+        agent: { sessionId },
+      });
+      expect(existsSync(join(SESSIONS_DIR, `${sessionId}.jsonl`))).toBe(false);
+
+      // The unparented control still records (the skip is not a mute).
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "question",
+        data: { toolCallId: "plain-1", questions: [{ key: "k", prompt: "?" }] },
+        agent: { sessionId },
+      });
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.tool_call_id).toBe("plain-1");
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("nested_tool_result answers its own call: a finished dispatched run rebuilds IDLE", () => {
+    // Inner tool_started rows are real barriers, so the state derivation must
+    // see the inner pair closed. A log that answered the inner call via
+    // nested_tool_result leaves NOTHING in started \ answered -- otherwise
+    // every script session rebuilds as interrupted.
+    const entries = [
+      entry({
+        source: LOG_SOURCE.LLM,
+        content: "running",
+        tool_calls: [
+          { id: "cm-9", type: "function", function: { name: "codemode_host", arguments: "{}" } },
+        ],
+      }),
+      entry({ source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "cm-9", tool_name: "codemode_host" }),
+      entry({ source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "cm-9/1", tool_name: "inner" }),
+      entry({
+        source: LOG_SOURCE.NESTED_TOOL_RESULT,
+        tool_call_id: "cm-9/1",
+        parent_tool_call_id: "cm-9",
+        content: "inner answer",
+      }),
+      entry({ source: LOG_SOURCE.TOOL_RESULT, tool_call_id: "cm-9", content: "script done" }),
+      entry({ source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ];
+    const facts = collectDurabilityFacts(entries);
+    expect(facts.answered.has("cm-9/1")).toBe(true);
+    const unresolved = [...facts.started].filter((id) => !facts.answered.has(id));
+    expect(unresolved).toEqual([]);
+    expect(deriveSessionState(facts)).toBe(SESSION_STATE.IDLE);
+
+    // A genuine mid-script crash (inner dispatched, never answered, parent
+    // gone with it) still derives interrupted: closing nested pairs must not
+    // hide a real crash.
+    const crashed = entries.filter(
+      (e) =>
+        !(e.source === LOG_SOURCE.NESTED_TOOL_RESULT && e.tool_call_id === "cm-9/1") &&
+        e.source !== LOG_SOURCE.TURN_END &&
+        !(e.source === LOG_SOURCE.TOOL_RESULT && e.tool_call_id === "cm-9"),
+    );
+    expect(deriveSessionState(collectDurabilityFacts(crashed))).toBe(SESSION_STATE.INTERRUPTED);
+  });
+
+  it("syncSessionFromLog rebuild: closed inner pair, no phantom open call", async () => {
+    // The row-rebuild leg (boot reconcile / index loss / rewind all route
+    // through here): the same log must rebuild idle with an empty
+    // open_calls mirror, while a control log without the inner rows
+    // agrees. A phantom open call nobody can answer is what the webui row
+    // badge and resume would inherit.
+    const sessionId = uniqueId("nested-rebuild");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      const agent = { sessionId };
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: {
+          role: "assistant",
+          content: "running a script",
+          toolCalls: [{ id: "cm-r", type: "function", function: { name: "codemode_host", arguments: "{}" } }],
+        },
+        agent,
+      });
+      await ext.hooks[HOOKS.TOOL_BEFORE_EXECUTE]!({
+        toolCallId: "cm-r",
+        toolName: "codemode_host",
+        input: "{}",
+        agent,
+      });
+      await ext.hooks[HOOKS.TOOL_BEFORE_EXECUTE]!({
+        toolCallId: "cm-r/1",
+        toolName: "inner",
+        input: "{}",
+        agent,
+      });
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "tool_result",
+        data: {
+          toolName: "inner",
+          toolCallId: "cm-r/1",
+          parentToolCallId: "cm-r",
+          content: "inner answer",
+        },
+        agent,
+      });
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { role: "tool", content: "script done", toolCallId: "cm-r" },
+        agent,
+      });
+      await ext.hooks[HOOKS.TURN_END]!({ stopped: true, reason: "completion", agent });
+
+      // Full rebuild from the log bytes, as an index loss would force.
+      const row = await syncSessionFromLog(sessionId);
+      expect(row?.state).toBe(SESSION_STATE.IDLE);
+      expect(openCallIds(sessionId)).toEqual([]);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("replay probe: an inner held-question log (no asked record) surfaces no phantom pendingQuestion", async () => {
+    // Pinned end-to-end at the log layer: an inner call that put a question
+    // to the human and was never answered leaves its parent answered and NO
+    // asked record behind -- replay must show nothing live.
+    const sessionId = uniqueId("asked-replay");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: {
+          role: "assistant",
+          content: "dispatching",
+          toolCalls: [{ id: "cm-3", type: "function", function: { name: "codemode_host", arguments: "{}" } }],
+        },
+        agent: { sessionId },
+      });
+      await ext.hooks[HOOKS.TOOL_BEFORE_EXECUTE]!({
+        toolCallId: "cm-3",
+        toolName: "codemode_host",
+        input: "{}",
+        agent: { sessionId },
+      });
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "question",
+        data: { toolCallId: "cm-3/1", questions: [{ key: "go", prompt: "Proceed?" }] },
+        agent: { sessionId },
+      });
+      await ext.hooks[HOOKS.TOOL_BEFORE_EXECUTE]!({
+        toolCallId: "cm-3/1",
+        toolName: "question",
+        input: "{}",
+        agent: { sessionId },
+      });
+      // The abort released the prompt; the inner call was denied.
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "tool_result",
+        data: {
+          toolName: "question",
+          toolCallId: "cm-3/1",
+          parentToolCallId: "cm-3",
+          content: "Question cancelled: the run was interrupted",
+        },
+        agent: { sessionId },
+      });
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { role: "tool", content: "script caught the denial", toolCallId: "cm-3" },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.some((e) => e.source === LOG_SOURCE.QUESTION_ASKED)).toBe(false);
+      const { agent, log } = recorder();
+      const result = replayEntriesIntoContext(agent, entries);
+      expect(result.pendingQuestions).toHaveLength(0);
+      expect(log.some((m) => m.toolCallId === "cm-3/1")).toBe(false);
+    } finally {
+      cleanup(sessionId);
+    }
   });
 });

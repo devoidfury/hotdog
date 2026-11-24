@@ -97,9 +97,13 @@ function parseToolArgs(
  * Key for the session memo: the tool plus EVERY extracted value. Deliberately
  * stricter than "the values that needed allowing" -- an allow for
  * `git status` must not silently cover `git push origin main` just because
- * both are covered by one `bash.cmd=git` rule.
+ * both are covered by one `bash.cmd=git` rule. A call carrying an
+ * `envelopeKey` keys on it instead: the consent covered the whole argument
+ * envelope, so any envelope change -- even one that leaves every matched
+ * target standing -- is a new ask.
  */
 function memoKey(call: ApprovalCall): string {
+  if (call.envelopeKey !== undefined) return `${call.tool}\u0000${call.envelopeKey}`;
   const parts = call.targets.map((t) => `${t.param}=${t.value}`).sort();
   return `${call.tool}\u0000${parts.join("\u0001")}`;
 }
@@ -121,16 +125,54 @@ function diffArgEcho(args: Record<string, unknown>, display: ToolDisplaySpec[]):
   return summarizeToolArgs(rest);
 }
 
+/**
+ * The header line for a call dispatched from inside another running call
+ * (the nested-call entry attributes every inner call to its parent): an
+ * inner call arrives with no model turn behind it, and the human must see
+ * WHERE it came from before approving. The parent's tool name resolves from
+ * the context's tool_calls when the parent call is there (a model-issued
+ * parent always is); otherwise the attribution rides the id alone.
+ */
+function parentAttribution(agent: unknown, parentToolCallId: string): string {
+  let name: string | null = null;
+  try {
+    const messages = (
+      agent as {
+        context?: {
+          getMessages?: () => Array<{ toolCalls?: Array<{ id?: string; function?: { name?: string } }> }>;
+        };
+      }
+    )?.context?.getMessages?.();
+    for (const m of messages ?? []) {
+      for (const tc of m.toolCalls ?? []) {
+        if (tc?.id === parentToolCallId && tc.function?.name) {
+          name = tc.function.name;
+          break;
+        }
+      }
+      if (name) break;
+    }
+  } catch {
+    // A host whose context is unreadable: the id alone still attributes.
+  }
+  return name
+    ? `inner call from ${name} <${parentToolCallId}>`
+    : `inner call from parent call <${parentToolCallId}>`;
+}
+
 /** What the human sees. Bounded, and always ends with the persistence hint.
  * `diffText` is the change itself -- the block `resolveCliDiff`/`renderCliDiff`
  * compose for this call's declaration: the human approves what they can read,
  * so a declared-diff call shows the same capped block the transcript commits,
- * before the answer rather than after it. */
+ * before the answer rather than after it. `attribution` is the parent line
+ * for a dispatched inner call; like every model-authored byte it rides
+ * spoofSafe at the end. */
 function approvalPromptText(
   call: ApprovalCall,
   reasons: string[],
   argsEcho: string,
   diffText: string | null,
+  attribution: string | null,
 ): string {
   const targets = call.targets
     .filter((t) => !t.denyOnly)
@@ -139,6 +181,7 @@ function approvalPromptText(
       `${t.param}: ${t.value.length > MAX_TARGET_ECHO ? `${t.value.slice(0, MAX_TARGET_ECHO)}…` : t.value}`,
     );
   const lines = [`Approve this tool call? (${call.tool})`];
+  if (attribution) lines.push(`  ${attribution}`);
   if (argsEcho !== "") {
     lines.push(`  args: ${argsEcho.length > MAX_ARGS_ECHO ? `${argsEcho.slice(0, MAX_ARGS_ECHO)}…` : argsEcho}`);
   }
@@ -158,6 +201,7 @@ async function askUser(
   reasons: string[],
   argsEcho: string,
   diffText: string | null,
+  attribution: string | null,
   input: InputLike | null | undefined,
   signal: AbortSignal | null,
 ): Promise<AskOutcome> {
@@ -169,7 +213,7 @@ async function askUser(
 
     const question = {
       key: ANSWER_KEY,
-      prompt: approvalPromptText(call, reasons, argsEcho, diffText),
+      prompt: approvalPromptText(call, reasons, argsEcho, diffText, attribution),
       options: OPTIONS,
       required: true,
       default: "deny",
@@ -354,12 +398,17 @@ export function create(core: CoreContext): ExtensionInstance {
       const diffText = proposed
         ? renderCliDiff(proposed, { indent: "  ", label: "will change" })
         : null;
+      const attribution =
+        typeof payload.parentToolCallId === "string" && payload.parentToolCallId !== ""
+          ? parentAttribution(payload.agent, payload.parentToolCallId)
+          : null;
       const outcome = await enqueuePrompt(() =>
         askUser(
           call,
           decision.reasons,
           proposed && parsedArgs.ok ? diffArgEcho(parsedArgs.args, diffDisplay) : payload.input,
           diffText,
+          attribution,
           (payload.toolCtx?.get("input") as InputLike | undefined) ?? null,
           runSignal(payload.agent, payload.toolCtx as { get(key: string): unknown } | undefined),
         ),

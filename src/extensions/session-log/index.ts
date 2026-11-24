@@ -733,10 +733,23 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       [HOOKS.OUTPUT_EVENT]: async ({ type, data, agent }) => {
         // QUESTION durability: fsynced but fire-and-forget (handlers aren't awaited).
         if (type === "question") {
-          const d = data as { toolCallId?: unknown; questions?: unknown };
+          const d = data as { toolCallId?: unknown; questions?: unknown; parentToolCallId?: unknown };
           const toolCallId = typeof d.toolCallId === "string" ? d.toolCallId : "";
           const questions = Array.isArray(d.questions) ? d.questions : null;
           if (!toolCallId || !questions || questions.length === 0) return;
+          // A PARENTED question answers a call that is not conversation: its
+          // answer lands on the dispatching call, never on a context
+          // tool_call, so a question_asked record here would replay as a
+          // phantom pending question with no call to answer. Parented means
+          // the event carries a parentToolCallId or the id carries the
+          // parent separator ("<parentCallId>/<n>" -- the nested entry's
+          // attribution id); record ordering is never the signal.
+          if (
+            (typeof d.parentToolCallId === "string" && d.parentToolCallId !== "") ||
+            toolCallId.includes("/")
+          ) {
+            return;
+          }
           const sessionId = agent.sessionId || "unknown";
           const logPath = resolveLogPath(sessionId);
           if (!logPath) return;
@@ -752,6 +765,45 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           // Commit point: awaiting_question is honest the moment the record
           // lands -- alive or dead, the session IS waiting on a human now.
           await safeIndex("question_asked", () => indexQuestionAsked(sessionId, toolCallId));
+          return;
+        }
+
+        // Nested-call answer: the dispatcher's finalized result for a call
+        // dispatched by another running call. Model-issued tool results
+        // never come through here (CONTEXT_MESSAGE logs those when the tool
+        // message enters context); only parented answers do, because the
+        // dispatcher returns its result instead of appending a message.
+        if (type === "tool_result") {
+          const d = data as {
+            toolName?: unknown;
+            toolCallId?: unknown;
+            parentToolCallId?: unknown;
+            content?: unknown;
+          };
+          const toolCallId = typeof d.toolCallId === "string" ? d.toolCallId : "";
+          const parentToolCallId =
+            typeof d.parentToolCallId === "string" ? d.parentToolCallId : "";
+          if (!toolCallId || !parentToolCallId) return;
+          const sessionId = agent.sessionId || "unknown";
+          const logPath = resolveLogPath(sessionId);
+          if (!logPath) return;
+          // Plain append: audit content, not a durability record -- the
+          // inner call's own tool_started barrier already fsynced before its
+          // side effects.
+          const entry = stripNulls({
+            ts: new Date().toISOString(),
+            session_id: sessionId,
+            source: LOG_SOURCE.NESTED_TOOL_RESULT,
+            v: LOG_VERSION,
+            content: d.content ?? "",
+            tool_call_id: toolCallId,
+            parent_tool_call_id: parentToolCallId,
+            tool_name: typeof d.toolName === "string" ? d.toolName : null,
+          });
+          await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.NESTED_TOOL_RESULT);
+          // The inner tool_started mirror row closes here, exactly like a
+          // tool_result closes a model-issued one.
+          await safeIndex("nested_tool_result", () => indexToolResult(sessionId, toolCallId));
           return;
         }
 

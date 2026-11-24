@@ -82,7 +82,7 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  // B6b (§4.1): both thresholds are read PER TURN through the live block
+  // Both thresholds are read PER TURN through the live block
   // (schema-owned, extension.json defaults 3 and 4; the config layer merges
   // them). The window is DERIVED AT USE from the same turn's thresholds --
   // never a cached window. Streaks live in the tail of `history` and
@@ -113,7 +113,7 @@ export function create(core: CoreContext): ExtensionInstance {
         if (!agent || agent.isRestoring) return;
 
         const st = getState(agent.sessionId);
-        // Per-turn threshold reads + window derived at use (§4.1, above).
+        // Per-turn threshold reads + window derived at use (above).
         const repeatThreshold = block().repeatThreshold;
         const pingPongThreshold = block().pingPongThreshold;
         // Streaks longer than the stop band (3t) are all level 3; no need to remember more.

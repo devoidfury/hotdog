@@ -21,7 +21,7 @@ export interface AgentFactoryOptions {
   /**
    * Session-profile overlays keyed by profile name (websocket/webui pass
    * their map; CLI sites leave it unset and take body from resolved).
-   * A FUNCTION is read per build (B3): the factory then follows whatever the
+   * A FUNCTION is read per build: the factory then follows whatever the
    * host's live source answers -- a profile added after boot lands on the
    * NEXT build instead of never.
    */
@@ -78,7 +78,7 @@ export function createAgentFactory(
 ): AgentBuildFn {
   return async (agentConfig: Record<string, unknown> = {}) => {
     const resolved = (options.resolved ?? core.resolved ?? {}) as ResolvedConfig;
-    // B5 (design §4.2): the live view applies ONLY on the default core.* path
+    // The live view applies ONLY on the default core.* path
     // -- a host that passes EITHER base explicitly (ui-interactive-cli,
     // ui-one-shot, workflows, test doubles) is PINNED BY CONSTRUCTION and
     // keeps today's point-in-time copy; a core without a store (fake/embedded)
@@ -86,7 +86,7 @@ export function createAgentFactory(
     const store =
       options.config == null && options.resolved == null ? core.configStore : undefined;
     const profileName = (agentConfig.profileName as string) || resolved.profileName || "default";
-    // Profile overlay read PER BUILD (B3): a reader re-resolves the map from
+    // Profile overlay read PER BUILD: a reader re-resolves the map from
     // the host's live source each time; a static map keeps the old behavior.
     // On the live path the construction-time map goes away when unset: the
     // current generation's profileManager output (resolved.profiles) is read
@@ -163,14 +163,14 @@ export function createAgentFactory(
     // the tool's internal line-shaping default is injected AFTER the spread: a
     // stale user key in the raw config bag can never drift the plane away from
     // what the inline tool factories do with the same constant.
-    // EXEMPTION E1 (B6a, design §4.3/§5.2): this is the WORKER-PLANE SNAPSHOT.
+    // EXEMPTION E1: this is the WORKER-PLANE SNAPSHOT.
     // Runners never boot the config, so these scalars are pinned at plane
     // entry, not read live -- a live config write changes NEW POOL ENTRIES
     // ONLY (P3); existing entries keep their spawn-time posture and the
     // broker's drift/keep-pinned behavior (postureDrift in tool-exec-broker.ts)
     // stands exactly as ruled. The INLINE plane is the live one: the
     // core-tools / bash-tool entries hand their tools scalar-or-reader knobs
-    // over the store (design §4.1, batch B6a).
+    // over the store.
     const toolExecConfig: WireToolConfig = {
       bashTool: {
         ...(baseConfig.bashTool as Record<string, unknown> | undefined),
@@ -184,7 +184,7 @@ export function createAgentFactory(
       envScrubExtra: envScrubExtraKeys(baseConfig),
     };
 
-    // Resolved-sourced values the agent needs (the §4.2 bucket ledger). On
+    // Resolved-sourced values the agent needs (the resolved-bucket ledger). On
     // the pinned path they become own-props of the copied bag exactly as
     // before; on the live path they become the per-agent OVERLAY (build pins)
     // or ride the resolved-aware base unpin -- never re-sourced from the raw

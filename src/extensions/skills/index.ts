@@ -22,7 +22,7 @@ const LOAD_SKILL_TOOL_NAME = "load_skill";
 
 /** Create the skills extension. Config defaults come from extension.json configSchema. */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
-  // B7 (§4.1/§4.3 skills row): the block is read through a lazy reader, never
+  // The block is read through a lazy reader, never
   // destructured into create-scope consts. `path` CONSUMERS resolve per use --
   // the loader holds a reader, so a listing/re-read (`directories()`, a later
   // `loadSkills()`) answers from the current generation. The boot fs import

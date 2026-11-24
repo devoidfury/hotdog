@@ -310,10 +310,10 @@ export interface CoreContext {
    *  properties and simply omit it. */
   configStore?: ConfigStore;
 
-  /** The parsed CLI bag main() ran with (B4). Captured once at boot so the
+  /** The parsed CLI bag main() ran with. Captured once at boot so the
    *  config re-resolve keeps honoring the cli layer (argv is fixed for the
    *  process lifetime; dropping it would silently discard flag overrides --
-   *  §4.2's provenance rule). Optional: embedded/test hosts may omit it, in
+   *  provenance rule). Optional: embedded/test hosts may omit it, in
    *  which case reresolve runs on the file/env layers only. */
   cliArgv?: CliArgv;
 
@@ -478,7 +478,7 @@ export interface CommandsRegisterPayload {
 }
 
 /**
- * A config knob held across a use boundary (B6a, design §4.1): either a
+ * A config knob held across a use boundary: either a
  * PINNED scalar -- hosts that never boot the config pass the value itself and
  * answer byte-identically forever (the pooled runner's wire snapshot, plain-
  * scalar test doubles) -- or a READER re-evaluated at each use. Live hosts

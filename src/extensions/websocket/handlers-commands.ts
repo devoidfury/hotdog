@@ -17,7 +17,7 @@ export function handleCommand(ctx: RouteContext): void {
   if (cmdText.startsWith("/")) {
     cmdText = cmdText.slice(1).trim();
   }
-  // B3 refusal table: the subagent pane is text-followup-only, so NOTHING
+  // Refusal table: the subagent pane is text-followup-only, so NOTHING
   // dispatches on a worker sid (the existing composer rule, enforced
   // server-side). /fork keeps its own honest reason: there is no manager
   // entry to fork. touch stays behind the gate -- a refusal moves no state.

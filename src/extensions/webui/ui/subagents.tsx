@@ -3,8 +3,8 @@
 // under the manager session card that delegated the tasks (Recent Logs'
 // disclosure idiom: label + chevron, aria-expanded/aria-controls). One row
 // per task agent -- status glyph, step label, elapsed clock, question badge
-// carrier (B2 questionPending rides taskWire) -- clicking a row opens the
-// WORKER'S OWN session view (B4: live rows attach via switchSession,
+// carrier (questionPending rides taskWire) -- clicking a row opens the
+// WORKER'S OWN session view (live rows attach via switchSession,
 // settled/durable rows open the durable log via viewLog -- openTargetFor
 // decides; the transcript is the standard session surface, no second path).
 //
@@ -107,7 +107,7 @@ interface SectionProps {
   now: number;
   collapsed: boolean;
   /** The session on screen in the main view: a row highlights when its
-   *  worker session IS the pane (B4 -- the transcript is a session view). */
+   *  worker session IS the pane (the transcript is a session view). */
   viewedSessionId: string | null;
   onToggle: () => void;
   /** Row press. The row itself rides along (additive second arg) so the app
@@ -120,7 +120,7 @@ interface SectionProps {
 }
 
 /**
- * Where a row press lands (B4's collapse onto the session view). A LIVE
+ * Where a row press lands: the session view. A LIVE
  * row (running/queued with a worker session built) opens that session
  * through the STANDARD attach (switchSession -- the pane becomes the
  * worker's session view, watcher-scoped, with windowed replay + live tail).

@@ -307,9 +307,8 @@ const NO_ANSWER_MARK = "(no answer)";
  * address), the activity words, plus the footer-style segments the webui
  * footer carries under each assistant message (last-response clock, ctx
  * used/total, the producing call's wall time, the worked-for turn total,
- * cost). The old TURN counter stays dropped (owner ruling); `messageIndex`
- * returns as the row's number under the owner's later ruling that it count
- * all user-input + assistant-response messages. Every segment rides only on
+ * cost). The old TURN counter stays dropped; `messageIndex` returns as the
+ * row's number counting all user-input + assistant-response messages. Every segment rides only on
  * real attestation: `cost` is a preformatted USD string that exists only
  * when `modelPricing` is configured; ctx/call come from the in-process
  * TOKEN_USAGE frames (totalTokens/contextWindow/durationMs -- the same pair

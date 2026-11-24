@@ -20,7 +20,7 @@ export interface RemovedKeyTombstone {
   /** Plain user-facing one-liner for every surface that quotes the tombstone
    *  (the SETTINGS diagnostics, the boot nudge, `hotdog rescue`'s verdict):
    *  states what changed in today's terms, never retirement archaeology
-   *  (owner ruling 2026-11-18 -- no surface may read like commit history).
+   *  (no surface may read like commit history).
    *  Falls back to nothing: a bare "no longer read; replaced by X" is
    *  already complete. */
   note?: string;

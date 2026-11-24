@@ -63,7 +63,7 @@ const TYPE_EXTENSIONS: Record<string, string[]> = {
 };
 
 interface GrepToolOptions {
-  /** B6a (§4.1): scalar-or-reader; the extension entry reads the live coreTools block per execute. */
+  /** Scalar-or-reader; the extension entry reads the live coreTools block per execute. */
   maxResults: ConfigKnob<number>;
   /** Internal line-shaping constant (the maxToolOutputLines config key is removed); a plain scalar, not a knob. */
   maxOutputLines: number;

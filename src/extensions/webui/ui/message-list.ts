@@ -67,8 +67,8 @@ interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ pat
 
 /**
  * Long user prompts (workflow task descriptions, pasted docs) render folded
- * to this many SOURCE lines with a chevron toggle (owner ruling 2026-11-18: one message
- * ate a viewport). Folding is a CSS clamp: the full text stays in the DOM,
+ * to this many SOURCE lines with a chevron toggle (one message ate a
+ * viewport). Folding is a CSS clamp: the full text stays in the DOM,
  * so the row's textContent search still sees the hit, and revealMatch opens
  * the fold before flashing (expand-on-hit). User messages only -- assistant
  * prose is structured markdown, and attachments already ride details boxes.
@@ -268,7 +268,7 @@ export interface MessageListManager {
   handleCommandResult: (data: CommandResultMessage) => void;
   handleQuestion: (data: QuestionMessage) => void;
   /**
-   * Worker-view question surface (B4 / R3): a watcher of a subagent session
+   * Worker-view question surface: a watcher of a subagent session
    * SEES the pending question but can never answer it -- the delegating
    * manager is the only respondent. Set true on a worker attach (kind
    * "subagent"), false on every interactive attach; while true, question
@@ -292,7 +292,7 @@ export interface MessageListManager {
   /**
    * Honest fallback for a FAILED subagent live attach: the pane shows
    * the fact ("Live tail unavailable for this subagent") plus two real
-   * actions -- "View log" (the B4 settled view of the worker's own durable
+   * actions -- "View log" (the settled view of the worker's own durable
    * log) and "Close" (removes the card). Never a raw error bubble, never
    * another session's transcript. One card at a time; the next attach or
    * view replaces the pane, and clear() drops it with everything else.
@@ -2077,7 +2077,7 @@ export function createMessageList(
           // Cold parity with the live TOOL_RESULT frame: the stored parts'
           // start_line meta numbers the diff gutters with real file lines,
           // and the whole envelope rides structured for the muted facts
-          // strip (owner ruling 2026-11-18) -- a browsed log renders the
+          // strip -- a browsed log renders the
           // exact same posture as the live transcript.
           const metaStartLine = Number(toolContentMeta(entry.content, "start_line"));
           const envelope = toolContentMetaAll(entry.content);

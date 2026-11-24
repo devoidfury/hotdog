@@ -44,7 +44,7 @@ export function handleCreateSession(ctx: RouteContext): void {
 export function handleDeleteSession(ctx: RouteContext): void {
   const { ws, msg, registry } = ctx;
   if (!msg.sessionId) return;
-  // B3 refusal table: the task lifecycle owns a worker's terminal (and its
+  // Refusal table: the task lifecycle owns a worker's terminal (and its
   // sweep); nothing here may fire -- not even the pin drop below. An
   // ADOPTED worker row gets the honest variant (no task lifecycle owns it).
   const row = registry.getRow(msg.sessionId as string);
@@ -94,7 +94,7 @@ export async function handleDismissSession(ctx: RouteContext): Promise<void> {
   // Malformed frames are dropped like the other sidebar messages; the id
   // carries the core session-id gate (it reaches the filesystem scan).
   if (typeof sessionId !== "string" || !isSafeSessionId(sessionId)) return;
-  // B3 refusal table: a worker row is not a dismissable live session (its
+  // Refusal table: a worker row is not a dismissable live session (its
   // row is reclaimed by the sweep after the task's terminal event). An
   // ADOPTED worker row gets the honest variant (no task lifecycle owns it).
   const row = registry.getRow(sessionId);
@@ -167,7 +167,7 @@ export async function handleSetPinned(ctx: RouteContext): Promise<void> {
   if (typeof sessionId !== "string" || !isSafeSessionId(sessionId) || typeof pinned !== "boolean") {
     return;
   }
-  // B3 refusal table (D8, ledger N5: this refusal is B3's): hidden rows
+  // Refusal table: hidden rows
   // have no sidebar slot to pin into.
   if (registry.getRow(sessionId)?.kind === "worker") {
     SessionRegistry.sendSafe(ws, {
@@ -192,7 +192,7 @@ export async function handleSetPinned(ctx: RouteContext): Promise<void> {
 export function handleRenameSession(ctx: RouteContext): void {
   const { ws, msg, registry } = ctx;
   if (!msg.sessionId || !msg.newName) return;
-  // B3 refusal table: a worker row is hidden (B1's projection), so a title
+  // Refusal table: a worker row is hidden (the worker-row projection), so a title
   // would be a label nobody renders; the honest answer is the refusal.
   if (registry.getRow(msg.sessionId as string)?.kind === "worker") {
     SessionRegistry.sendSafe(ws, {
@@ -219,7 +219,7 @@ export function handleListProfiles(ctx: RouteContext): void {
 export async function handleSwitchProfile(ctx: RouteContext): Promise<void> {
   const { ws, msg, registry } = ctx;
   if (!msg.sessionId || !msg.profileName) return;
-  // B3 refusal table (R4's switch-disabled): the worker profile is the
+  // Refusal table (switch disabled): the worker profile is the
   // spawn-time decision; switching it would rewrite the task's placement.
   if (registry.getRow(msg.sessionId as string)?.kind === "worker") {
     SessionRegistry.sendSafe(ws, {

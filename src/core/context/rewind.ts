@@ -20,7 +20,7 @@ export interface TrimResult {
  * Cutting only at user boundaries keeps assistant(tool_calls) messages together with their tool results,
  * so the kept context is always wire-valid without a repair pass.
  *
- * STRAY-FREE CUT (owner ruling): the kept context ends at the last VISIBLE message it retains and that message's answered tool-call block. Harness notices, system reminders, loop-detect nudges, orphan tool results and any other traffic trailing that boundary -- whatever their role -- are swept out with the dropped turns; the sweep is positional over the whole array, not a user/assistant filter. Only when the trim retains no visible message at all does the pre-conversation prefix (system prompt, compaction summary) stand.
+ * STRAY-FREE CUT: the kept context ends at the last VISIBLE message it retains and that message's answered tool-call block. Harness notices, system reminders, loop-detect nudges, orphan tool results and any other traffic trailing that boundary -- whatever their role -- are swept out with the dropped turns; the sweep is positional over the whole array, not a user/assistant filter. Only when the trim retains no visible message at all does the pre-conversation prefix (system prompt, compaction summary) stand.
  */
 export function trimTurns(messages: Message[], turns: number): TrimResult {
   const totalTurns = messages.reduce((n, m) => (m.role === "user" ? n + 1 : n), 0);
@@ -97,8 +97,7 @@ function trimToLastVisible(messages: Message[]): Message[] {
 // immediately-following answered results with it. So the kept context always
 // ends exactly at a real, wire-valid boundary and nothing -- no tool call, no
 // tool result, no harness/system entry parked between visible messages --
-// dangles past the cut (owner ruling: zero stray entries trailing the cut
-// boundary). The slice below is positional over the whole context array, so
+// dangles past the cut (zero stray entries trailing the cut boundary). The slice below is positional over the whole context array, so
 // this holds by construction, not by role filtering.
 
 /** Absolute: address visible message #index (keep through it). */

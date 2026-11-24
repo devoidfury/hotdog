@@ -439,7 +439,7 @@ export class WaitTool extends SubagentTool {
     const args = parseToolInput(input) ?? {};
     const message = args.message as string | null;
     const note = message ? ` Note: ${message}` : "";
-    // ZERO meta, on purpose (owner ruling 2026-11-11): the note already rides
+    // ZERO meta, on purpose: the note already rides
     // the output text, and a meta entry re-enters every flattened display as
     // META: {"message":...} (toolContentText, utils/tool-content.ts) plus a
     // duplicated <message> child on the xml wire (it is not a short key).

@@ -470,7 +470,7 @@ export interface SearchHitWire {
   matchCount: number;
   profile?: string;
   model?: string;
-  /** B5 additive: the delegation task description when this id is an
+  /** Additive: the delegation task description when this id is an
    *  attested subagent log (Recent Logs hides it; the search row labels
    *  it). Omitted on interactive hits -- their bytes are unchanged. */
   subagentOf?: string;
@@ -753,8 +753,8 @@ export function wireImageStubs(
  *  values. */
 export const MAX_CONFIG_VALUE_CHARS = 2000;
 /** Row and finding caps per snapshot reply (belt over the schema's own
- *  bound: count rows, honor the truncated flag). KEPT at 400 for the all-fields editor (owner ruling 2026-11-09):
- *  rows now include file-only keys, provider entries (indexed) and the
+ *  bound: count rows, honor the truncated flag). KEPT at 400 for the
+ *  all-fields editor: rows now include file-only keys, provider entries (indexed) and the
  *  children of class-A refused containers, but a full real snapshot is ~80
  *  schema leaves plus tens of extras -- 400 bounds one reply well above the
  *  real payload, and the honest `truncated` flag covers the pathological
@@ -873,8 +873,7 @@ export interface ConfigKeyEntryWire {
   /** Redaction fired on this row: leaf-secret, or a secret-shaped entry
    *  nulled inside a container value (bashTool.env, mcpServers[].env). */
   redacted?: boolean;
-  /** LIST-CHROME array row (owner ruling 2026-11-11, the provider-card
-   *  doctrine generalized): the row is the array field's heading. It carries
+  /** LIST-CHROME array row: the row is the array field's heading. It carries
    *  NO edit stamp (a wholesale write to it is refused), and the array's
    *  elements ride as their own rows keyed `key[i]` ("workspace.deny[0]",
    *  "providers[0].models[2]"), each with its own stamp (scalar/enum/writeOnly
@@ -887,10 +886,10 @@ export interface ConfigKeyEntryWire {
    *  json stamp or the provider-card / class-A child posture. */
   arrayChrome?: true;
   /** Settings EDITOR affordance: present on EVERY row the write path would
-   *  accept from setConfigKey (owner ruling 2026-11-09, read whole: EVERY
-   *  SETTING THE CONFIG FILE CAN AFFECT -- the whitelist is retired, and a key
-   *  the file cannot resolve ships no row at all, so its absence here is an
-   *  omitted row rather than a missing stamp) and ABSENT only on the honest
+   *  accept from setConfigKey -- EVERY SETTING THE CONFIG FILE CAN AFFECT
+   *  (the whitelist is retired, and a key the file cannot resolve ships no row
+   *  at all, so its absence here is an omitted row rather than a missing
+   *  stamp) -- and ABSENT only on the honest
    *  refusal classes,
    *  whose writes the SERVER refuses too (the stamp predicate is the write
    *  gate, not just the button):
@@ -968,7 +967,7 @@ export type ConfigSnapshotResultWire = {
 // ── Config key edit (C2S setConfigKey → S2C setConfigKeyResult) ────────────
 // The settings editor's write path (see ./handlers-config.ts). One value,
 // one addressable keyPath, one atomic surgical edit of the resolved config
-// file. The reply attests the IN-PROCESS outcome, hook by hook (design §7.1):
+// file. The reply attests the IN-PROCESS outcome, hook by hook:
 // `applied` names the class the value actually landed in ("live" only when a
 // migrated live path honored it), `needsRestart` is the legacy shim the
 // server DERIVES (true iff applied === "restart-required"), and success with
@@ -1001,15 +1000,15 @@ export type SetConfigKeyResultWire = {
    *  "rebind"          -- store swapped + socket/listen-level rebind performed (notice says the cost)
    *  "next-session"    -- store swapped; new sessions/builds honor it; running artifacts keep theirs
    *  "restart-required"-- value persisted only (pre-C7 posture; also every
-   *                       still-unruled §5 row, prepare-refusals, and last-good §2.3 outcomes) */
+   *                       still-pinned row, prepare-refusals, and last-good outcomes) */
   applied?: "live" | "rebind" | "next-session" | "restart-required";
   /** Human one-liners, rendered verbatim under the row: downtime warnings,
    *  "new pool entries only", "keeps current values because re-resolution
    *  failed", in-flight semantics. formatError text where an error is cited
-   *  (the §2.3 last-good error rides HERE -- §7.1's type is the wire
-   *  contract and carries no separate liveApplyError field; see b4-notes). */
+   *  (the last-good error rides HERE -- the wire contract carries no
+   *  separate liveApplyError field). */
   appliedNotices?: string[];
-  /** Per-hook ledger for this batch (§3): the truth of the side effects. */
+  /** Per-hook ledger for this batch: the truth of the side effects. */
   applyHooks?: Array<{ keyPath: string; phase: "prepare" | "apply";
                       status: "applied" | "degraded" | "refused"; error?: string }>;
   /** The persisted value echo on a scalar save (the client updates the row's
@@ -1212,7 +1211,7 @@ export interface TaskInfoWire {
   turnStartedAt: number | null;
   /**
    * True while the worker is blocked in a question-tool wait awaiting its
-   * delegating manager (B2, rides from core's TaskInfo via the taskWire
+   * delegating manager (rides from core's TaskInfo via the taskWire
    * spread). Additive: old clients ignore it; the nested subagent row badges
    * it. Live rows only -- durable (sidecar) rows never carry it.
    */

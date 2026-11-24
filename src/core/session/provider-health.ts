@@ -99,8 +99,8 @@ export interface ProviderHealth {
   /** Snapshot for diagnostics (`hotdog info` per-provider up/down). */
   status(): Array<{ name: string; down: boolean; reason: string | null }>;
   /**
-   * Re-arm the interval timer (config-live apply, design §3.3
-   * providerHealthCheckIntervalSecs row, batch B4): stop + recreate with the
+   * Re-arm the interval timer (config-live apply of
+   * providerHealthCheckIntervalSecs): stop + recreate with the
    * new seconds; `secs <= 0` DISABLES the timer. The failure-DRIVEN demotion
    * doctrine (markDown/noteUp fired from the request path,
    * task-manager.ts:118-131) lives outside the timer and stays intact in

@@ -16,7 +16,7 @@ export function handleSend(ctx: RouteContext): void {
   const files = msg.files;
   if (!sid) return;
 
-  // B3 refusal table (design (d), R4's attribute-not-fork): a worker row is
+  // Refusal table (attribute-not-fork): a worker row is
   // not a turn-taking session. Today this silently vanished (the private
   // SessionManager has no entry, so enqueue hit nothing); now it answers.
   // An ADOPTED worker row gets the honest variant: there is no task for a
@@ -83,8 +83,8 @@ export function handleCancel(ctx: RouteContext): void {
   const { ws, msg, registry, bridge } = ctx;
   if (!msg.sessionId) return;
   const managerSid = msg.sessionId as string;
-  // B3 refusal table: cancel on a worker sid is refused. This closes the
-  // gap the B2 ledger carried: the plain bridge.cancel below resolved a
+  // Refusal table: cancel on a worker sid is refused. This closes the
+  // gap: the plain bridge.cancel below resolved a
   // held worker question UNMARKED (defaults-as-answer, a D10 breach). The
   // refusal leaves the pending HELD for the manager; the kill control is
   // task-side (interrupt_task), and the manager's own cancel route above

@@ -50,7 +50,7 @@ interface WorkflowsExtensionConfig {
 }
 
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
-  // B7 (§4.1/§4.3 workflows row): the create() snapshot is GONE. Every value
+  // The create() snapshot is GONE. Every value
   // below is a reader resolved where it is used:
   //  - limits: resolved per validate/dispatch, so a raised
   //    workflows.maxNodes / maxRuntimeMins lands on the NEXT one. A run that
@@ -62,7 +62,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   //    new dir while existing runs keep the dirs they were written to (each
   //    ManagedRun carries its own runDir). The boot durability scan below is
   //    boot machinery and reads the boot value once, as before.
-  //  - modelGroups: read per group-ref resolution -- B3's scheduler precedent
+  //  - modelGroups: read per group-ref resolution -- the scheduler precedent
   //    (a reader over the live CONFIG bag; modelGroups is a config-bag root,
   //    read exactly like task-manager.ts / websocket/server.ts do).
   const block = () => getExtensionConfig<WorkflowsExtensionConfig>(core, "workflows");
@@ -251,7 +251,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       },
 
       [HOOKS.TOOLS_REGISTER]: async (toolRegistry) => {
-        // Readers all the way down (B7): each validate/dispatch/status call
+        // Readers all the way down: each validate/dispatch/status call
         // resolves dir, limits, the timeout toggle and the group bag against
         // the CURRENT generation.
         const opts: WorkflowToolOptions = {

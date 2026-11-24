@@ -18,7 +18,7 @@ export function sessionCreatedPayload(
   sessionId: string,
 ): Record<string, unknown> {
   const session = registry.get(sessionId);
-  // Worker rows read null from the live-agent oracle (B1); their bookkeeping
+  // Worker rows read null from the live-agent oracle; their bookkeeping
   // half comes from the raw row, the behavior half from the row agent's
   // ACCESSOR (null after release: the fields fall back like a released
   // interactive agent's do). The kind read keys on the ROW, not the oracle:
@@ -39,7 +39,7 @@ export function sessionCreatedPayload(
     models: Object.keys(agent?.modelRegistry || {}),
     sttEnabled: registry.sttEnabled,
     toolExec: registry.toolExecLabel(sessionId),
-    // B3 (design (d), client-facing vocabulary; the row's birth attribute
+    // Client-facing vocabulary (the row's birth attribute
     // stays "worker"): additive -- OMITTED on interactive rows, so an
     // interactive payload's bytes are unchanged. Absence = old behavior.
     // `adopted` (additive, same omit rule): this worker session was born by

@@ -71,7 +71,7 @@ export interface WireToolDescriptor {
 }
 
 /**
- * E1 required-scalar doctrine (§4.3): every scalar a pooled tool needs
+ * E1 required-scalar doctrine: every scalar a pooled tool needs
  * arrives on the wire ctx as a PLAIN required value -- the runner never
  * boots config, and a silently-defaulted second copy of a cap is how a
  * plane drifts from it.

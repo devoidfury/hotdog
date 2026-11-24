@@ -1,4 +1,4 @@
-// The SessionRegistry: the facade every websocket handler imports. B1 split
+// The SessionRegistry: the facade every websocket handler imports. Split
 // its two concerns into sibling modules -- agent-sessions.ts (the session
 // book: rows, birth kind, lifecycle, list projection, worker rows, the idle
 // sweep, the drain) and channel-hub.ts (sockets, channels, broadcast
@@ -44,7 +44,7 @@ export interface SessionRegistryOptions {
    * Resolved bag the tool-exec plane posture is read from. Pass the BAG for
    * a pinned snapshot (tests, embedded hosts) or a READER for a live strip
    * (the real server hands one over, so the label follows store.current()
-   * per payload -- B3). Omitted = inline (unfenced): a registry built
+   * per payload). Omitted = inline (unfenced): a registry built
    * without it advertises no plane.
    */
   toolExecResolved?: Record<string, unknown> | (() => Record<string, unknown>);

@@ -116,7 +116,7 @@ export interface TextBuffer {
   baseline: string;
   /** DERIVED at every commit, never a latch: current serialization !== the
    *  baseline. Text changed back to the baseline -- by undo or by any other
-   *  route -- reads CLEAN (owner ruling 2026-11-16); the tab dot, the close
+   *  route -- reads CLEAN; the tab dot, the close
    *  gate and the beforeunload veto all ride this flag's honesty. */
   dirty: boolean;
 }

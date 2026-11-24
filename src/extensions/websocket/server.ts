@@ -49,7 +49,7 @@ const finiteNumber = (name: string, v: unknown): number => {
 };
 
 /** Redacted host of an endpoint value -- NEVER the full URL, path/query can
- *  carry tokens (§5.2 audit doctrine: endpoint/credential line, redacted host
+ *  carry tokens (audit doctrine: endpoint/credential line, redacted host
  *  only, never value bytes). */
 const hostOnly = (v: unknown): string => {
   if (typeof v !== "string" || v === "") return "(endpoint unset)";
@@ -61,8 +61,8 @@ const hostOnly = (v: unknown): string => {
 };
 
 /**
- * The §3.3 shared-LlmClient row: IN-PLACE public-field reassignment on the
- * ONE shared client object. The rebuild branch is REJECTED (§3.3): the three
+ * The shared-LlmClient live path: IN-PLACE public-field reassignment on the
+ * ONE shared client object. The rebuild branch is REJECTED: the three
  * boot holders -- the server.ts variable, the agent factory's
  * options.llmClient (the path EVERY new agent takes, agent-factory.ts:133),
  * and the SessionRegistry option -- all keep the same object, so a rebuilt
@@ -156,8 +156,8 @@ export interface CreateWsServerOptions {
 export interface WsServer {
   sessionRegistry: SessionRegistry;
   /** The ONE shared LlmClient this server's factory and registry hold -- the
-   *  object the §3.3 live fields are reassigned IN PLACE on. Exposed so an
-   *  embedder (and the §9 agent-plane probe) observes exactly what the agents
+   *  object the live fields are reassigned IN PLACE on. Exposed so an
+   *  embedder (and the agent-plane probe) observes exactly what the agents
    *  observe; it is not a second client. */
   llmClient: LlmClient;
   onUpgrade: (
@@ -196,7 +196,7 @@ export function createWsServer(
   // the sttEnabled flag on the sessionCreated payload.
   const sttTarget = resolveSttTarget(core.resolved, sharedLlmClient);
 
-  // Profile overlays read PER BUILD through the live surface (B3): the map
+  // Profile overlays read PER BUILD through the live surface: the map
   // behind core.resolved.profileManager re-derives at each agent build, so a
   // profile added after boot lands on the NEXT build. The host-passed boot
   // snapshot stays the fallback for hosts without a manager (mock cores,
@@ -235,7 +235,7 @@ export function createWsServer(
     buildAgent,
     llmClient: sharedLlmClient,
     // No question defaults here: they resolve at question-armed time below,
-    // so a session row never freezes a copy of them (B3).
+    // so a session row never freezes a copy of them.
     sessionTimeoutMin,
     profiles,
     sttTarget,
@@ -249,7 +249,7 @@ export function createWsServer(
     streamBatchMs: () => resolveStreamBatchMs(core.config),
     // Posture strip source: a READER over the live resolved plane, consulted
     // per payload -- the strip follows store.current() instead of holding the
-    // boot bag reference (B3).
+    // boot bag reference.
     toolExecResolved: () => (core.resolved as Record<string, unknown> | undefined) ?? {},
     onSessionDeleted: (sid) => {
       // Drop the hold FIRST: dropSession cancels the pending question, and
@@ -264,7 +264,7 @@ export function createWsServer(
   // so the TaskManager lives here. Publishing it as the taskManager service lets delegate_task
   // resolve lazily; the observer relays spawn/status (TASK_UPDATE, scoped to the manager's
   // channels) so the webui task rows tick -- worker transcripts ride the session view's own
-  // tail since B4, never the main chat transcript.
+  // tail, never the main chat transcript.
   // Hoisted so the returned stopTaskManager() can reach it (null when no registry).
   let taskManager: TaskManager | null = null;
   if (resolvedCore?.modelRegistry) {
@@ -273,7 +273,7 @@ export function createWsServer(
       buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<AgentLike>,
       modelRegistry: resolvedCore.modelRegistry,
       config: core.config,
-      // Placement reads modelGroups through the live config accessor (B3):
+      // Placement reads modelGroups through the live config accessor:
       // placement N+1 after a swap sees the new member set.
       getModelGroups: () =>
         ((core.config as Record<string, unknown> | undefined)?.modelGroups as
@@ -283,12 +283,12 @@ export function createWsServer(
       sessionManager: registry.getSessionManager(),
       // A follow-up on a session blocked in a question becomes its answer.
       resolvePendingQuestion: (sid, text) => bridge?.answerWithText(sid, text) ?? false,
-      // B2 manager-gone closure seam: the CANCEL route releases a cancelled
+      // Manager-gone closure seam: the CANCEL route releases a cancelled
       // manager's held worker questions through this (bridge.resolveUnanswered
       // -- defaults + the unanswered marker, never ok-JSON defaults; the
       // worker task itself is NOT interrupted).
       releaseWorkerQuestion: (sid, reason) => bridge?.resolveUnanswered(sid, reason) ?? false,
-      // B1 worker-row seam: the worker's session row is born at the
+      // Worker-row seam: the worker's session row is born at the
       // recordAgentSession site (entry.agent in hand, before the first turn,
       // so the row exists before any question can arm). Book-only: the row
       // never enters the private SessionManager (no bus, no run loop).
@@ -340,7 +340,7 @@ export function createWsServer(
             }
           }
           if (sid) {
-            // B1 terminal release: mark the worker row terminal (frames stop;
+            // Terminal release: mark the worker row terminal (frames stop;
             // watcher channels are NOT force-closed -- the idle sweep reclaims
             // the released row once it holds zero clients), and drop the
             // bridge entry (the #inputs map leak: worker bridge inputs lived
@@ -352,7 +352,7 @@ export function createWsServer(
         }
         return;
       }
-      // B3's worker live-tail producer (design (b) "Live output"): the ONE
+      // The worker live-tail producer: the ONE
       // new wiring. EXACT order: (a) gate FIRST on the watcher count -- zero
       // watchers pays nothing: one map lookup, then return before ANY
       // mapping or allocation (no mapper call, no frame, no resolver
@@ -386,7 +386,7 @@ export function createWsServer(
     // Question defaults resolve at QUESTION-ARMED time (this callback runs
     // once per ask, before the timer is armed): the live websocket block
     // answers, so a swap changes the NEXT armed question while an in-flight
-    // one keeps its armed timer (P8's benign twin -- that IS the B3 posture).
+    // one keeps its armed timer (P8's benign twin -- that IS the posture).
     // The createWsServer options stay as the host hint for cores with no
     // websocket block (hand-built mocks).
     getPolicy: (sid) => {
@@ -395,9 +395,7 @@ export function createWsServer(
       const strategy = (ws.questionStrategy as string | undefined) ?? questionStrategy;
       const timeoutSecs =
         (ws.questionTimeoutSecs as number | undefined) ?? questionTimeoutSecs;
-      // Worker rows (owner rulings 2026-11-16, binding; they supersede the
-      // design doc's pre-ruling "default + per-question timer" posture):
-      // worker questions run "wait", ALWAYS -- strategy "wait" arms no
+      // Worker questions run "wait", ALWAYS -- strategy "wait" arms no
       // timer, which is the point (no worker-facing timer; the lane yields
       // on ask and the manager wakes and answers via the existing steer-lane
       // machinery). An inherited "cancel" or "default" (host config OR row
@@ -425,7 +423,7 @@ export function createWsServer(
         timeoutSecs: meta?.questionTimeoutSecs || timeoutSecs,
       };
     },
-    // B3 carried-note fix (B4): this drives only the question-tool RESULT's
+    // Carried-note fix: this drives only the question-tool RESULT's
     // mode label. A worker-row question is answered by the delegating
     // manager (R3) -- never through the socket -- so watcher channels must
     // not make it read "interactive".
@@ -451,14 +449,14 @@ export function createWsServer(
     },
   });
 
-  // ── Config-live apply hooks (B4, design §3.3) ─────────────────────────────
+  // ── Config-live apply hooks ───────────────────────────────────────────────
   // Registered once, at this host's create(). Load order: createCore already
   // put the core-side hookTrace row in the table before any extension
   // loaded, so core hooks run before these extension rows (registration
   // order = run order). The unregister closures are deliberately not
   // surfaced: the WsServer has no per-object teardown today (webui stops the
   // cleanup loop and the TaskManager only) -- B8's auth seam introduces the
-  // lifecycle that needs them; see b4-notes.
+  // lifecycle that needs them.
   registerConfigApplyHook({
     keyPath: "websocket.sessionTimeoutMin",
     phase: "apply",

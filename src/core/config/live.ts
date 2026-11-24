@@ -1,5 +1,5 @@
 /**
- * live.ts -- the notify seam above the store atom (design §1.3-§1.6, batch B2).
+ * live.ts -- the notify seam above the store atom.
  *
  * The store owns ONE reactiveState atom over ConfigGenerations and fires it
  * blind on every commit: no keyPath granularity, no old/new values. This
@@ -9,7 +9,7 @@
  * keyPath granularity rides above the atom as a subscriber helper, and the
  * missing old/new values are reconstructed there honestly.
  *
- * Why one store atom + helper, not per-top-level-block atoms (§1.3):
+ * Why one store atom + helper, not per-top-level-block atoms:
  * per-block atoms would split ownership across N atoms with no single
  * "current process config" value to read, require inventing atoms
  * dynamically when extension blocks appear, force multi-dep effect
@@ -30,7 +30,7 @@ export interface ConfigChange {
   /** Current value at keyPath (post-swap read). */
   value: unknown;
   /** The value THIS subscriber last observed. Because every publish flows
-   *  through the serialized transaction (§2.4) and every wake passes the
+   *  through the serialized transaction and every wake passes the
    *  filter test, "last observed" IS the previous generation's value -- the
    *  old value is reconstructed per subscriber, not handed by the atom. */
   previous: unknown;
@@ -40,7 +40,7 @@ export interface ConfigChange {
 
 /**
  * Value at keyPath in a generation: getNested against the config bag first
- * (the primary consumer surface, §1.2), falling back to the resolved bag --
+ * (the primary consumer surface), falling back to the resolved bag --
  * `changed` spans both bags in one prefix namespace (store.ts diffChanged),
  * so a subscription must be able to answer resolved-only keys ("baseUrl"
  * style) through the same seam. A bare keyPath reads the top-level block.
@@ -105,7 +105,7 @@ function reallyChanged(previous: unknown, value: unknown): boolean {
  *   compare, then canonical JSON compare when both sides are objects and
  *   the refs differ (re-resolve rebuilds every subtree, so ref-inequality
  *   alone would fire everyone on every write).
- * - `previous` is this subscription's own last observation (§1.4), seeded
+ * - `previous` is this subscription's own last observation, seeded
  *   at subscribe time with the CURRENT value at keyPath: a subscription
  *   created mid-life never claims a value it never observed. A delivered
  *   value becomes the observation even when fn throws -- delivery happened;
@@ -120,7 +120,7 @@ function reallyChanged(previous: unknown, value: unknown): boolean {
  *   (fire-and-forget) call simply queues on the FIFO tail and runs after
  *   the transaction -- that IS the honest deferral; build no extra queue
  *   machinery for it.
- * - Set-iteration consequences (§1.6), stated rather than fought: a
+ * - Set-iteration consequences, stated rather than fought: a
  *   subscriber ADDED during a notify pass runs in the same pass -- safe by
  *   construction because subscribers read state at callback time, so it
  *   just observes the new value twice and the change test no-ops the extra
@@ -152,7 +152,7 @@ export function onConfigChange(
         `[config-live] onConfigChange("${keyPath}") subscriber threw: ${formatError(e)}`,
       );
     }
-    last = value; // delivered = observed, even through a throw (§1.4)
+    last = value; // delivered = observed, even through a throw
   };
 
   const stop = store.generation.effect(wrapped);

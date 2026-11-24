@@ -66,10 +66,10 @@ export class TaskManager {
   #observer: TaskObserver | null = null;
   /** Follow-up -> pending-question answer seam (null: plain steer only). */
   #resolvePendingQuestion: ((sessionId: string, text: string) => boolean) | null;
-  /** B2 host seam: release a held worker question WITHOUT answering it
+  /** Host seam: release a held worker question WITHOUT answering it
    *  (null: no bridge to release through). See TaskManagerOptions.releaseWorkerQuestion. */
   #releaseWorkerQuestion: ((sessionId: string, reason: string) => boolean) | null = null;
-  /** B1 host seam: worker-session row birth at the recordAgentSession site
+  /** Host seam: worker-session row birth at the recordAgentSession site
    *  (null: no host row table). See TaskManagerOptions.onWorkerSessionStarted. */
   #onWorkerSessionStarted: ((info: WorkerSessionStartedInfo) => void) | null = null;
 
@@ -87,7 +87,7 @@ export class TaskManager {
         baseUrl: (options.config as Record<string, unknown>).baseUrl as string | undefined,
         apiKey: (options.config as Record<string, unknown>).apiKey as string | undefined,
       });
-    // modelGroups rides the config bag like providers, but as a READER (B3):
+    // modelGroups rides the config bag like providers, but as a READER:
     // the scheduler calls it per placement, so no generation's map object is
     // ever pinned. Hosts holding a live core inject an accessor-backed
     // reader (websocket/server.ts); the default re-reads this manager's own
@@ -224,7 +224,7 @@ export class TaskManager {
   }
 
   /**
-   * Fire the B1 worker-session seam (TaskManagerOptions.onWorkerSessionStarted).
+   * Fire the worker-session seam (TaskManagerOptions.onWorkerSessionStarted).
    * Guarded exactly like the observer relay above: a throwing host must not
    * disturb task execution.
    */
@@ -367,7 +367,7 @@ export class TaskManager {
   }
 
   /**
-   * Read-only working probe for worker rows (B3 attach): is the task whose
+   * Read-only working probe for worker rows: is the task whose
    * WORKER runs under this agent session mid-turn? Workers never enter the
    * private SessionManager, so the webui's `working` source
    * (isSessionRunning) cannot answer for them -- the task's inRun is the
@@ -972,7 +972,7 @@ export class TaskManager {
    * body wrapped untrusted. Engine-spawned tasks (no delegating session, or a
    * host without a getBus seam) have nobody to reach: the wake is dropped with
    * a warning, and the truth is that NOTHING displays it in place either --
-   * the webui opens worker views now (B4's collapse; the relay grammar is
+   * the webui opens worker views now (the collapse onto session views; the relay grammar is
    * retired, and even before that it had no QUESTION case -- the old claim
    * here was false). The question is
    * not invisible: it rides the worker's durable session log, and the worker

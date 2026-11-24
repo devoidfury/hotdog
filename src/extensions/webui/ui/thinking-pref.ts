@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
-// Reasoning-visibility preference: a per-BROWSER view setting (owner ruling
-// 2026-11-05). localStorage so it survives a reload and applies to whatever
+// Reasoning-visibility preference: a per-BROWSER view setting.
+// localStorage so it survives a reload and applies to whatever
 // transcript is on screen -- the live one or a cold log being browsed. The
 // CLI's /thinking session state (agent.hideThinking, server broadcast) is
 // separate server state; this file never touches it.

@@ -103,15 +103,15 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  // B6b (§4.1): autoIncludeFilesUnderBytes is read PER HANDOFF (at the point
+  // autoIncludeFilesUnderBytes is read PER HANDOFF (at the point
   // of use in collectFiles), no longer captured at create(). FAIL-LOUD
   // doctrine kept, moved with the read: an invalid value REFUSES the
   // file-carrying handoff with a ConfigError that surfaces as the TURN_END
   // "Handoff error: ..." emission BEFORE any context is cleared -- never a
   // silent default, never a zeroed feature (a handoff with no files uses no
   // bytes limit and is untouched, honestly: the value is not consulted).
-  // The old boot-time throw is retired BY RULING of this migration (a
-  // captured boot value is exactly what §4.1 removes); a bad live write lands
+  // The old boot-time throw is retired by the migration (a
+  // captured boot value is exactly what per-handoff reads remove); a bad live write lands
   // on the NEXT file-carrying handoff instead of at startup.
   const resolveAutoIncludeBytes = (): number => {
     const raw = getExtensionConfig<{ autoIncludeFilesUnderBytes?: number }>(
@@ -144,7 +144,7 @@ export function create(core: CoreContext): ExtensionInstance {
     files: string[],
     workspace: Workspace,
   ): Promise<{ includes: Array<Record<string, unknown>>; notes: string[] }> {
-    // ONE per-handoff read (§4.1): the value the whole file pass enforces,
+    // ONE per-handoff read: the value the whole file pass enforces,
     // resolved at use. An invalid published value throws ConfigError from
     // here; the TURN_END catch renders it as the loud "Handoff error" line
     // with the session and its context fully intact (refusal, not default).

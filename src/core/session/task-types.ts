@@ -326,7 +326,7 @@ export interface TaskManagerOptions {
    */
   resolvePendingQuestion?: (sessionId: string, text: string) => boolean;
   /**
-   * B2 host seam (the shape `resolvePendingQuestion` established): release a
+   * Host seam (the shape `resolvePendingQuestion` established): release a
    * worker's HELD question WITHOUT answering it -- the host wires this to its
    * bridge's `resolveUnanswered` (defaults + the D10 unanswered marker, so
    * the tool says "not answered", never passes defaults off as a reply).
@@ -338,7 +338,7 @@ export interface TaskManagerOptions {
    */
   releaseWorkerQuestion?: (sessionId: string, reason: string) => boolean;
   /**
-   * B1 host seam (the shape `resolvePendingQuestion` established): fired at
+   * Host seam (the shape `resolvePendingQuestion` established): fired at
    * the recordAgentSession site -- after the worker agent is built and its
    * durable-log key stamped on the entry, BEFORE the first turn, so the
    * host's session row exists before any question can arm. The agent
@@ -349,7 +349,7 @@ export interface TaskManagerOptions {
    */
   onWorkerSessionStarted?: (info: WorkerSessionStartedInfo) => void;
   /**
-   * Reader for the config modelGroups map (B3 live-surface convention): the
+   * Reader for the config modelGroups map (live-surface convention): the
    * scheduler calls it per placement instead of pinning the boot bag's map at
    * construction. Hosts that hold a live core pass an accessor-backed reader
    * (`() => core.config.modelGroups ?? {}`); absent, the manager re-reads its

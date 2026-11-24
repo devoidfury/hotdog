@@ -79,8 +79,8 @@ export async function attachLiveSession(
   cursor = 0,
   fullOverride?: LogEntry[],
 ): Promise<boolean> {
-  // B3 worker-row branch of the live check: the live-agent oracle refuses
-  // worker rows (B1), so the raw row answers for them -- a LIVE (non-
+  // Worker-row branch of the live check: the live-agent oracle refuses
+  // worker rows, so the raw row answers for them -- a LIVE (non-
   // terminal) worker row attaches. The replay half below is RIDDEN
   // wholesale (full replay past the cursor with the RESET/shrink clamps,
   // the window trio, replayPendingQuestion -- the bridge is per-sid
@@ -256,8 +256,8 @@ export async function attachResumedSession(
     return;
   }
 
-  // B3: a LIVE worker row is live for the reconnect too -- the live-agent
-  // oracle above refuses it (B1), so the raw row answers here and the
+  // A LIVE worker row is live for the reconnect too -- the live-agent
+  // oracle above refuses it, so the raw row answers here and the
   // attach rides the worker branch of attachLiveSession. A TERMINAL worker
   // row (or none) falls through to the cold-log adoption below, unchanged:
   // Continue on a released worker's log is the normal resume path.

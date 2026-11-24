@@ -30,7 +30,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 };
 
 interface ReadToolOptions {
-  // B6a (§4.1): scalar-or-reader knobs. Static scalars (the pooled runner,
+  // Scalar-or-reader knobs. Static scalars (the pooled runner,
   // test doubles) stay pinned; the extension entry passes readers so every
   // execute reads the live coreTools block.
   readLimit: ConfigKnob<number>;

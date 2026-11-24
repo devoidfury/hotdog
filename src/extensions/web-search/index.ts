@@ -29,13 +29,12 @@ interface SearchResult {
 }
 
 /**
- * The knobs the web-search tool is built with (B6b, design §4.1):
- * scalar-or-reader. Plain scalars stay pinned forever (test doubles); the
+ * The knobs the web-search tool is built with: scalar-or-reader. Plain scalars stay pinned forever (test doubles); the
  * extension entry passes readers over the live webSearch block, so every
  * search -- provider, caps, AND the provider keys/endpoint -- answers from the
- * current generation (§5.2 row: per-search reads incl. secrets).
+ * current generation (per-search reads incl. secrets).
  * REDACTION DOCTRINE UNCHANGED: secret values never cross wire or log; the
- * §5.3 change line may name an endpoint HOST and, for keys, only
+ * change line may name an endpoint HOST and, for keys, only
  * set/unset/changed -- never any key material, ever.
  */
 interface WebSearchToolOptions {
@@ -507,7 +506,7 @@ function formatResults(results: SearchResult[], query: string, provider: string)
 // ── Tool Class ──────────────────────────────────────────────────────────────
 
 /** Audit summary for an API-key change: STATE WORDS ONLY -- key material is
- *  never rendered, in either direction (the §5.3 redaction floor). */
+ *  never rendered, in either direction (the redaction floor). */
 function keyChangeSummary(oldKey: string, newKey: string): string | null {
   if (oldKey === newKey) return null;
   if (!oldKey) return "unset -> set";
@@ -545,7 +544,7 @@ export class WebSearchTool {
   #braveApiKey: ConfigKnob<string>;
   #tavilyApiKey: ConfigKnob<string>;
   #searxngInstanceUrl: ConfigKnob<string>;
-  /** Trust values last SEEN by execute() -- the baseline for the §5.3 lines. */
+  /** Trust values last SEEN by execute() -- the baseline for the change lines. */
   #lastTrust: { brave: string; tavily: string; searxng: string } | null = null;
 
   // The caps clamp at the READ (they used to clamp in the ctor): a scalar knob
@@ -580,7 +579,7 @@ export class WebSearchTool {
   }
 
   /**
-   * §5.3 audit floor for the §5.2 webSearch row (LIVE per-search reads): an
+   * Audit floor for the LIVE per-search reads: an
    * endpoint/key change must never pass silently. Diff against the values
    * last SEEN at a search; the first observation seeds the baseline without
    * logging (boot posture is not a change), then ONE line per changed key
@@ -631,8 +630,8 @@ export class WebSearchTool {
     }
 
     const tiles = typeof args.tiles === "string" && args.tiles.trim() ? args.tiles.trim() : undefined;
-    // B6b (§4.1): ONE live read per search for every knob (no torn mid-search
-    // values), then the §5.3 change line for the trust keys (§5.2 row).
+    // ONE live read per search for every knob (no torn mid-search
+    // values), then the change line for the trust keys.
     const provider = this.provider.toLowerCase().trim();
     const maxResults = this.maxResults;
     const timeout = this.timeout;
@@ -683,9 +682,9 @@ export class WebSearchTool {
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  // B6b (§4.1): the knobs reach the tool as READERS over the live webSearch
+  // The knobs reach the tool as READERS over the live webSearch
   // block; nothing from the block is captured at create()/registration scope.
-  // Per-search reads incl. the secrets (§5.2 row) -- redaction doctrine
+  // Per-search reads incl. the secrets -- redaction doctrine
   // unchanged, the values never ride the wire or the log.
   const block = () => getExtensionConfig<WebSearchConfig>(core, "webSearch");
 

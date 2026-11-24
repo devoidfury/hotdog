@@ -197,9 +197,9 @@ async function collectAdditionalFiles(
 export class SkillsLoader {
   /**
    * Where the skills live: a plain string/array stays PINNED forever (test
-   * doubles, embedded hosts -- byte-identical behavior, B6a's ConfigKnob
+   * doubles, embedded hosts -- byte-identical behavior, the ConfigKnob
    * convention), a reader resolves the CURRENT configured path at every use
-   * (B7, design §4.1: the constructor holds the reader, never a config
+   * (the constructor holds the reader, never a config
    * scalar). Colon-separated spellings normalize identically either way.
    */
   private readonly paths: ConfigKnob<string | string[]>;

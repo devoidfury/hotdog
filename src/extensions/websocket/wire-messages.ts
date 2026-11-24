@@ -303,8 +303,8 @@ export function s2cToolResult(
     name: o.name,
     // Content parts travel as text on this transport: the browser has no
     // part renderer, so flatten the fields here (display, not a format).
-    // The META LINE is left out of the text (owner ruling 2026-11-18): the
-    // envelope instead rides structured below, where the block renders its
+    // The META LINE is left out of the text: the envelope instead rides
+    // structured below, where the block renders its
     // curated facts (exit code, durations, truncation) as one muted strip
     // and keeps the full envelope behind the expand idiom. startLine stays
     // its own field: the diff rails consume it as a number.

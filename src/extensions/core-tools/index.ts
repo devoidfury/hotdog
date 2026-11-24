@@ -49,7 +49,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
 export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 
 /**
- * The knobs the core tools are built with (B6a, design §4.1): scalar-or-reader.
+ * The knobs the core tools are built with: scalar-or-reader.
  * Static scalars stay pinned forever (plain-scalar hosts: test doubles, the
  * mirrored websocket registration pins); the extension entry below passes
  * readers over the live store, so every execute reads the CURRENT generation's
@@ -197,11 +197,10 @@ interface RawCoreToolConfig {
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  // Config defaults come from extension.json configSchema. B6a (§4.1): the
-  // knobs reach the tools as READERS over the live block -- nothing from the
+  // Config defaults come from extension.json configSchema. The knobs reach the tools as READERS over the live block -- nothing from the
   // block is captured at create() scope, so a store publish changes the NEXT
-  // execute of an already-registered tool (design §4.3 row: read/grep/find/
-  // edit read the coreTools block per execute).
+  // execute of an already-registered tool (read/grep/find/edit read the
+  // coreTools block per execute).
   const block = () => getExtensionConfig<RawCoreToolConfig>(core, "coreTools");
 
   return {

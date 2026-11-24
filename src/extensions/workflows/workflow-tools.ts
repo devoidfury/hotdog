@@ -212,7 +212,7 @@ export function createWorkflowScanner(
 ): () => Promise<WorkflowListing[]> {
   const cache = new Map<string, { mtimeMs: number; size: number; entry: WorkflowListing | null }>();
   // The cached entries belong to the dir they were parsed from: when the
-  // live reader starts answering a different dir (B7), the cache is dropped
+  // live reader starts answering a different dir, the cache is dropped
   // rather than served under the wrong root.
   let cacheDir: string | null = null;
   return async () => {
@@ -277,18 +277,18 @@ export interface WorkflowToolOptions {
   getRunsRoot: () => string | null;
   /** The workflows directory holding `*.workflow.yaml` graphs; null when unset. */
   getWorkflowsDir: () => string | null;
-  /** Soft limits (workflows.maxNodes, workflows.maxRuntimeMins). B7 (§4.1):
+  /** Soft limits (workflows.maxNodes, workflows.maxRuntimeMins):
    *  a plain object stays PINNED forever (test/embedded hosts), a reader
    *  resolves at each validate/dispatch -- the object handed to parseWorkflow
    *  / WorkflowRun is the CURRENT one, and the run then freezes it (P8). */
   limits: ConfigKnob<Partial<WorkflowLimits>>;
   /** workflows.enableRuntimeTimeouts; gates the engine caps of dispatched
-   *  runs. B7: reader-or-scalar, read at DISPATCH (the toggle's documented
+   *  runs. Reader-or-scalar, read at DISPATCH (the toggle's documented
    *  landing), never captured at registration. */
   enableRuntimeTimeouts?: ConfigKnob<boolean>;
   /** Resolved config modelGroups: enables declared-group resolution in validate/dispatch.
    *  When absent the group field is shape-checked only (runtime still resolves loudly).
-   *  Already a reader; B7 makes the live host's reader re-read the bag. */
+   *  Already a reader; the live host's reader re-reads the bag. */
   getModelGroups?: () => Record<string, string[]>;
   registry: RunRegistry;
 }

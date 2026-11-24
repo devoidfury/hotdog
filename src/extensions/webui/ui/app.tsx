@@ -189,7 +189,7 @@ function mergeLogRows(held: LogInfo[], incoming: LogInfo[]): LogInfo[] {
 const activeLogIdAtom = reactiveState<string | null>(null);
 const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
 
-// Owner ruling 2026-11-18: the version-skew banner's dismissal. Per page-load on purpose -- a
+// The version-skew banner's dismissal. Per page-load on purpose -- a
 // fresh reload re-attests the handshake and re-raises the banner if the
 // daemon is still old (dismissing hides the strip, not the diagnosis).
 const versionSkewDismissedAtom = reactiveState<boolean>(false);
@@ -314,11 +314,11 @@ function onSearchKeydown(e: KeyboardEvent): void {
 }
 
 function onActivateHit(hit: SearchHitWire): void {
-  // NO hit ever attaches (owner ruling 2026-11-18). A LIVE hit opens a read-only PEEK at that
+  // NO hit ever attaches. A LIVE hit opens a read-only PEEK at that
   // session's history (viewLog reads the durable log by id; the socket keeps
   // its own session and the composer stays locked); a COLD hit opens the
   // same read as OBSERVING. The hit's query rides as the seek needle: the
-  // peek pages the B3 loadOlder seam until the matched message renders, then
+  // peek pages the loadOlder seam until the matched message renders, then
   // scrolls it into view with a transient flash -- and if the history runs
   // out first (compacted away), the banner says so instead of quietly
   // showing the head.
@@ -705,8 +705,8 @@ function syncTaskTick(): void {
   }
 }
 
-/** The ATTACHED session is a worker row (sessionCreated kind, B3): the pane
- *  is a subagent session view (B4 -- the relay pane is gone; the session
+/** The ATTACHED session is a worker row (sessionCreated kind): the pane
+ *  is a subagent session view (the relay pane is gone; the session
  *  surface IS the pane). Steering rides taskFollowup (the worker's own send
  *  is refused server-side); attachments, slash commands, fork/rename/pin and
  *  profile switches are refused too, so the chrome must not offer them. */
@@ -1391,7 +1391,7 @@ function onLogMenu(e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElem
 }
 
 /** Row-press routing shared by the sidebar row and the context menu's Open
- *  (openTargetFor decides the landing, B4): a LIVE worker row opens its
+ *  (openTargetFor decides the landing): a LIVE worker row opens its
  *  SESSION through the standard attach (switchSession -- the pane is the
  *  session view, there is no second transcript surface); a SETTLED or
  *  DURABLE row opens the worker's own durable log through the existing cold
@@ -1410,7 +1410,7 @@ function openTaskRow(t: TaskInfoWire): void {
   // both labels (and the log row drops its highlight).
   if (activeLogIdAtom() !== null) clearLogView();
   // The subagent hint: if this live-row attach fails, the pane owes the
-  // honest fallback card, not a raw error bubble (owner ruling 2026-11-18).
+  // honest fallback card, not a raw error bubble.
   chat?.switchSession(target.sessionId, { subagent: true });
 }
 
@@ -1688,8 +1688,8 @@ const workbenchPanel = createPanelResize({
   defaultSize: WORKBENCH_DEFAULT_WIDTH,
   min: WORKBENCH_MIN_WIDTH,
   max: WORKBENCH_MAX_WIDTH,
-  // Mirror the sidebar's pattern (owner ruling: a wide screen hands the
-  // pane most of its width): 60% of the viewport, and on degenerate
+  // Mirror the sidebar's pattern (a wide screen hands the pane most of its
+  // width): 60% of the viewport, and on degenerate
   // viewports the seam's min-wins rule takes the wheel.
   viewportMax: () => window.innerWidth * 0.6,
   step: 16,
@@ -1758,7 +1758,7 @@ function onToggleWorkbenchTreePin(): void {
 // and aria-expanded keeps honestly meaning "dock visible"). The SESSIONS
 // SIDEBAR TRAVELS with the chat: it docks beside it on the far right,
 // keeping its own preference and its disclosure in both shapes (the tree
-// owns the slot it left). The dock is TWO numbers, not one (owner ruling):
+// owns the slot it left). The dock is TWO numbers, not one:
 // D --editor-dock-width is the BLOCK, dragged at its left border, and S
 // --sidebar-width is the RAIL, dragged at the rail's right border with the
 // chat absorbing the difference; the tree keeps its own seam (treeColPanel
@@ -2581,7 +2581,7 @@ function startChat(): void {
     onTaskControl: (r: TaskControlWire) => {
       // Requester-only refusal (steer/Stop). It must not pass silently: an
       // honest system line lands in the transcript that issued the action
-      // (B4: the worker-session view -- the only surface that steers).
+      // (the worker-session view -- the only surface that steers).
       if (r.ok) return;
       const word = r.action === "interrupt" ? "Stop" : "Steering";
       chat?.messageListAtom()?.addSystemMessage(`${word} refused: ${r.error ?? "no reason given"}`);
@@ -2774,7 +2774,7 @@ function startChat(): void {
   // model changes, and pull profiles once connected. Streaming output must
   // NEVER land in this list: transcript frames go straight from chat.ts into
   // the MessageListManager's imperative DOM path (the viewed worker's own
-  // tail included, since B4's collapse), so a session streaming hundreds of
+  // tail included, since the collapse onto session views), so a session streaming hundreds of
   // deltas per second repaints nothing here -- the
   // sidebar rows refresh on tasksAtom (per taskUpdate) and the 1 s tick.
   stopChatEffects = effect(render, [
@@ -2860,9 +2860,8 @@ function onChatSubmit(e: Event): void {
   const attachments = attachmentsAtom();
   if (!text && attachments.length === 0) return;
 
-  // A worker-session view steers its TASK through the follow-up route
-  // (owner ruling 2026-11-13, re-pointed by B4's collapse): the route is
-  // text-only on the wire (taskFollowup carries no files), and the worker
+  // A worker-session view steers its TASK through the follow-up route:
+  // the route is text-only on the wire (taskFollowup carries no files), and the worker
   // row's own send/command surface is refused server-side. With staged
   // attachments the box and the draft stay intact -- the bytes are the
   // user's until a route can carry them. No local echo: the drained steer
@@ -3429,9 +3428,9 @@ function App() {
   // (syncSelects) was exactly this job and is gone).
   const currentProfile = chat?.currentProfileAtom() ?? "";
   const currentModel = chat?.currentModelAtom() ?? "";
-  // The composer's working posture is the ATTACHED session's (owner ruling
-  // 2026-11-13, now literally true since the pane IS the session): the
-  // worker-row attach answers `working` with the task's inRun (B3's live
+  // The composer's working posture is the ATTACHED session's (literally
+  // true since the pane IS the session): the
+  // worker-row attach answers `working` with the task's inRun (the live
   // check), so the button starts honest and can never claim a turn the
   // server never attested (deliberately not optimistic: taskInterrupt can be
   // refused, and a refused Stop must not leave a lying button).
@@ -3444,14 +3443,13 @@ function App() {
   const view = chat?.sessionViewAtom() ?? ATTACHED_VIEW;
   const composer = composerForView(view);
   // A cold log / a peek is a read-only record; a worker-session view is a
-  // LIVE view (owner ruling 2026-11-13): the composer stays operable and
-  // STEERS the task. The fence strip and file drops stay inert in every
+  // LIVE view: the composer stays operable and STEERS the task. The fence strip and file drops stay inert in every
   // non-writing view: they act on the ATTACHED session, which is not what
   // the pane is showing (and are refused for a worker row outright).
   const browseView = view.mode !== "attached" || view.workerView;
   const sessionId = chat?.sessionIdAtom() ?? null;
   // The header identity is the ATTACHED session's id (the pane's subject is
-  // the session since B4 -- a worker view names the worker's OWN session id,
+  // the session -- a worker view names the worker's OWN session id,
   // which is what viewLog/search key on; the copy button always copies the
   // full id of what it names).
   const badgeId = sessionId;
@@ -3524,8 +3522,8 @@ function App() {
         >
           {liveAnnounceAtom()}
         </div>
-        {/* Owner ruling 2026-11-18: client/daemon build skew (bundle stamp vs the daemon's
-            additive authOk version). Visible warning, honest sentence,
+        {/* Client/daemon build skew (bundle stamp vs the daemon's additive
+            authOk version). Visible warning, honest sentence,
             dismissible for this page-load; re-attested on every handshake.
             Never renders when the two agree. */}
         {chat?.versionSkewAtom() && !versionSkewDismissedAtom() ? (
@@ -3691,8 +3689,8 @@ function App() {
             --sidebar-width (its own handle would sit on the block's outer
             border, which the dock seam already owns -- see #dock-resize).
             Closing hides the WHOLE block: the rail leaves with the chat in
-            CSS (owner ruling 2026-11-14, CHAT/EDITOR MODE block) -- the DOM
-            never learns the difference. */}
+            CSS (CHAT/EDITOR MODE block) -- the DOM never learns the
+            difference. */}
         <main
           id="chat-area"
           className={editorMode && dockCollapsed ? "chat-dock-hidden" : undefined}
@@ -3731,9 +3729,8 @@ function App() {
               >
                 <IconWorkbench flip />
               </button>
-              {/* The pane's subject identity (owner ruling 2026-11-13, B4-
-                  honest): a worker-session view prefixes "Subagent:" and the
-                  badge is the WORKER's own session id (the key its durable
+              {/* The pane's subject identity: a worker-session view prefixes
+                  "Subagent:" and the badge is the WORKER's own session id (the key its durable
                   log rides); an interactive attach says "Session:". The dim
                   is log view only: there the badge shows the attached id
                   while the pane is a cold record, so it must read as
@@ -4054,7 +4051,7 @@ function App() {
                   <label id="profile-selector" className="profile-selector">
                     {/* Label text is screen-reader-only (house .visually-hidden
                         clip: keeps the accessible name, drops the visible
-                        "Profile:" the owner hid 2026-11-14). */}
+                        "Profile:"). */}
                     <span className="visually-hidden">Profile</span>
                     <Combobox
                       id="profile-select"
@@ -4102,8 +4099,8 @@ function App() {
                   // type=button: it lives inside #chat-form; without it the
                   // click would submit the composer before cancelling. The
                   // in-button spinner is the chat column's only busy tell.
-                  // Same button, two addressees (owner ruling 2026-11-13):
-                  // the viewed subagent's Stop rides taskInterrupt for THAT
+                  // Same button, two addressees: the viewed subagent's Stop
+                  // rides taskInterrupt for THAT
                   // task, never the manager's cancel frame.
                   <button
                     type="button"

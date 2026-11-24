@@ -83,8 +83,7 @@ export interface FileViewEntry {
   /** Honest one-line rejection, verbatim. A pager failure keeps the loaded
    *  lines on screen and stops the pager (refresh is the reload affordance). */
   error?: string;
-  /** The foot bar's PAINT override (owner request 2026-11-14): a registry
-   *  lang name -- "plain" forces the uncolored sheet -- or absent for the
+  /** The foot bar's PAINT override: a registry lang name -- "plain" forces the uncolored sheet -- or absent for the
    *  auto-guess. It is how the user asked to LOOK at the file, not part of
    *  the read: reload and paging preserve it, only setFileViewLang moves it. */
   lang?: string;
@@ -371,7 +370,7 @@ export function FileView(p: FileViewProps) {
     : "reading...";
   return (
     <div className="file-view" data-path={p.path}>
-      {/* NO HEAD CHROME (owner ruling 2026-11-14): the tab already names the
+      {/* NO HEAD CHROME: the tab already names the
           file, so the name row is gone and the sheet starts at the tab
           strip's hairline. The viewer's whole chrome rides the foot bar. */}
       {loading ? <div className="file-view-note">Reading file...</div> : null}
@@ -403,7 +402,7 @@ export function FileView(p: FileViewProps) {
           at the head. */}
       <div className="file-view-bar">
         {p.onLang ? (
-          // The paint list (owner request 2026-11-14): a NATIVE select --
+          // The paint list: a NATIVE select --
           // the popup, keyboard and the selected-row highlight arrive free
           // (the composer's #model-select wore this idiom until the
           // 2026-11-15 combobox migration; this chooser stays native, its

@@ -1,5 +1,5 @@
 /**
- * reresolve.ts -- the re-resolve pipeline (design §2.1, batch B4).
+ * reresolve.ts -- the re-resolve pipeline.
  *
  * The cheap half of what boot does (`buildConfig`, config/index.ts), run after
  * a validated config-file write to produce the NEXT ConfigGeneration:
@@ -10,14 +10,14 @@
  * memo would hand back the BOOT result, and a fresh buildConfig would run the
  * network half) and never calls `buildModelRegistry` -- NO network on the
  * write path; provider-catalog work belongs to the health sweep / its apply
- * hook (§3.3). The full pipeline (not an "affected subtree" diff) is deliberate:
+ * hook. The full pipeline (not an "affected subtree" diff) is deliberate:
  * `resolveAll` is a pure loop over CONFIG_SCHEMA, the fs touches are ms-scale,
  * and scoping the resolve to one subtree would fork the resolution semantics
- * into a second code path (design §2.1).
+ * into a second code path.
  *
  * May THROW (ConfigError on an unset `$VAR` in the file, schema validation
  * failure, a profile/template read that fails) -- callers MUST implement the
- * §2.3 last-good posture: keep the file write, keep the store's previous
+ * last-good posture: keep the file write, keep the store's previous
  * generation, say so plainly in the reply. No retry machinery: the next
  * successful write re-runs the pipeline against the whole file.
  */
@@ -49,7 +49,7 @@ export interface CandidateGeneration {
  * argv (the cli layer stays honest: boot's flags keep applying, and the write
  * transaction pins `config` to the exact file the write chain verified).
  *
- * configDir threading (the sketch's noted gap, design §2.1 NOTE): the REAL
+ * configDir threading (the sketch's noted gap): the REAL
  * buildAgentConfig signature REQUIRES `configDir` (config/index.ts:341-347,
  * `configDir: string`). This threads the RESOLVED config dir the boot
  * pipeline used -- `previous.resolved.configDir` (BuildAgentConfigExtra),
@@ -58,7 +58,7 @@ export interface CandidateGeneration {
  * recorded one.
  *
  * `previous.resolved` must exist (the `!` on modelRegistry): re-resolve only
- * runs post-boot-adopt inside the write transaction (§2.4), so the previous
+ * runs post-boot-adopt inside the write transaction, so the previous
  * generation always carries a resolved bag.
  */
 export async function reresolveConfig(
@@ -92,7 +92,7 @@ export async function reresolveConfig(
     defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
   });
 
-  // 3. Mutable identity #1 (§1.5): CARRY FORWARD the live model-registry
+  // 3. Mutable identity #1: CARRY FORWARD the live model-registry
   //    object. The provider-health catalog piggyback upserts into it by
   //    design ("UPSERT ONLY, never remove"), so the sweep's live updates
   //    survive publishes; re-resolve never builds a new one (that is the
@@ -103,7 +103,7 @@ export async function reresolveConfig(
   //    resolveExtensionConfig + Object.assign + validateConfig. Runs whenever
   //    a registry is present (boot runs it for an empty param list too --
   //    validateConfig covers the CORE schema keys on its own, so a corrupted
-  //    file fails here and lands in the §2.3 last-good posture).
+  //    file fails here and lands in the last-good posture).
   const extContext: ResolutionContext = {
     cli: cliArgv,
     config: config as Record<string, unknown>,

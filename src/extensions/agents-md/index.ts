@@ -31,7 +31,7 @@ async function buildAgentsMdChunk(autoload: boolean): Promise<string> {
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  // B7 (§4.1/§4.3 agentsMd.autoload row): nothing is captured here. The gate
+  // Nothing is captured here. The gate
   // is read at EVERY SYSTEM_PROMPT_BUILD, so a live write lands on the next
   // prompt rebuild -- both directions: `false` stops shipping the chunk from
   // the next build, a later `true` brings it back. A rebuild is the natural

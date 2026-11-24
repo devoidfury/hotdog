@@ -1,14 +1,14 @@
 // The session book: live session rows (metadata + birth kind), the list
 // projection, the question-badge mirror, the idle sweep, and the SIGTERM
-// drain. Split out of session-registry.ts (B1): a row
+// drain. Split out of session-registry.ts: a row
 // is now an addressable entity that exists with or without sockets and with
 // or without a private-SessionManager entry -- transport lives in
 // channel-hub.ts, and SessionRegistry stays the facade every handler
 // imports.
 //
-// Row kinds (the B1 birth attribute): rows created by create()/fork() are
+// Row kinds (the birth attribute): rows created by create()/fork() are
 // INTERACTIVE (the attribute stays absent -- interactive is the default, so
-// every pre-B1 read path is byte-identical). Worker rows are born at
+// every existing read path is byte-identical). Worker rows are born at
 // registerWorker (a task agent's build) and die at releaseWorker (the task's
 // terminal event); they never enter the private SessionManager (no bus, no
 // run loop -- getBus(workerSid) stays undefined, keeping the manager-side
@@ -69,7 +69,7 @@ export interface SessionMetadata {
    * EXPLICIT per-session question policy (C2S create message). Unset means
    * "no explicit choice": the defaults are read at question-armed time
    * (createWsServer's getPolicy, through the live surface) -- a session row
-   * never freezes a boot copy of them (B3). An armed question keeps the
+   * never freezes a boot copy of them. An armed question keeps the
    * policy its timer was armed with (P8 benign twin).
    */
   questionStrategy?: string;
@@ -86,8 +86,8 @@ export interface SessionMetadata {
    *  kept in step by the bridge hooks via setQuestionPending. */
   questionPending?: boolean;
   /**
-   * Birth attribute (B1). ABSENT reads as "interactive": create()/fork()
-   * never write it, so every pre-B1 path reads exactly as before. "worker"
+   * Birth attribute. ABSENT reads as "interactive": create()/fork()
+   * never write it, so every existing path reads exactly as before. "worker"
    * rows are task-agent sessions registered through registerWorker --
    * book-only rows (no private-SessionManager entry, no bus, no run loop),
    * invisible to the interactive projection and to the handler-facing
@@ -180,7 +180,7 @@ export interface AgentSessionsOptions {
    * Resolved bag the tool-exec plane posture is read from. Pass the BAG for
    * a pinned snapshot (tests, embedded hosts) or a READER for a live strip
    * (the real server hands one over, so the label follows store.current()
-   * per payload -- B3). Omitted = inline (unfenced): a registry built
+   * per payload). Omitted = inline (unfenced): a registry built
    * without it advertises no plane.
    */
   toolExecResolved?: Record<string, unknown> | (() => Record<string, unknown>);
@@ -429,7 +429,7 @@ export class AgentSessions {
   ): Promise<{ sessionId: string; agent: AgentLike }> {
     const meta = this.#metadata.get(sourceSessionId);
     // A worker row is not a forkable session: the birth attribute gates the
-    // same "unknown session" refusal the pre-B1 world gave an arbitrary id
+    // same "unknown session" refusal an arbitrary id gets
     // (and a worker has no manager entry to fork anyway).
     if (!meta || meta.kind === "worker") {
       throw new AgentError(`Cannot fork unknown session: ${sourceSessionId}`);
@@ -527,7 +527,7 @@ export class AgentSessions {
    * The LIVE-session oracle: a row whose agent is registered with the
    * private SessionManager. Worker rows read null here by design (they are
    * book-only), which is exactly what keeps every get()-gated handler
-   * refusing a worker sid with the pre-B1 "Session not found" posture.
+   * refusing a worker sid with a plain "Session not found" posture.
    */
   get(
     sessionId: string,
@@ -540,14 +540,14 @@ export class AgentSessions {
   }
 
   /** Raw row lookup INCLUDING worker rows (the interactive projection stays
-   *  list()/size; this is the row-kind-aware accessor's B1 home -- the
+   *  list()/size; this is the row-kind-aware accessor home -- the
    *  server's getPolicy worker branch reads it). */
   getRow(sessionId: string): SessionMetadata | null {
     return this.#metadata.get(sessionId) ?? null;
   }
 
   /**
-   * Register a worker's session row (B1): the task agent's birth in the
+   * Register a worker's session row: the task agent's birth in the
    * session book, fired from the TaskManager's onWorkerSessionStarted seam
    * (the recordAgentSession site -- entry.agent in hand before the first
    * turn, so the row exists before any question can arm). Book-only:
@@ -782,7 +782,7 @@ export class AgentSessions {
     const meta = this.#metadata.get(sessionId);
     if (!meta) return false;
     // A worker row's lifecycle belongs to the TaskManager, not this book:
-    // delete() reads exactly like the pre-B1 "unknown id" refusal for one
+    // delete() reads exactly like the plain "unknown id" refusal for one
     // (the terminal observer releases it; the routes refuse worker ids
     // outright). ADOPTED worker rows are the exception the adoption
     // makes: their task book is gone and the real agent lives in the
@@ -822,9 +822,9 @@ export class AgentSessions {
   /** Mirror the question bridge's pending state onto the row (sidebar
    *  awaiting_question badge). Returns whether the flag actually changed,
    *  so callers can broadcast the list only on real transitions.
-   *  Worker rows read as immutable here: their badge is B2's nested task-row
+   *  Worker rows read as immutable here: their badge is the nested task-row
    *  questionPending (mirroring a hidden row would add a pointless SESSIONS
-   *  broadcast frame -- B1's zero-behavior-change bar). */
+   *  broadcast frame -- the zero-behavior-change bar). */
   setQuestionPending(sessionId: string, pending: boolean): boolean {
     const meta = this.#metadata.get(sessionId);
     if (!meta || meta.kind === "worker") return false;

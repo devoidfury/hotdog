@@ -18,7 +18,7 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  // B6b (§4.1): maxLoops is read at EACH loop check (the TURN_END cap test
+  // maxLoops is read at EACH loop check (the TURN_END cap test
   // below), not captured here. P8's benign twin, pinned in tests: a loop
   // already running its Nth lap is a turn enqueued under the cap in force
   // when that lap count was evaluated -- a later lower write cannot reach
@@ -112,7 +112,7 @@ export function create(core: CoreContext): ExtensionInstance {
           return;
         }
 
-        // Read the cap at THIS check (§4.1): a published change lands on the
+        // Read the cap at THIS check: a published change lands on the
         // next boundary, never mid-lap (P8 benign twin -- the running lap
         // completes under the cap its count was evaluated against).
         const maxLoops = block().maxLoops;

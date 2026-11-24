@@ -219,7 +219,7 @@ export async function handleRegenerate(
 
 /**
  * /undo: drop the last turn via rewindContext, which also fires CONTEXT_REWOUND so the session-log extension checkpoints the log.
- * Turn-based by owner ruling -- the deliberate difference: /undo undoes a TURN (user message + everything after it),
+ * Turn-based -- the deliberate difference: /undo undoes a TURN (user message + everything after it),
  * /rewind cuts by the visible-message index. trimTurns serves this path and nothing else.
  */
 export async function handleUndo(agent: Agent): Promise<CommandResult> {
@@ -261,7 +261,7 @@ function takeMessageCut(arg: string): { cut: MessageCut | null; rest: string } {
 const REWIND_USAGE = "Usage: /rewind [-N | N]";
 
 /**
- * /rewind grammar (docs/cli-reference.md), message-based by owner ruling --
+ * /rewind grammar (docs/cli-reference.md), message-based --
  * the turns unit lives only in /undo:
  *   /rewind        cut ONE visible message back -- exactly /rewind -1
  *   /rewind N      cut to absolute visible message #N (keep through #N)

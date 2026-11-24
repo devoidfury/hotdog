@@ -46,8 +46,7 @@ export interface ToolResultData {
    *  `start_line` meta, forwarded on the TOOL_RESULT frame). Numbers the
    *  diff gutters with real file lines; absent -> snippet-relative 1..N. */
   startLine?: number;
-  /** The result part's meta envelope, structured (owner ruling 2026-11-18):
-   *  the block curates its facts into one muted strip under the result and
+  /** The result part's meta envelope, structured: the block curates its facts into one muted strip under the result and
    *  keeps the FULL envelope reachable behind the expand idiom. Absent =
    *  no envelope, no strip -- never an invented one. */
   meta?: Record<string, string>;
@@ -97,8 +96,7 @@ export const FILE_RENDER_CAP_CHARS = 100_000;
  *  lines; the rest stays out until expanded, so a huge read stays lazy even
  *  while its preview shows. */
 export const FOLD_PREVIEW_CHARS = 2_000;
-/** Bodies under this many lines auto-open when they arrive (owner ruling
- *  2026-11-05): a small result is not worth a click. Strictly fewer; empty
+/** Bodies under this many lines auto-open when they arrive: a small result is not worth a click. Strictly fewer; empty
  *  bodies stay closed, and so does anything past the preview cap -- a
  *  one-line giant is a blob, and a collapsed summary is its lazy face.
  *  A user toggle is always the explicit override in both directions. */
@@ -114,9 +112,8 @@ function oneLine(text: string, max: number): string {
 }
 
 /**
- * The curated envelope facts for the muted strip under a result block
- * (owner ruling 2026-11-18): one table of the keys the house tools
- * actually stamp, in the order the strip speaks them. A fact renders only
+ * The curated envelope facts for the muted strip under a result block:
+ * one table of the keys the house tools actually stamp, in the order the strip speaks them. A fact renders only
  * when the envelope ACTUALLY carries it -- absent fields are omitted,
  * never invented (durations and byte counts are simply not stamped yet,
  * and an omitted segment beats a lying one). Keys outside this table stay
@@ -813,8 +810,7 @@ export function ToolBlock({ state, onShowFull, onToggleBox, onUnfold, onToggleEn
 
   const images = result?.images && result.images.length > 0 ? <ImagesView images={result.images} /> : null;
 
-  // The muted facts strip (owner ruling 2026-11-18): one quiet line under
-  // the result block -- curated envelope facts in the assistant-footer
+  // The muted facts strip: one quiet line under the result block -- curated envelope facts in the assistant-footer
   // register, with the FULL raw envelope behind the same disclosure idiom
   // the prose posture uses for json. No envelope, no strip, never a
   // fabricated one; nothing here restates the block header.

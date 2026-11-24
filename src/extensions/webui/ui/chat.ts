@@ -67,13 +67,13 @@ const toolExecAtom = reactiveState<string>("");
 // ── Subagent ticker (sidebar rows; see ./subagents.tsx) ───────────────────
 // Broadcast feed (S2C taskList/taskUpdate), deliberately kept outside the
 // App tree: tasksAtom alone feeds the sidebar rows. The transcript is a
-// plain SESSION view since B4: a live worker row opens via switchSession,
+// plain SESSION view: a live worker row opens via switchSession,
 // a settled/durable one via viewLog -- no second transcript surface, no
 // relay buffer. The kind/parent atoms below are the chrome's only signal.
 const tasksAtom = reactiveState<TaskInfoWire[]>([]);
 // The ATTACHED view's kind ("subagent" on a worker-row attach; null for an
 // interactive session) and its delegating manager, both from the
-// sessionCreated payload (B3's additive fields). Every attach rewrites them;
+// sessionCreated payload (additive fields). Every attach rewrites them;
 // the app reads them for the header label, the chrome hide-outs, the steer
 // posture, and the leave affordance.
 const sessionKindAtom = reactiveState<string | null>(null);
@@ -95,8 +95,8 @@ function clearTasks(): void {
 const sessionTitleAtom = reactiveState<string | null>(null);
 
 // ── Session view state (the one named view-vs-attach surface) ──────────────
-// The owner ruling 2026-11-18: all of it is "what is on screen vs what would I be
-// writing to" confusion. One named state ends the ad-hoc pairing of flags:
+// The root confusion is "what is on screen vs what would I be writing to".
+// One named state ends the ad-hoc pairing of flags:
 // attached is the socket's live session (the default), peeking is a
 // read-only view of ANOTHER live session's history opened from a search hit
 // (the socket never moved), observing is a durable-log read (cold row,
@@ -138,8 +138,8 @@ export interface ComposerCapability {
   };
 }
 
-/** The ONE composer rule (owner ruling 2026-11-18): attached writes -- interactive sends,
- *  worker rows steer the task; peeking and observing never write, and only
+/** The ONE composer rule: attached writes -- interactive sends, worker
+ *  rows steer the task; peeking and observing never write, and only
  *  peeking offers the explicit take-over. Pure: view state in, capability
  *  out. */
 export function composerForView(view: SessionViewState): ComposerCapability {
@@ -259,7 +259,7 @@ interface SessionCreatedMessage {
   hasOlder?: boolean;
   oldestIndex?: number;
   epochToken?: number;
-  /** View kind (additive, B3): "subagent" on a worker-row attach; the
+  /** View kind (additive): "subagent" on a worker-row attach; the
    *  delegating manager's id rides beside it. Drives the webui chrome. */
   kind?: string;
   parentSessionId?: string | null;
@@ -484,8 +484,7 @@ interface AuthRequiredMessage {
 
 interface AuthOkMessage {
   type: "authOk";
-  /** Additive version-skew stamp (owner ruling 2026-11-18): the daemon's package version at
-   *  connect. Absent on a daemon older than the banner itself -- which IS
+  /** Additive version-skew stamp: the daemon's package version at connect. Absent on a daemon older than the banner itself -- which IS
    *  the skew the banner exists for. */
   version?: string;
 }
@@ -544,9 +543,8 @@ interface ToolResultMessage {
   /** Where the edit landed (server-extracted from the result's meta);
    *  numbers the diff gutters with real file lines. */
   startLine?: number;
-  /** The result's meta envelope, structured (additive frame field; owner
-   *  ruling 2026-11-18): drives the muted facts strip under the result
-   *  block, with the full envelope behind the block's expand idiom. */
+  /** The result's meta envelope, structured (additive frame field): drives
+   *  the muted facts strip under the result block, with the full envelope behind the block's expand idiom. */
   meta?: Record<string, string>;
 }
 
@@ -951,8 +949,8 @@ export interface ChatController {
   profilesAtom: Atom<Record<string, ProfileInfo>>;
   currentProfileAtom: Atom<string>;
   connectedAtom: Atom<boolean>;
-  /** Owner ruling 2026-11-18: client bundle vs daemon build stamp mismatch (attested per
-   *  handshake; false until the first authOk of a connection). */
+  /** Client bundle vs daemon build stamp mismatch (attested per handshake;
+   *  false until the first authOk of a connection). */
   versionSkewAtom: Atom<boolean>;
   workingAtom: Atom<boolean>;
   // Per-session working state for the sidebar indicators.
@@ -1091,8 +1089,7 @@ export function createChat({
   const sessionWorkingMap = new Map<string, boolean>();
 
   // ── Reasoning visibility (per-browser view preference) ───────────────────
-  // Owner ruling 2026-11-05: whether reasoning shows is THIS browser's view
-  // setting (localStorage via thinking-pref.ts, survives reload), applied to
+  // Whether reasoning shows is THIS browser's view setting (localStorage via thinking-pref.ts, survives reload), applied to
   // whatever transcript is on screen -- the live one or a browsed cold log.
   // The server's /thinking session state (agent.hideThinking, broadcast on the
   // sessionState channel) stays independent: see the sessionState case in
@@ -1718,8 +1715,7 @@ export function createChat({
         // the ATTACHED session -- but task rows carry the MANAGER's id, so a
         // WORKER-row attach ships an empty one. Accepting it deletes the
         // parent card's Subagents section: the menu that hops between
-        // siblings, gone the moment a child is picked (owner ruling
-        // 2026-11-18). While a worker row is the view the board stands as
+        // siblings, gone the moment a child is picked. While a worker row is the view the board stands as
         // last attested; every non-worker attach re-attests it wholesale.
         // (Known ceiling: a page-load whose reconnect identity IS a worker
         // attaches without ever having seen the manager's board.)
@@ -1892,8 +1888,8 @@ export function createChat({
           }
         }
         // hideThinking is deliberately NOT forwarded: reasoning visibility is
-        // this browser's view preference (owner ruling 2026-11-05), so a CLI
-        // /thinking toggle must not repaint the webui transcript. The CLI's own
+        // this browser's view preference, so a CLI /thinking toggle must
+        // not repaint the webui transcript. The CLI's own
         // notice still arrives as a commandResult row, and message-list's
         // hideThinking engine (handleSessionState/setHideThinking) is intact --
         // the header chip drives it now, not the server.
@@ -1903,7 +1899,7 @@ export function createChat({
         if (pendingSubagentAttach !== null) {
           // The subagent-row attach failed (any error): honest card in the
           // empty pane -- the worker's own durable log stays one click away
-          // (B4's settled view keys on the SAME id the attach used), and no
+          // (the settled view keys on the SAME id the attach used), and no
           // raw "Session not found" bubble enters the transcript. Not a run
           // error: no aria-live terminal edge, no working flip.
           const failedSid = pendingSubagentAttach;

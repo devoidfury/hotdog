@@ -67,7 +67,7 @@ export interface ToolExecutorDeps {
    * Central char cap enforced on every finalized tool result: once before the
    * TOOL_RESULT pipeline (in-pipeline observers see capped bytes) and once,
    * binding, on the stored part after hook replacement. Read through the
-   * agent view PER FINALIZE (B5), so a mid-session `maxToolResultChars`
+   * agent view PER FINALIZE, so a mid-session `maxToolResultChars`
    * publish lands on the next finalize, not at executor construction; this
    * plain number is the fallback for hand-built callers whose agent carries
    * no view (0/unset disables enforcement, production plumbing is
@@ -101,7 +101,7 @@ export class ToolExecutor {
   }
 
   /**
-   * maxToolResultChars at finalize time (B5): the agent's config IS the live
+   * maxToolResultChars at finalize time: the agent's config IS the live
    * view (config/agent-view.ts), so the overlay/base answer at THIS moment
    * caps the result -- a publish between two finalizes changes the next one,
    * with no ctor freeze. Hand-built callers (mock deps, standalone agents)

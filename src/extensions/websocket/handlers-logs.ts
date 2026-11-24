@@ -55,7 +55,7 @@ import type { RouteContext } from "./route-types.ts";
  *  lineage carries NO field -- no section, exactly as before. The lineage is
  *  the process-lifetime boot snapshot (SpawnLog.lineage doctrine).
  *
- *  B5 (R4/D7): logs the sidecar attests as WORKER logs (joinedAgentSessionIds
+ *  Logs the sidecar attests as WORKER logs (joinedAgentSessionIds
  *  -- boot lineage UNION this lifetime's live joins, minus D6 promotions)
  *  are excluded from THIS list only. viewLog/LOG_VIEWED/loadOlder and the
  *  search corpora keep reaching them by id (the list hides, the log stays
@@ -89,7 +89,7 @@ export async function coldLogRows(
     }
   }
   // D8 pin honesty: no persisted pin survives pointing at an id this list
-  // excludes (pins predate B3's refusal). Pruned on the list-build path,
+  // excludes (pins predate the refusal). Pruned on the list-build path,
   // persisting only on a hit (dropPinned idiom). Promotions are already
   // out of `joined`, so a promoted session's pin is never touched.
   for (const id of getPinnedIds()) if (joined.has(id)) dropPinned(id);
@@ -777,7 +777,7 @@ export async function searchSessionLogs(
   const needle = query.toLowerCase();
   const matches = await searchSessionCorpora(query);
   const activeIds = new Set(registry.list().map((s) => s.id));
-  // B5 label: a hit on a worker-attested id (the id Recent Logs hides)
+  // Worker-log label: a hit on a worker-attested id (the id Recent Logs hides)
   // carries its delegation task description, read from the sidecar lineage
   // (cold records) or THIS lifetime's task registry (live/just-settled
   // records the boot snapshot cannot see). No description to attest -> no

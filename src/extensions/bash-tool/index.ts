@@ -31,7 +31,7 @@ const MAX_OUTPUT_CHARS = 1_000_000;
 const KILL_GRACE_MS = 2000;
 
 interface BashToolOptions {
-  /** Command default timeout (config: bashTool.bashTimeoutMs). B6a (§4.1):
+  /** Command default timeout (config: bashTool.bashTimeoutMs):
    *  scalar-or-reader -- the extension entry reads the live bashTool block
    *  per execute; the pooled runner's wire snapshot stays a pinned scalar. */
   timeoutMs: ConfigKnob<number>;
@@ -43,12 +43,12 @@ interface BashToolOptions {
   envScrubExtra?: ConfigKnob<readonly string[] | undefined>;
   /** Env scrubbing on/off (resolved posture `envScrubbing`; --disable-env-scrubbing
    *  overrides the file). Scalar-or-reader; defaults to true. The extension
-   *  entry passes a SPAWN-TIME reader over core.resolved (owner override
-   *  2026-11-11: cli > config > default -- the resolved bag carries the
-   *  precedence, and reading it live respects the cli layer). */
+   *  entry passes a SPAWN-TIME reader over core.resolved (cli > config >
+   *  default -- the resolved bag carries the precedence, and reading it
+   *  live respects the cli layer). */
   envScrubbing?: ConfigKnob<boolean>;
   /** Extra environment variables for spawned shells (config: bashTool.env).
-   *  NOT a knob -- §5.4 exception (ruled 2026-11-10, restart-bound): a
+   *  NOT a knob -- restart-bound: a
    *  subprocess env map is a code-execution channel, snapshotted at tool
    *  construction (boot registration / pool-entry spawn). Values never echoed. */
   env?: Record<string, string>;
@@ -123,7 +123,7 @@ export class BashTool {
     headerKeys: ["timeoutMs"],
   };
 
-  // B6a knobs (design §4.1): the public accessors below resolve a scalar knob
+  // The public accessors below resolve a scalar knob
   // as pinned (byte-identical to the old fields) and re-call a reader knob at
   // each use, so an inline execute/spawn follows the live store.
   #timeoutMs: ConfigKnob<number>;
@@ -193,7 +193,7 @@ export class BashTool {
     const workspace = ctx?.get?.("workspace") as Workspace | undefined;
     const cwd = workspace?.root;
     const command = args.command as string;
-    // B6a: the timeout knobs resolve per execute (one live read shared by the
+    // The timeout knobs resolve per execute (one live read shared by the
     // requested-value fallback and the default, so no torn mid-call posture).
     const defaultTimeoutMs = this.timeoutMs;
     const timeout = resolveBashTimeout(
@@ -223,10 +223,10 @@ export class BashTool {
       ...OWN_PROCESS_GROUP,
       // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
       stdio: ["ignore", "pipe", "pipe"],
-      // SPAWN-TIME reads (§5.2 row + owner override 2026-11-11): scrub posture
+      // SPAWN-TIME reads: scrub posture
       // (resolved: cli > config > default) and the extra-key list are resolved
       // right here, so a config write changes the NEXT spawn, never this one's
-      // successor through a stale capture. `env` stays the boot snapshot (§5.4).
+      // successor through a stale capture. `env` stays the boot snapshot.
       env: agentSpawnEnv(this.envScrubExtra, this.env, this.envScrubbing),
     });
 
@@ -379,12 +379,11 @@ export class BashTool {
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
 export function create(core: CoreContext): ExtensionInstance {
-  // Config defaults come from extension.json configSchema. B6a (§4.1): the
-  // knobs reach the tool as READERS over the live store -- timeoutMs/
+  // Config defaults come from extension.json configSchema. The knobs reach the tool as READERS over the live store -- timeoutMs/
   // maxTimeoutMs resolve per execute, the scrub posture and extra-key list
-  // per spawn, so an operator write lands on the NEXT exec (design §4.3 +
-  // §5.2 rows). Nothing from the block is captured at create()/registration
-  // scope except bashTool.env, deliberately (see the §5.4 note below).
+  // per spawn, so an operator write lands on the NEXT exec. Nothing from the
+  // block is captured at create()/registration scope except bashTool.env,
+  // deliberately (see the note on the env option).
   const block = () =>
     getExtensionConfig<{
       bashTimeoutMs: number;
@@ -402,15 +401,14 @@ export function create(core: CoreContext): ExtensionInstance {
           maxOutputLines: INTERNAL_MAX_OUTPUT_LINES,
           maxTimeoutMs: () => block().maxTimeoutMs,
           envScrubExtra: () => envScrubExtraKeys(core.config),
-          // OWNER OVERRIDE (2026-11-11) vs the contract row (§4.3/§5.2 claimed
-          // cli-layer-only, no config-file layer): envScrubbing now resolves
-          // cli(disableEnvScrubbing, falsy) > config(envScrubbing) > default(true),
+          // envScrubbing resolves cli(disableEnvScrubbing, falsy) >
+          // config(envScrubbing) > default(true),
           // so the SPAWN-TIME read goes through the resolved bag, which carries
           // that precedence -- the cli flag still outranks the file, and a file
           // write reaches the next inline spawn (pool: new entries, E1/P3).
           envScrubbing: () => core.resolved?.envScrubbing !== false,
-          // §5.4 EXCEPTION (ruled 2026-11-10): bashTool.env stays restart-bound
-          // -- a subprocess env map is a code-execution channel, not a knob.
+          // bashTool.env stays restart-bound: a subprocess env map is a
+          // code-execution channel, not a knob.
           // Read ONCE at registration (boot) and stored as a plain map; a
           // config write reaches the tool only after restart. Values never echoed.
           env: block().env as Record<string, string> | undefined,
@@ -429,9 +427,8 @@ export function create(core: CoreContext): ExtensionInstance {
  * and calls `WIRE_TOOL_FACTORIES.bash(ctx.toolConfig)` per invoke.
  *
  * Mirrors `create()`'s field list but is not the same function: create()
- * hands BashTool live reader knobs over the store (§4.1); the wire side
- * takes the runner's PINNED scalars (EXEMPTION E1, §4.3 -- the runner never
- * boots config; an operator write changes NEW pool entries only). Keep the
+ * hands BashTool live reader knobs over the store; the wire side
+ * takes the runner's PINNED scalars (the runner never boots config; an operator write changes NEW pool entries only). Keep the
  * two field lists in sync.
  *
  * Env posture: envScrubbing defaults TRUE, envScrubExtra rides the wire,

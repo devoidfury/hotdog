@@ -1347,7 +1347,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
             };
           }
           // Command-side switch writes the CURRENT generation's block in place
-          // (same posture as before; the notify/transaction wiring is B4's job
+          // (same posture as before; the notify/transaction wiring is separate
           // -- writing through the live read keeps the current bag honest
           // instead of mutating a captured one).
           getExtensionConfig<CompactionSettings>(core, "compaction").strategy = name;
@@ -1409,7 +1409,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
     },
 
     // Exposed for external use: the CURRENT generation's block (tests and
-    // hosts read/write through it; a create-time capture is exactly what B3
+    // hosts read/write through it; a create-time capture is exactly what the live read
     // removes).
     registry: strategyRegistry,
     get settings(): CompactionSettings {

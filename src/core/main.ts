@@ -203,7 +203,7 @@ export function createCore(
 
   core.extensions = createExtensionLoader(core as LoaderCore);
 
-  // §3.3 hookTrace row (B4): the once-at-boot reassignment in main() stays
+  // The boot hookTrace reassignment in main() stays
   // (boot posture); this is its live twin. Registered here, in createCore --
   // core hooks land in the table before extension hooks by load order
   // (createCore runs before loadExtensions), and every host that builds a
@@ -437,8 +437,8 @@ export async function main(): Promise<number> {
     console.error("Run `hotdog rescue` for config diagnostics (paths, syntax, unknown keys).");
     // Out-of-set enum values parse fine and fail here, in validation: name the
     // repair command the way the broken-syntax path does, plus every offending
-    // key and its accepted set (the owner ruled boot keeps failing; rescue
-    // makes getting out easy).
+    // key and its accepted set (boot keeps failing; rescue makes getting
+    // out easy).
     const badEnums = e instanceof ConfigError ? enumHintsFromValidationErrors(e.validationErrors) : [];
     if (badEnums.length > 0) {
       console.error(
@@ -481,9 +481,9 @@ export async function main(): Promise<number> {
   });
 
   core.resolved = resolved as ResolvedConfig;
-  // Keep the parsed CLI bag reachable for the config re-resolve (§2.1): the
+  // Keep the parsed CLI bag reachable for the config re-resolve: the
   // daemon's live argv IS the boot argv (it cannot change at runtime), and
-  // re-resolve must keep honoring its layers (the §4.2 provenance rule --
+  // re-resolve must keep honoring its layers (the provenance rule --
   // dropping it would silently discard the operator's flag overrides).
   core.cliArgv = cli as CliArgv;
 

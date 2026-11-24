@@ -1,5 +1,5 @@
 /**
- * Config apply-hook registry -- config-as-side-effect (design §3.1/§3.2, batch B4).
+ * Config apply-hook registry -- config-as-side-effect.
  *
  * One typed table (not scattered `if (keyPath === ...)` in the write handler):
  * a hook declares a keyPath PREFIX matched against the changed ROOTS of the
@@ -8,17 +8,17 @@
  * REGISTRATION ORDER (deterministic: core hooks register before extension
  * hooks by load order -- createCore runs before extension create()).
  *
- * Phase semantics (the validate-then-swap spine, §2.4):
+ * Phase semantics (the validate-then-swap spine):
  * - "prepare" runs BEFORE the store swap. A throw REFUSES the swap: the store
  *   keeps the previous generation, the value stays persisted in the file, the
  *   reply says restart-required + the refuse reason. This is what makes
  *   recompile/rebuild classes safe (the risky part runs while refusal is free).
  * - "apply" runs AFTER the swap and may NOT veto: a throw or timeout is a
- *   degraded report (§3.2: a failed apply hook NEVER re-swaps the store --
+ *   degraded report (a failed apply hook NEVER re-swaps the store --
  *   the store's contract is "what the persisted+verified config says", and
  *   the file write is already authoritative).
  *
- * Timeout doctrine (§2.4): the transaction runs inside the non-reentrant
+ * Timeout doctrine: the transaction runs inside the non-reentrant
  * config-edit lock, so a hung hook is a hung panel. Default 2000ms, cap
  * 15000ms, mandatory-by-review on any hook that awaits I/O. A timed-out hook
  * keeps running in the background (JS offers no cooperative cancel); the
@@ -61,7 +61,7 @@ export interface ConfigApplyHook {
    *  args -- the store still holds the old generation). They are the generic
    *  config-bag reads; an apply hook that needs the resolution chain's
    *  authoritative value reads `ctx.store.current().resolved` itself (the
-   *  swap completed before apply hooks run, §1.5). */
+   *  swap completed before apply hooks run). */
   handle(ctx: ConfigApplyContext, previous: unknown, next: unknown): void | Promise<void>;
 }
 
@@ -86,7 +86,7 @@ export function registerConfigApplyHook(hook: ConfigApplyHook): () => void {
   };
 }
 
-/** Snapshot copy of the table (§4.5 hook-coverage walk + tests). */
+/** Snapshot copy of the table (hook-coverage walk + tests). */
 export function registeredHooks(): readonly ConfigApplyHook[] {
   return [...hooks];
 }
@@ -129,7 +129,7 @@ export function hookTimeoutMs(hook: ConfigApplyHook): number {
  *  segment must be one of the differing roots; "" matches every publish.
  *  Root-segment equality, not string prefix ("web" never matches "webui").
  *
- *  THE RULE, written down (B4 review): matching is ROOT-granular against
+ *  THE RULE, written down: matching is ROOT-granular against
  *  generation.changed, so a sibling write under the same top-level root FIRES
  *  the row -- observed: a `websocket.questionTimeoutSecs` write fires the
  *  `sessionTimeoutMin` hook (harmless today: it re-arms the age it just read
@@ -152,7 +152,7 @@ export function hooksForPhase(
   return hooks.filter((h) => h.phase === phase && hookMatchesChangedRoot(h.keyPath, changedRoots));
 }
 
-/** Per-hook run ledger entry -- the truth of the side effects, reply-bound (§7.1). */
+/** Per-hook run ledger entry -- the truth of the side effects, reply-bound. */
 export interface ApplyHookRunReport {
   keyPath: string;
   phase: "prepare" | "apply";

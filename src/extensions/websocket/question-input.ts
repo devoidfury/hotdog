@@ -5,7 +5,7 @@
 //
 // Strategy semantics (interactive sessions -- task WORKER rows run `wait`
 // always; the host's getPolicy coerces any inherited strategy on a worker
-// row, owner rulings 2026-11-16, and releases held worker questions through
+// row, and releases held worker questions through
 // resolveUnanswered when the answerer (the delegating manager) goes away):
 //   wait    -- hold until a client answers (no timeout timer)
 //   default -- after questionTimeoutSecs, resolve with defaults

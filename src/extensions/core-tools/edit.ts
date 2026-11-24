@@ -13,7 +13,7 @@ import { ToolContext, type ConfigKnob, readKnob } from "@core/extensions/types.t
 import { detectFileStyle, stripFileStyle, applyFileStyle } from "@utils/file-utils.ts";
 
 interface EditToolOptions {
-  /** B6a (§4.1): scalar-or-reader; the extension entry reads the live coreTools block per execute. */
+  /** Scalar-or-reader; the extension entry reads the live coreTools block per execute. */
   maxEditInputSize: ConfigKnob<number>;
 }
 

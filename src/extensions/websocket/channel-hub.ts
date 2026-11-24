@@ -1,4 +1,4 @@
-// Pure transport, split out of session-registry.ts (B1): the registered
+// Pure transport, split out of session-registry.ts: the registered
 // connections, the pending-auth map + reaper, the per-session channel sets,
 // and the broadcast scoping. A hub entry attaches to ANY AgentSessions row;
 // the replay cursor stays per-socket (socket.ts), never here. Broadcast
@@ -158,7 +158,7 @@ export class ChannelHub {
     sessionId: string,
     ws: HotdogServerSocket<unknown>,
   ): WebSocketChannel | undefined {
-    // B3: a hub entry attaches to ANY row. Interactive rows still ride the
+    // A hub entry attaches to ANY row. Interactive rows still ride the
     // live-agent oracle (no agent = no attach, byte-identical). Worker rows
     // never enter the private SessionManager, so their channel is pure
     // attach bookkeeping + socket handle: the Channel's event-bus
@@ -206,7 +206,7 @@ export class ChannelHub {
     }
     this.#channels.get(sessionId)!.add(channel);
 
-    // connectedClients rides the RAW ROW (B1's metadata-only semantics:
+    // connectedClients rides the RAW ROW (metadata-only semantics:
     // getRow covers worker rows, get() would refuse them).
     row.connectedClients += 1;
     row.lastActivityAt = Date.now();
@@ -233,7 +233,7 @@ export class ChannelHub {
   }
 
   /** Watcher count for one session (ONE map lookup). The live-tail
-   *  producer's zero-watcher gate (B3): zero means map nothing, allocate
+   *  producer's zero-watcher gate: zero means map nothing, allocate
    *  nothing -- R2's "zero watchers pays nothing". */
   channelCount(sessionId: string): number {
     return this.#channels.get(sessionId)?.size ?? 0;
@@ -243,7 +243,7 @@ export class ChannelHub {
    * Deliver one frame to the sockets attached to `sessionId` (sendSafe over
    * the row's channel set -- the same activeSessionId-scope semantics
    * broadcastScoped gives, since a channel exists exactly for the session
-   * its socket is on). B3's worker live-tail delivery path; interactive
+   * its socket is on). Worker live-tail delivery path; interactive
    * rows keep flowing through the event-bus subscription. Each channel's
    * OWN stream batcher coalesces (per-watcher buffers: one busy worker never
    * delays another session), and non-streaming frames flush-before-send in

@@ -45,7 +45,7 @@ export class TaskScheduler {
   /** Resolved process default model (agent-factory's own fallback); last chain link for spawn placement. */
   #buildDefaultModel: string;
   #peekLoaded: (provider: string) => Promise<Set<string>>;
-  /** Live modelGroups reader (B3): called per placement, never a pinned map. */
+  /** Live modelGroups reader: called per placement, never a pinned map. */
   #getModelGroups: () => Record<string, string[]>;
   #noSpread: Set<string>;
   /** Cross-process lane slot ledger (null when lanesDir is unset: caps apply to this process only). */

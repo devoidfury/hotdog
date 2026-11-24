@@ -266,7 +266,7 @@ export function sortPinned<T extends { id: string }>(rows: T[], pinned: Set<stri
   return [...rows].sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)));
 }
 
-/** Section label for RECENT LOGS day grouping (owner ruling 2026-11-18): "Today" and
+/** Section label for RECENT LOGS day grouping: "Today" and
  *  "Yesterday" for the LOCAL calendar day (not a rolling 24h -- 23:50 and
  *  00:10 are different days), otherwise the ISO-style YYYY-MM-DD so a stale
  *  run reads unambiguously. `now` is the caller's wall clock (the sidebar's
@@ -521,15 +521,15 @@ function SearchHitRow(p: { hit: SearchHitWire; query: string; onActivate: () => 
   const name = hit.profile || shortId(hit.logId);
   line1.push(<span className="row-profile">{name}</span>);
   if (hit.model) line1.push(<span className="row-sep">·</span>, <span className="row-model">{hit.model}</span>);
-  // live/cold rides a quiet glyph-adjacent tag; a click NEVER attaches
-  // (owner ruling 2026-11-18): live opens a read-only peek with an explicit Take over, cold
-  // observes the log. The tag's title states that honestly for both.
+  // live/cold rides a quiet glyph-adjacent tag; a click NEVER attaches:
+  // live opens a read-only peek with an explicit Take over, cold observes
+  // the log. The tag's title states that honestly for both.
   line1.push(
     <span className={`search-scope${hit.live ? " search-scope-live" : ""}`} title={hit.live ? "Live session -- opens read-only (Take over to write)" : "Archived log -- opens read-only"}>
       {hit.live ? "live" : "log"}
     </span>,
   );
-  // B5: attested subagent hits (the log Recent Logs hides) say so, with
+  // Attested subagent hits (the log Recent Logs hides) say so, with
   // the delegation task as the handle. Absent on interactive hits -- the
   // row renders exactly as before.
   if (hit.subagentOf) {
@@ -630,8 +630,7 @@ export function Sidebar(p: SidebarProps) {
   // the screen while one is open (a cold row, a settled/durable subagent
   // transcript -- worker logs ride their worker sid); otherwise the attached
   // session does. Keying only activeSessionId left an observed cold subagent
-  // row unmarked (owner ruling 2026-11-18: same selected treatment live and
-  // cold).
+  // row unmarked -- same selected treatment live and cold.
   const viewedSubjectId = p.activeLogId ?? p.activeSessionId;
   return (
     <aside id="sidebar" className={classes}>
@@ -682,9 +681,8 @@ export function Sidebar(p: SidebarProps) {
               profile={s.profile}
               title={s.title}
               // Idle omits the badge outright (the cold-log rule, now shared):
-              // the resting state is the default. Working omits it too (owner
-              // ruling 2026-11-05): the Stop button's spinner is the busy
-              // tell; only a pending question speaks in this slot.
+              // the resting state is the default. Working omits it too: the
+              // Stop button's spinner is the busy tell; only a pending question speaks in this slot.
               status={s.questionPending ? "awaiting_question" : null}
               statusClass={s.questionPending ? "log-state-awaiting_question" : undefined}
               ctxUsed={s.ctxUsed}
@@ -762,7 +760,7 @@ export function Sidebar(p: SidebarProps) {
       >
         <h2>
           Recent Logs
-          {/* The first date of what follows (owner ruling 2026-11-18): the list can run
+          {/* The first date of what follows: the list can run
               hundreds of rows deep, and the header names the day the top of
               it belongs to. Quiet chrome, not a second title. A COLLAPSED
               section shows nothing following, so it dates nothing. */}
@@ -802,8 +800,7 @@ export function Sidebar(p: SidebarProps) {
             No recent logs
           </div>
         ) : (
-          // Day sections (owner ruling 2026-11-18): the flat 200-row list got light date
-          // labels -- "Today", "Yesterday", then YYYY-MM-DD -- with the
+          // Day sections: the flat 200-row list got light date labels -- "Today", "Yesterday", then YYYY-MM-DD -- with the
           // pinned block grouped as its own section ABOVE them (the existing
           // pinned-first order rides through unchanged; see logSections).
           // The labels are presentation-role: they restate what every row's

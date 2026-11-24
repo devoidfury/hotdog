@@ -125,7 +125,7 @@ export interface RunConfig {
   maxRuntimeMsOverride?: number;
   /**
    * The effective workflows.enableRuntimeTimeouts AT DISPATCH: the caller
-   * reads the live value when it builds this run (B7 -- the extension hands
+   * reads the live value when it builds this run (the extension hands
    * over a per-dispatch read, not a load-time snapshot), and this constructor
    * freezes it for the life of the run. False keeps every runtime-cap kill
    * point dormant; the run duration accounting (and the run.jsonl stats it

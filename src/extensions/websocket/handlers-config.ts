@@ -6,14 +6,13 @@
 // The bottom of this file adds the
 // settings EDITOR (C2S setConfigKey -> S2C setConfigKeyResult): the file's
 // one write path -- editability for EVERY SETTING THE CONFIG FILE CAN AFFECT
-// (owner ruling 2026-11-09 "it needs to be ALL the settings", scoped honestly
-// 2026-11-11: a schema leaf whose declared layers never read the file -- the
-// CLI-only and default-only keys -- is not a setting the panel can write, so it
-// ships no row and its write is refused), gated by the two honest refusals +
+// (a schema leaf whose declared layers never read the file -- the CLI-only
+// and default-only keys -- is not a setting the panel can write, so it ships
+// no row and its write is refused), gated by the two honest refusals +
 // schema/shape revalidation + surgical JSONC edit + atomic rescue-verified
 // write described there.
 //
-// Hard rules (owner ruling):
+// Hard rules:
 // - The snapshot is READ-ONLY. Zero new config keys anywhere.
 // - Diagnostics only: FileReport.rawText and parse-error excerpts NEVER
 //   serialize. File bytes are not a viewer deliverable.
@@ -148,8 +147,7 @@ const URL_USERINFO_RE = /^([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]*@/i;
  * userinfo, truncate long strings with the "[truncated]" marker. Returns
  * [value, redactedSomething, byteFaithful]. Never mutates the source config.
  *
- * `lossy` is the byte-faithfulness signal the EDITOR needs (owner ruling
- * 2026-11-09): the shipped value is not a faithful copy when a string was
+ * `lossy` is the byte-faithfulness signal the EDITOR needs: the shipped value is not a faithful copy when a string was
  * truncated or stubbed, a container was cut at the depth limit, or URL
  * userinfo was scrubbed. Editing FROM a lossy value would overwrite real
  * bytes with the stub -- exactly the harm the secret refusal exists for --
@@ -208,8 +206,8 @@ function wireValue(value: unknown, depth = 0): { value: unknown; hit: boolean; l
  *  and the WRITE GATE (applyConfigKeyEditLocked) share it: a wholesale
  *  container write the stamp was withheld for must be refused server-side
  *  too -- hiding the button is not a gate, and writing the shipped summary
- *  back would splice stubs over the user's real bytes (owner ruling: the
- *  invariant is server-side). Lossy SCALARS are the exception by doctrine:
+ *  back would splice stubs over the user's real bytes -- the invariant is
+ *  server-side. Lossy SCALARS are the exception by doctrine:
  *  scalar writes replace the whole token, so they carry a seedless REPLACE
  *  stamp instead of a refusal (fresh value, no seed faithfulness needed). */
 function shipFaithful(value: unknown): boolean {
@@ -252,7 +250,7 @@ function collectLeaves(prefix: string, prop: SchemaProperty, out: LeafEntry[]): 
   out.push({ path: prefix, prop });
 }
 
-/** THE shared config-file-reachability predicate (owner ruling 2026-11-11).
+/** THE shared config-file-reachability predicate.
  *  resolveKey walks ONLY the declared layers chain, so a leaf that declares
  *  layers but none of them reads the settings file can never be affected by
  *  one: a cli-only key resolves from its flag and a default-only key never
@@ -332,7 +330,7 @@ function cliFlagInArgv(argv: string[], flag: { long: string; short?: string; typ
 }
 
 // ── Editor stamps (ALL-the-settings row editability) ────────────────────────
-// Owner ruling 2026-11-09: EVERY row the snapshot renders carries row.edit,
+// EVERY row the snapshot renders carries row.edit,
 // EXCEPT the two honest refusals:
 //   A) NOT BYTE-FAITHFUL SHIP -- the row's seed slot was redacted (a secret
 //      inside a container), URL-scrubbed, stubbed, or truncated: editing
@@ -444,8 +442,7 @@ const runtimeScalarType = (v: unknown): "number" | "integer" | "boolean" | "stri
         ? "string"
         : null;
 
-/** LIST-CHROME array test (owner ruling 2026-11-11, the provider-card
- *  doctrine generalized): an array whose EVERY element is a writable scalar
+/** LIST-CHROME array test: an array whose EVERY element is a writable scalar
  *  (the same four words isEditScalarType gates on the write side -- stamp
  *  predicate and write gate share the definition). Chrome row + one stamped
  *  element row per value. Arrays with object/null members (mcpServers,
@@ -526,8 +523,7 @@ function stampFor(r: StampRequest): ConfigKeyEditWire | null {  if (!r.addressab
     // A lossy SHIP (truncated string, scrubbed URL userinfo) does not refuse
     // a SCALAR: the write replaces the whole value token anyway, so it rides
     // a seedless REPLACE stamp -- the client seeds an empty input instead of
-    // a summary (owner ruling 2026-11-09: ALL the settings; a third refusal
-    // class for big prose was never sanctioned).
+    // a summary; a third refusal class for big prose was never sanctioned).
     const bounds = r.prop!;
     return {
       type: r.prop!.type as "number" | "integer" | "boolean" | "string",
@@ -867,8 +863,7 @@ function buildRows(entry: LeafEntry, ctx: RowCtx): ConfigKeyEntryWire[] {
   // A secret-shaped entry nulled inside a container value (bashTool.env,
   // mcpServers[].env) is a redaction event too -- flag it so the UI says so.
   if (hit) row.redacted = true;
-  // ARRAY LIST chrome (owner ruling 2026-11-11, the provider-card doctrine
-  // generalized): a primitive-valued array -- or a schema-declared list the
+  // ARRAY LIST chrome: a primitive-valued array -- or a schema-declared list the
   // file does not carry yet -- ships as this chrome row (slots intact, NO
   // edit stamp) plus one stamped row per element carrying its own per-layer
   // slots. The wholesale array write is refused server-side to match (the
@@ -894,7 +889,7 @@ function buildRows(entry: LeafEntry, ctx: RowCtx): ConfigKeyEntryWire[] {
     row.arrayChrome = true;
     return [row];
   }
-  // Editor affordance (ALL the settings, owner ruling 2026-11-09): every
+  // Editor affordance: every
   // row the snapshot renders is stamped except the two honest refusals (see
   // the stamp section). The type/bounds ride as input hints; the write path
   // revalidates against the schema/file shape on every save.
@@ -1043,9 +1038,8 @@ function providerRows(core: CoreContext): ConfigKeyEntryWire[] {
 
 /**
  * Rows for a providers array the IN-USE FILE carries, shaped for the panel's
- * provider CARDS (owner ruling 2026-11-11: one card per provider, no
- * whole-array dump, no per-element JSON container row while the leaf rows
- * render). The shipped set:
+ * provider CARDS: one card per provider, no whole-array dump, no
+ * per-element JSON container row while the leaf rows render. The shipped set:
  *  - the top `providers` row as-is MINUS its edit stamp: the section heading
  *    is its chrome (the whole-array JSON editor is retired -- provider lists
  *    change through the card's add/remove ops, and the write gate refuses the
@@ -1141,7 +1135,7 @@ function collectFileRows(
  *  the container's shipped payload redacts or stubs something inside. A
  *  primitive-valued array becomes LIST chrome instead (heading row, no
  *  stamp, + one stamped row per element; the write gate refuses the bulk
- *  splice to match -- owner ruling 2026-11-11). */
+ *  splice to match). */
 function fileOnlyRows(segs: KeySeg[], v: unknown, ctx: RowCtx, wireDepth: number): ConfigKeyEntryWire[] {
   const row: ConfigKeyEntryWire = { key: keyString(segs) };
   const secret = secretSegs(segs);
@@ -1231,8 +1225,8 @@ function buildFindings(usableText: string, unified: ConfigSchema, configParamKey
       type: "removed-key",
       key: hit.key,
       line: hit.line,
-      // Plain user-facing copy only (owner ruling 2026-11-18): the
-      // replacement, plus the tombstone's user note when it has one.
+      // Plain user-facing copy only: the replacement, plus the tombstone's
+      // user note when it has one.
       message:
         `"${hit.key}" is no longer read; replaced by "${r.replacement}"` +
         (r.note ? ` (${r.note})` : ""),
@@ -1370,7 +1364,7 @@ export async function buildConfigSnapshot(
   const sectionNameOf = (topKey: string): string => (Object.hasOwn(CONFIG_SCHEMA, topKey) ? "core" : topKey);
 
   for (const leaf of allLeaves) {
-    // THE SHIP FILTER (owner ruling 2026-11-11): a leaf the config file cannot
+    // THE SHIP FILTER: a leaf the config file cannot
     // affect ships no row, so the panel never offers a file write for it (and
     // the rail counts, the search and the every-row stamp sweep simply lose it
     // -- the client renders what arrives, zero webui changes). Still collected
@@ -2060,7 +2054,7 @@ const realConfigEditDeps: ConfigEditDeps = {
   unlink: (p) => fs.unlink(p),
 };
 
-/** §7.1 attestation classes (the wire type lives in ./protocol.ts; the write
+/** Attestation classes (the wire type lives in ./protocol.ts; the write
  *  path produces the same union). */
 type ConfigAppliedClass = "live" | "rebind" | "next-session" | "restart-required";
 
@@ -2068,14 +2062,14 @@ export type ConfigKeyEditOutcome =
   | {
       ok: true;
       /** LEGACY shim, DERIVED from `applied` at reply build, never maintained
-       *  by hand: true iff applied === "restart-required" (§7.1). */
+       *  by hand: true iff applied === "restart-required". */
       needsRestart: boolean;
-      /** What actually happened in THIS process for THIS write (§7.1). */
+      /** What actually happened in THIS process for THIS write. */
       applied: ConfigAppliedClass;
-      /** Human one-liners rendered verbatim under the row; the §2.3 last-good
+      /** Human one-liners rendered verbatim under the row; the last-good
        *  error text rides here (the wire type has no liveApplyError field). */
       appliedNotices?: string[];
-      /** Per-hook ledger for this batch (§3); omitted when no hook ran. */
+      /** Per-hook ledger for this batch; omitted when no hook ran. */
       applyHooks?: ApplyHookRunReport[];
       value?: EditScalar | null;
       valueText?: string;
@@ -2335,8 +2329,7 @@ async function applyConfigKeyEditLocked(
   // value, and nothing else creates array-element children (fail closed).
   const provCreate = cur.found ? undefined : providerChildCreateTarget(segs, parsedFile);
 
-  // ARRAY LIST chrome (owner ruling 2026-11-11, the provider-card doctrine
-  // generalized): a primitive-valued array in the file, or an ABSENT
+  // ARRAY LIST chrome: a primitive-valued array in the file, or an ABSENT
   // schema-declared list, renders as chrome (heading row without a stamp;
   // the elements are the rows, editConfigList appends/removes). The gate
   // matches the stamp: the bulk splice is refused and the honest text names
@@ -2529,11 +2522,11 @@ async function applyConfigKeyEditLocked(
 
   // 6/7. Atomic write + verify + rollback (the shared write tail; the list
   // ops run through the very same one). The chain itself is UNTOUCHED; on a
-  // clean verify the §2.4 live transaction continues below -- still inside
+  // clean verify the live transaction continues below -- still inside
   // the SAME withConfigEditLock span (applyConfigKeyEdit wraps this whole
   // function), so file truth, store truth, and the reply can never
   // interleave with another writer, and the reply is composed before the
-  // lock releases (§7.2: the transaction completes BEFORE the reply).
+  // lock releases (the transaction completes BEFORE the reply).
   // Approvals pre-compile, BEFORE any byte is written: a userGate write that
   // would leave rules the compiler rejects is refused here, not by the boot
   // that never happens. See candidateRuleBlockRefusal.
@@ -2553,14 +2546,14 @@ async function applyConfigKeyEditLocked(
   });
   if (!fileResult.ok) return fileResult;
 
-  // 8. Live transaction (B4, design §2.4): reresolve -> prepare hooks ->
+  // 8. Live transaction: reresolve -> prepare hooks ->
   //    swap -> apply hooks (awaited, per-hook timeout) -> commit -> attestation.
   const live = await runLiveConfigApply(core, keyPath, filePath, opts.actor);
   return {
     ok: true,
     ...echo,
     applied: live.applied,
-    // The legacy shim DERIVED server-side (§7.1), never hand-maintained:
+    // The legacy shim DERIVED server-side, never hand-maintained:
     // true iff applied === "restart-required".
     needsRestart: live.applied === "restart-required",
     ...(live.appliedNotices.length > 0 ? { appliedNotices: live.appliedNotices } : {}),
@@ -2569,9 +2562,9 @@ async function applyConfigKeyEditLocked(
 }
 
 /**
- * The static per-keyPath live-class table (design §7.1: the `applied` CLASS
- * comes from a table, not from a runtime "a hook ran" guess). B4's rows are
- * exactly the migrated hook-backed keys (§3.3's four); every key WITHOUT a
+ * The static per-keyPath live-class table: the `applied` CLASS comes from a
+ * table, not from a runtime "a hook ran" guess. The rows are exactly the
+ * migrated hook-backed keys; every key WITHOUT a
  * migrated live path keeps replying "restart-required" exactly as before.
  * The side-effect-class rows extend it: the webui
  * rebind/auth pair, the userGate rule fields, providers (+ the stamped
@@ -2652,9 +2645,9 @@ function liveRowForWrite(keyPath: string): LiveAppliedRow | undefined {
 
 /** Value at keyPath in a generation: config bag first, resolved bag as the
  *  fallback (the same two-bag namespace the changed-diff spans; live.ts's
- *  seam reads identically). Hook ARGUMENTS only -- the §3.1 generic pair;
+ *  seam reads identically). Hook ARGUMENTS only -- the generic pair;
  *  hooks that need the resolution chain's authoritative value read
- *  ctx.store.current().resolved themselves (post-swap truth, §1.5). */
+ *  ctx.store.current().resolved themselves (post-swap truth). */
 function generationValueAt(
   bags: { config: object; resolved?: object },
   keyPath: string,
@@ -2664,8 +2657,8 @@ function generationValueAt(
 }
 
 /**
- * The §2.4 transaction, run INSIDE withConfigEditLock after a verified file
- * write. Returns the §7.1 attestation for the reply. Never throws: every
+ * The live transaction, run INSIDE withConfigEditLock after a verified file
+ * write. Returns the attestation for the reply. Never throws: every
  * failure mode answers with a plain, honest restart-required story.
  */
 async function runLiveConfigApply(
@@ -2683,9 +2676,9 @@ async function runLiveConfigApply(
     return { applied: "restart-required", appliedNotices: notices, applyHooks: reports };
   }
 
-  // reresolve (may throw -> §2.3 last-good). The live argv: the parsed CLI
+  // reresolve (may throw -> last-good). The live argv: the parsed CLI
   // bag main() bound at boot (the cli layer cannot change at runtime but
-  // MUST keep applying, §4.2's provenance argument), with `config` pinned to
+  // MUST keep applying), with `config` pinned to
   // the exact file the write chain just verified -- the same bytes the
   // snapshot's in-use path resolved (peekConfigFlags/resolveConfigDir are
   // boot-stable; pinning keeps the re-read pointed at what was written even
@@ -2697,10 +2690,10 @@ async function runLiveConfigApply(
     const cliArgv: CliArgv = { ...(core.cliArgv ?? {}), config: filePath };
     candidate = await reresolveConfig(cliArgv, core.configRegistry, previous);
   } catch (e) {
-    // LAST-GOOD (§2.3): the file keeps the write (verified bytes; next boot's
+    // LAST-GOOD: the file keeps the write (verified bytes; next boot's
     // truth; a broken-boot file is rescue's domain, not the runtime's). The
     // store keeps the PREVIOUS generation, untouched. Plain reply, formatError
-    // text included -- liveApplyError ruling (§7.1-canonical): the wire type
+    // text included -- liveApplyError ruling: the wire type
     // carries no such field, the error text rides appliedNotices verbatim.
     // No retry machinery; the next successful write re-runs the whole chain.
     notices.push(
@@ -2726,7 +2719,7 @@ async function runLiveConfigApply(
 
   // PREPARE hooks (before the swap): a throw REFUSES the swap. The value
   // stays persisted in the file, the runtime untouched, applied
-  // "restart-required" + the refuse reason (§2.4).
+  // "restart-required" + the refuse reason.
   for (const hook of hooksForPhase("prepare", changed)) {
     const report = await runConfigApplyHook(
       ctx,
@@ -2744,9 +2737,9 @@ async function runLiveConfigApply(
   }
 
   // SWAP: reads are NEW from here on; the changed prefixes are "applying"
-  // until commit (§1.5 F5 window). APPLY hooks run after the swap, awaited,
+  // until commit (the applying window). APPLY hooks run after the swap, awaited,
   // each under its timeoutMs -- a throw/timeout is a degraded report and the
-  // store NEVER re-swaps (§3.2).
+  // store NEVER re-swaps.
   const commit = store.swap(candidate);
   const degraded: Array<{ keyPath: string; why: string }> = [];
   try {
@@ -2767,12 +2760,12 @@ async function runLiveConfigApply(
     }
   } finally {
     // ONE notify pass (batchId+1, applying clears, degraded attaches via
-    // B1's commit(degraded?) channel -- clearing per the prefix rule).
+    // the commit(degraded?) channel -- clearing per the prefix rule).
     commit(degraded.length > 0 ? degraded : undefined);
   }
 
   // The `applied` attestation: static class, downgraded by what actually
-  // happened to this key's live path (§7.1). Three demotions, then the one
+  // happened to this key's live path. Three demotions, then the one
   // quiet pass. (1) A degraded primary effect means the new value is NOT in
   // effect (the old side effect still runs): restart-required, with the
   // degraded notice stated above. (2) The hook ran nothing and the resolved
@@ -2782,7 +2775,7 @@ async function runLiveConfigApply(
   // hook ran nothing, other canonical values moved, but THIS key's root did
   // not -- a higher layer (provider/cli/env) decides it and the file's new
   // value reached nobody but the store: restart-required, notice names the
-  // shadow (B4 review F1). (4) Nothing at all in `changed`: a genuine no-op,
+  // shadow. (4) Nothing at all in `changed`: a genuine no-op,
   // the running value already equals the file, so the live claim stands
   // unconfirmed and honest -- EXCEPT for "rebind", which claims an act that
   // a no-op does not perform: it is downgraded to "live" (the port is
@@ -3125,8 +3118,7 @@ function commentEndAt(text: string, at: number): number {
 }
 
 /** The byte ranges a remove of elems[pos] deletes (application order: last
- *  start first). THE CUT DOCTRINE (owner ruling 2026-11-11, audit finding 2):
- * a cut swallows ONLY whitespace, at most one separator comma (plus a JSONC
+ *  start first). THE CUT DOCTRINE: a cut swallows ONLY whitespace, at most one separator comma (plus a JSONC
  * trailing comma riding on the cut), and -- the one deliberately pinned
  * exception -- a comment that STARTS on the removed element's closing line
  * (spaces/tabs and at most its own comma in between); that comment describes

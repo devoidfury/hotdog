@@ -29,7 +29,7 @@ export class ProjectInfoTool {
   metadata: ToolMetadata = { sideEffects: false, difficulty: 1, tags: ["files"] };
 
   /** File-listing ceiling, plumbed from coreTools.grepMaxResults.
-   *  B6a (§4.1): scalar-or-reader; live per execute through the getter. */
+   *  Scalar-or-reader; live per execute through the getter. */
   #maxFiles: ConfigKnob<number>;
 
   constructor(options: { maxFiles: ConfigKnob<number> }) {

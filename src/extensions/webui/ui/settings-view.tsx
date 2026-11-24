@@ -6,8 +6,7 @@
 // recomputes per request; there is still no push feed, so staleness only ends
 // at the next open/Refresh, never mid-visit. Editing rides
 // the same frame: EVERY row the server stamped `edit` carries its IMMEDIATE
-// control (owner ruling C6, 2026-11-09: no Edit click for scalars -- the
-// toggle flips, the stepper steps, the input blurs, the save goes out); the
+// control (no Edit click for scalars -- the toggle flips, the stepper steps, the input blurs, the save goes out); the
 // honest hint survives ONLY on the two refusal classes -- rows whose shipped
 // payload is a redacted/stubbed summary, and paths the surgical locator
 // cannot address. Saves go out as setConfigKey (fresh requestId per save,
@@ -751,7 +750,7 @@ export function rowMatchesQuery(row: ConfigKeyEntryWire, query: string): boolean
   return row.description !== undefined && normSearch(row.description).includes(q);
 }
 
-// ── Field-unit counts (owner ruling 2026-11-11) ─────────────────────────────
+// ── Field-unit counts ─────────────────────────────
 // The rail answers "how many SETTINGS live here" the way a user perceives
 // them, not how many snapshot rows the server happened to ship. A row
 // contributes ONE countable FIELD UNIT or ZERO; the count is the number of
@@ -2190,8 +2189,7 @@ export function SettingsViewer({
   };
   const groups = snapshot ? categoryGroups(snapshot) : [];
   const searching = query.trim() !== "";
-  // Search-mode grouping. The rail counts FIELD UNITS (owner ruling
-  // 2026-11-11): the matched rows resolve to their units against the FULL
+  // Search-mode grouping. The rail counts FIELD UNITS: the matched rows resolve to their units against the FULL
   // group as context, so a match on `providers[1].url` claims the ONE
   // provider, two matches inside `workspace.paths` claim the array once,
   // and pure chrome matches (the `providers` heading) claim nothing.

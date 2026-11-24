@@ -1,4 +1,4 @@
-// Owner ruling 2026-11-18: the web client's build stamp and the honest version-skew decision.
+// The web client's build stamp and the honest version-skew decision.
 //
 // The stamp is the package version, inlined by Bun when it bundles the UI
 // (the daemon serves the bundle, so a bundle and a daemon of one checkout

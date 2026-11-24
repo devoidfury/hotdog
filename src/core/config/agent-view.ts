@@ -1,5 +1,5 @@
 /**
- * agent-view.ts -- the live agent.config view (design §4.2, batch B5).
+ * agent-view.ts -- the live agent.config view.
  *
  * `agent.config` on the DEFAULT (store-backed) factory path is a Proxy over
  * the live ConfigStore with a per-agent own-property overlay: overlay own
@@ -30,7 +30,7 @@ import type { ConfigStore } from "./store.ts";
  *  resolved.*, never as agent config. Never enumerated into agent.config
  *  (get() still reads through): whole-config spreads/serializations cannot
  *  silently start shipping live objects (the ProfileManager, the model
- *  registry...). §9 test 7 pins this exact set. */
+ *  registry...). The config-live probes pin this exact set. */
 export const AGENT_VIEW_EXCLUDED: ReadonlySet<string> = new Set([
   "model",
   "modelRegistry",
@@ -72,7 +72,7 @@ export function liveAgentConfig(
     }),
     // Writes land in the overlay ONLY: an agent's own mutation (applyProfile's
     // blacklistTools, a per-session override) pins over the live base exactly
-    // like the pre-B5 copied bag did; the store's generation is never touched.
+    // like the copied bag did; the store's generation is never touched.
     set: (t, k, v) => {
       (t as Record<string | symbol, unknown>)[k] = v;
       return true;

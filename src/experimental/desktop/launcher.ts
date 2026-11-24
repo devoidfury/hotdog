@@ -358,11 +358,13 @@ async function spawnShim(plan: ShimPlan, url: string): Promise<WindowHandle | nu
 /** Compiled on demand by the launcher chain; exported for the gated
  *  compile smoke test (tests/extensions/desktop-shim-macos-smoke.test.ts). */
 export async function compileShim(plan: ShimPlan): Promise<string | null> {
-  await mkdir(join(plan.outPath, ".."), { recursive: true });
   const tmp = `${plan.outPath}.tmp-${randomBytes(4).toString("hex")}`;
-  logger.info(`[desktop] compiling the webview shim (first run; ${plan.cc}, one-off)`);
   let plistPath: string | null = null;
   try {
+    // INSIDE the catch on purpose: a non-writable cache dir is the same
+    // "could not run" posture as an unspawnable cc -- null, not a throw.
+    await mkdir(join(plan.outPath, ".."), { recursive: true });
+    logger.info(`[desktop] compiling the webview shim (first run; ${plan.cc}, one-off)`);
     const flags = [...plan.flags];
     if (plan.atsPlist !== undefined) {
       // -Wl,-sectcreate embeds the plist as the binary's __info_plist

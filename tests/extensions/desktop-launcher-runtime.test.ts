@@ -150,15 +150,41 @@ describe("compileShim runtime (fake cc)", () => {
   });
 
   it("unspawnable cc -> null through the catch, not a throw", async () => {
+    // The out dir lives in scratch: the failure under test is the cc spawn,
+    // not / write access (a /nonexistent outPath littered the root on hosts
+    // where it was writable and threw before the catch on hosts where it
+    // was not).
+    const dir = await scratch("nocc");
     const bin = await compileShim({
-      sourcePath: "/nonexistent/whatever.c",
-      outPath: "/nonexistent/dir/shim",
+      sourcePath: join(dir, "whatever.c"),
+      outPath: join(dir, "nested", "shim"),
       cc: join(BIN_DIR, "no-such-compiler"),
       flags: [],
       cached: false,
     });
     expect(bin).toBeNull();
   });
+
+  if (process.platform !== "win32") {
+    it("unwritable out dir -> null through the catch, not a throw", async () => {
+      const dir = await scratch("roout");
+      const roDir = join(dir, "ro");
+      mkdirSync(roDir);
+      chmodSync(roDir, 0o500);
+      try {
+        const bin = await compileShim({
+          sourcePath: join(dir, "whatever.c"),
+          outPath: join(roDir, "nested", "shim"),
+          cc: join(BIN_DIR, "no-such-compiler"),
+          flags: [],
+          cached: false,
+        });
+        expect(bin).toBeNull();
+      } finally {
+        chmodSync(roDir, 0o700);
+      }
+    });
+  }
 
   it("codesign=true on a host without codesign: the signing attempt fails soft, the binary still rides", async () => {
     // On Linux there is no codesign binary: adhocSign's spawn throws, and

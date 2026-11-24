@@ -539,7 +539,8 @@ UI theme. Built-in options: `dark`, `light`, `monochrome`. Also accepts a file p
 `final_response`, `compacting`, `progress`, `arg_key`, `shell_command`, `shell_operator`, `arg_separator`,
 the tool-result diff classes `diff_add` (green), `diff_del` (red), `diff_ctx` (bright_black), `diff_meta`
 (the diff's path/stat header and elision line), and `status_bar` (the interactive status bar; dark/light
-default to `bg_cyan` -- the cyan accent as the bar's background with a pinned black foreground -- and the
+default to `bg_cyan` -- the cyan accent as the bar's background with a pinned black foreground (the
+256-color cube black, immune to themes that remap ANSI black to a tinted dark) -- and the
 monochrome theme keeps `inverse`; any ANSI class name works, `""` gives a plain text row).
 Color names are ANSI classes (`cyan`, `bright_black`, `bold_white`, ...); an empty or unknown name leaves
 that class unstyled.

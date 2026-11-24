@@ -2681,7 +2681,7 @@ describe("status row: pure shape", () => {
 
 describe("status bar: styled rows", () => {
   const dark = new ColorPalette(dark_palette());
-  const ON = "\x1b[46;30m"; // bg_cyan: the dark theme's status_bar default
+  const ON = "\x1b[46;38;5;16m"; // bg_cyan: the dark theme's status_bar default
   const OFF = "\x1b[0m";
 
   it("null palette, colors off, or empty status_bar -> plain wrapped rows, no padding", () => {
@@ -2733,7 +2733,7 @@ describe("status bar: styled rows", () => {
     };
     rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
     expect(rig.screenRows().some((r) => r.startsWith(" working · 00:00"))).toBe(true);
-    const spans = raw.join("").match(/\x1b\[46;30m[^\x1b]*\x1b\[0m/g) ?? [];
+    const spans = raw.join("").match(/\x1b\[46;38;5;16m[^\x1b]*\x1b\[0m/g) ?? [];
     expect(spans.length).toBeGreaterThan(0);
     // One span, one bar: margin + text + padding out to the full 80 cells.
     expect(visibleWidth(spans[spans.length - 1]!)).toBe(80);

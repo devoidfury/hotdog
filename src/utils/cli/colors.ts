@@ -357,8 +357,11 @@ const COLOR_MAP: Record<string, string> = {
   // Status-bar default: cyan ground with a pinned black foreground -- the
   // CLI's cyan accent (36) moved to the bg slot. The fg is pinned because
   // the terminal's default fg is a light gray on dark themes, which reads
-  // poorly on cyan; black works on light and dark alike.
-  bg_cyan: "46;30",
+  // poorly on cyan. The black is the 256-color cube's (38;5;16), not ANSI
+  // black: modern themes remap palette slot 0 to a tinted dark, which made
+  // the pinned fg dim navy on cyan; the cube black stays #000000 on every
+  // theme that only restyles the ANSI 16 (same fallback posture as orange).
+  bg_cyan: "46;38;5;16",
   // 256-color orange: the heading accent the basic 8 cannot name. Terminals
   // without 256-color support print the sequence's text unstyled-at-worst.
   orange: "38;5;208",

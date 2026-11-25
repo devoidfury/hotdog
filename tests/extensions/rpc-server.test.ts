@@ -185,4 +185,41 @@ describe("RpcQuestionSeam", () => {
     const answers = await pending;
     expect(unansweredReason(answers)).toBe("connection closed");
   });
+
+  it("declares itself interactive: asks block the run until answered or released", () => {
+    const seam = new RpcQuestionSeam(() => {});
+    expect(seam.isInteractive()).toBe(true);
+  });
+});
+
+describe("RpcServer base-channel surface", () => {
+  it("read() yields nothing: input arrives through run(), not the base contract", async () => {
+    const { server } = createServer();
+    const seen: string[] = [];
+    for await (const line of server.read()) seen.push(line);
+    expect(seen).toEqual([]);
+  });
+
+  it("write() (the base Channel seam) emits an event record tagged with the current session", () => {
+    // The machine path delivers events through the session subscription;
+    // write() is the inherited door a subclass or the base would call.
+    class Probe extends RpcServer {
+      emitForTest(event: OutputEvent): void {
+        this.write(event);
+      }
+    }
+    const { manager } = createMockSessionManager();
+    const lines: string[] = [];
+    const probe = new Probe({ sessionManager: manager, sessionId: "s1", writeLine: (l) => lines.push(l) });
+    probe.emitForTest({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "hi" } as OutputEvent);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!)).toMatchObject({
+      v: 1,
+      type: "event",
+      seq: 1,
+      session: "s1",
+      event: "assistant_message",
+      data: { content: "hi" },
+    });
+  });
 });

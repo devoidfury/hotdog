@@ -134,6 +134,24 @@ describe("parseCommandLine", () => {
   it("rejects ids that are not string or number", () => {
     expect(parseCommandLine('{"id":{"a":1},"cmd":"status"}').ok).toBe(false);
   });
+
+  it("rejects a non-string cmd with the id echoed for correlation", () => {
+    const parsed = parseCommandLine('{"id":3,"cmd":5}');
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error).toContain("cmd must be a string");
+      expect(parsed.id).toBe(3);
+    }
+  });
+
+  it("rejects non-string text and session fields", () => {
+    const text = parseCommandLine('{"cmd":"status","text":5}');
+    expect(text.ok).toBe(false);
+    if (!text.ok) expect(text.error).toContain("text must be a string");
+    const session = parseCommandLine('{"cmd":"cancel","session":true}');
+    expect(session.ok).toBe(false);
+    if (!session.ok) expect(session.error).toContain("session must be a string");
+  });
 });
 
 describe("JsonlEventWriter", () => {

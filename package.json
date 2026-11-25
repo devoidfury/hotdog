@@ -1,6 +1,6 @@
 {
   "name": "@read-receipt/hotdog",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "exports": {
     ".": "./src/index.ts",
     "./sdk": "./src/sdk.ts",

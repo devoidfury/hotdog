@@ -2,100 +2,57 @@
 
 ## Unreleased
 
-- **cli - the status bar stops trusting the terminal's black.** The `bg_cyan` bar now uses the 256-color cube black, so themes that recolor palette slot 0 can no longer render it as dim navy on cyan.
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.17.0...main
 
-- **experimental/codemode - a new opt-in tool that runs model-authored JavaScript with tool calls.** The script runs in a fenced child process; every `tools.*` call inside it round-trips through the normal pipeline (gate, approvals, caps) and is audited. While loaded, codemode shadows the other tools -- they leave the model's declaration list but stay callable from inside scripts. Opt in by adding `@experimental` to `extensionPaths`.
+## [v0.17.0] - 2026-11-24
 
-- **webui - workers adopted across a restart come back honest.** A restarted or reconnecting daemon re-adopts a still-live worker as a live row (running, since-spawn clock, opens the live tail); a cold-adopted workflow worker keeps its subagent identity -- hidden from top-level lists, nested under its manager -- and answers cancel/send with honest "adopted" refusals instead of pointing at a task that died with the old process. When the turn settles, the manager's card stops claiming "interrupted".
+- **experimental/codemode - a new opt-in tool that runs model-authored JavaScript with tool calls.** The script runs in a fenced child process; `tools.*` call inside it round-trips through the normal pipeline (gate, approvals, caps) and is audited. While loaded, codemode shadows the other tools -- they leave the model's declaration list but stay callable from inside scripts. Opt in by adding `@experimental` to `extensionPaths`.
 
-- **webui - RECENT LOGS got cheap.** The cold list now ships the newest 50 rows plus a "load older" page, served from the session index (it used to re-serialize the entire log store -- ~350 kB of JSON -- on every attach, pin flip, and dismissal), and live refreshes ship only the rows newer than your last frame. Pinned rows always ship in full; search is untouched.
-
-- **webui - streaming costs a handful of frames instead of hundreds.** Text and reasoning chunks coalesce behind `webui.streamBatchMs` (default 200 ms, 0 = off; the first frame of a burst ships immediately, and the knob applies live), and in-flight tool-call previews send only the new argument bytes instead of re-sending the whole partial every frame.
-
-- **compaction - the ctx gauge, the trigger, and the overflow rescue finally see images.** Image payloads now count in the token estimate -- an image-heavy session could blow its 262k window while the gauge read 25% and the rescue deleted text that was never the problem. The rescue strips older images first (placeholder `[image omitted by compaction]`, the newest 2 kept, on-disk tool-result paths stay re-readable), and the provider's billed prompt size rides as a floor for triggers and rescue targets.
-
-- **compaction - the overflow rescue stops lying.** A gateway error that merely quotes an overflow phrase no longer triggers compact-and-retry: when the local estimate and the provider's last reported input both fit the window, the error surfaces untouched. And a rescue that removed nothing no longer announces "compacted" -- it reports nothing was eligible and skips the pointless retry of the identical request.
-
-- **compaction - a rejected request re-aims instead of retrying identically.** When the provider still refuses after a rescue, follow-up attempts aim progressively lower (85% down to 35% of the rejected size, at most 3 re-aims), every re-issue is strictly lighter than what was just refused, and a reduction that cannot get smaller stops with an honest notice instead of looping on the same 400.
-
-- **compaction - compaction survives restarts.** Successful reductions checkpoint the durable log, so a resumed session replays from the last checkpoint instead of re-inflating history the live session had already compacted. Tip: run `/compact` once in long-running sessions right after upgrading to stamp the first checkpoint.
-
-- **webui - cold logs ship image stubs, not inline base64.** History pages omit the pixels and fetch each image lazily when its box scrolls into view; live frames and freshly streamed images stay inline.
-
-- **webui - one named view state, honest chrome, and the raw META envelope retires.** Search hits never silently attach -- live hits peek read-only with an explicit Take over. The raw `META:` line is gone from every chat surface; the facts render as one muted strip with the full envelope behind a disclosure. Failed subagent attaches render a fallback card, client/daemon build skew gets a dismissible warning, and long user prompts fold at 4 lines with expand-on-click.
-
-- **webui - Ctrl/Cmd+C actually reaches the clipboard.** Copy staged the selection into a hidden textarea and then cleared it before the browser could read it, so real browsers copied nothing; copy now writes through the shared clipboard seam (the cut path already did).
-
-- **webui - the editor's foot bar reads the caret and jumps.** A `row:col` chip tracks the primary caret; click it, type `N` (keeps the column) or `N:M`, Enter. Line and column clamp honestly, an invalid spec refuses and stays open for the fix, Escape cancels.
-
-- **webui - the editor's mouse interaction works in real browsers.** The selection highlight was painting zero-pixel-tall rects (invisible despite correct state); the caret landed left of the click on tab-indented files (a `code`-element font override desynced measurement from rendering); drags started from the empty area or a wheel turn mid-drag landed off-target. All verified against real Chromium with glyph-position ground truth.
-
-- **webui - chrome tighten-up.** The file foot bar and tree indent tighten, footer icon buttons slim, pane resize seams stop eating the scrollbar tracks beside them (the hover highlight becomes a 2px accent line instead of a full-strip slab), and the row actions button grows and stays visible on the viewed row.
-
-- **experimental/agent-browser - the `userGate` probe reads the config per use.** A live `userGate.enabled` flip no longer leaves the tool quoting a stale "not enabled" refusal; loading the extension itself still needs a boot.
-
-- **webui - attachment boxes stop rendering black-on-black in the hotdog theme.**
-
-- **webui - the editor grows multi-caret and brace matching.** Alt+click adds or removes a caret, Alt+Shift+Arrow adds one on the next/prev line, Alt+Shift+drag is box selection; typing, Backspace, Enter, Tab and paste apply at every caret as one undo step. Brackets auto-close, closers overtype, Backspace between an empty pair kills both halves, Enter expands `{}`, and the caret's bracket pair highlights.
-
-- **webui - a refresh no longer loses state.** The viewed subagent, the composer's caret and focus, and the live "Thinking" row all survive a reload, and toggling reasoning visibility mid-turn re-derives the row.
-
-- **webui - the editor fills the pane top to bottom and the caret stops drifting.** The code sheet owns the full pane with the foot bar pinned at the bottom, empty-area clicks place the caret at buffer end, and one shared column<->x mapping (re-measured when webfonts settle) cures the drift. Also: Ctrl+X with an empty selection is inert, a rename racing an in-flight save no longer wedges the save gate, and a dirty buffer vetoes a refresh instead of vanishing silently.
-
-- **webui - the syntax language chooser returns to the editor's foot bar.** It had survived only on the read-only viewer, so editable files lost the override control.
-
-- **compaction - pass-the-baton is notice-first.** Over budget, the handoff notice is appended without popping anything, so the agent narrates its summary with its recent work still in context; the tail pops only if it keeps running past the budget.
-
-- **webui - the file-view tab becomes a real editor.** A zero-dependency custom core (hidden textarea for focus/IME, windowed rendering): undo/redo with typing coalesced into word/timeout runs, Ctrl+S save with an mtime conflict gate, auto-indent, tab/dedent, clipboard through the native events, and a per-browser visible-whitespace toggle.
-
-- **webui - the file tree grows real file ops: create, rename, delete, download, and server-side save.** Every path on every op passes the workspace safety gate first (renames check both ends; a destination landing in a denylisted dir through a symlink refuses the whole move; deletes never follow symlinks), creates never clobber, and racing same-path saves resolve to exactly one winner.
-
-- **webui - subagent transcripts open complete.** An idle or finished subagent opens on its whole transcript from its durable log (it used to serve a stale cached relay tail, sometimes a fifth of the conversation), opens on its delegated prompt, and closes each response with the same usage footer the session view shows.
-
-- **config - the `thinker` knob is retired.** The broken `{}` think-format template goes rather than limps on: thinking always prints in the built-in `[Thinking: ...]` shape and `hideThinking` remains the control. A leftover `thinker` key warns once instead of failing boot; `--thinker`/`-t` are gone (unknown flags stay fatal).
+- **webui - editor mode layout.** A header button swaps between the chat layout and an editor layout where the file tree and viewer take the stage. Flipping is instant and lossless.
 
 - **webui - the profile and model pills are searchable comboboxes.** Type to find an entry in a long list; fully keyboard-operable, and the actual current value keeps showing while you filter.
 
-- **webui - the live transcript says it is waiting.** One "Thinking" row (screen-reader friendly, announced once) covers each model call until something visible lands, and rides the whole reasoning phase when reasoning is hidden. Tool calls also preview while still streaming instead of appearing only once fully committed.
+- **webui - workers adopted across a restart come back honest.** A restarted or reconnecting daemon re-adopts a still-live worker as a live row (running, since-spawn clock, opens the live tail); a cold-adopted workflow worker keeps its subagent identity -- hidden from top-level lists, nested under its manager -- and answers cancel/send with honest "adopted" refusals instead of pointing at a task that died with the old process. When the turn settles, the manager's card stops claiming "interrupted".
 
-- **webui - workbench: a docked, resizable, tabbed column beside the chat** holding a workspace file tree and a file viewer. The tree reaches only your configured workspace roots, denylisted paths never even list, tabs and pane widths restore per browser tab, and every border -- including the tree column in chat mode -- drags and remembers.
+- **webui - workbench: a docked, resizable, tabbed column beside the chat** holding a workspace file tree and a file viewer. The tree reaches only your configured workspace roots, denylisted paths never even list, tabs and pane widths restore per browser tab, and every border drags and remembers.
 
-- **syntax - code is colored everywhere you read it.** The webui file viewer, chat tool blocks, and markdown fences highlight about forty languages (JS/TS/JSX, Python, Rust, Go, C-family, shell, SQL, YAML, JSON, and more); the foot bar names the detected language and clicking it overrides the guess; files open with the first 2,000 lines instead of 200. The interactive CLI colors assistant prose too (`uiInteractiveCli.markdown: false` turns it off).
+- **webui - the file-view tab is also an editor.** A zero-dependency custom core (hidden textarea for focus/IME, windowed rendering): undo/redo with typing coalesced into word/timeout runs, Ctrl+S save with an mtime conflict gate, auto-indent, tab/dedent, clipboard through the native events, and a per-browser visible-whitespace toggle.
 
-- **webui - editor mode layout.** One header control swaps between the chat layout and an editor layout where the file tree and viewer take the stage and the sessions rail docks beside the chat. Flipping is instant and lossless -- transcript, draft, and open tabs ride through -- and the mode plus pane widths are remembered per browser.
+- **webui - streaming costs a handful of frames instead of hundreds.** Text and reasoning chunks coalesce behind `webui.streamBatchMs` (default 200 ms, 0 = off; the first frame of a burst ships immediately, and the knob applies live), and in-flight tool-call previews send only the new argument bytes instead of re-sending the whole partial every frame.
 
-- **webui - settings panel: read and edit every setting from the browser.** Each key shows its value, where it came from (file / env / cli), and a differs-from-default marker; secrets never travel to the browser (replace-only boxes). Saves are surgical text edits to your config file: comments, formatting, and every untouched key survive byte for byte.
+- **webui - editor - cursor position status** A `row:col` chip tracks the primary cursor; click it, type `N` (keeps the column) or `N:M`, Enter. Line and column clamp honestly, an invalid spec refuses and stays open for the fix, Escape cancels.
 
-- **config - most settings now apply without a restart.** A panel save rebinds the webui port, rebuilds auth, recompiles tool-approval rules, and re-points providers; keys that genuinely need a restart say so in the save reply and a pending banner. Every change lands as a redacted audit line and a notice on live sessions.
+- **webui - keyboard and screen-reader access.** Sidebar rows, their context menus, and the settings panel are operable without a mouse, the composer is no longer a focus trap, and a polite live region announces the run: "Working", then "Reply complete" / "Run failed" / "Work stopped" / "Connection lost".
+
+- **experimental/agent-browser - the `userGate` probe reads the config per use.** A live `userGate.enabled` flip no longer leaves the tool quoting a stale "not enabled" refusal; loading the extension itself still needs a boot.
+
+- **webui - hold state across refresh.** The viewed subagent, the composer's caret and focus, and the live "Thinking" row all survive a reload, and toggling reasoning visibility mid-turn re-derives the row.
+
+- **syntax - code highlighting.** The webui file viewer, chat tool blocks, and markdown fences highlight about forty languages (JS/TS/JSX, Python, Rust, Go, C-family, shell, SQL, YAML, JSON, and more); the foot bar names the detected language and clicking it overrides the guess; files open with the first 2,000 lines instead of 200. The interactive CLI colors assistant prose too (`uiInteractiveCli.markdown: false` turns it off).
+
+- **webui - RECENT LOGS got cheap.** The cold list now ships the newest 50 rows plus a "load older" page, served from the session index (it used to re-serialize the entire log store -- ~350 kB of JSON -- on every attach, pin flip, and dismissal), and live refreshes ship only the rows newer than your last frame. Pinned rows always ship in full; search is untouched.
+
+- **config** - most settings now apply without a restart.
 
 - **config - keys that were silently ignored now work; two dead ones retired.** `maxRetries`, `toolRetryDelay`, and `taskProfile` are finally read from `defaults.json`; `logLevel`/`logTarget` move from env-only to real config keys; `temperature` and `prompt` are removed (nothing ever read them) and `hotdog rescue` names them.
 
-- **rescue - `hotdog rescue fix` repairs invalid enum values.** A `"logLevel": "verbos"` typo used to hard-fail boot with no path out but manual editing; rescue now names the offending key and the accepted values, and `fix` resets it in place with comments and formatting preserved.
-
-- **webui - subagents live in the sidebar.** Each manager card carries a collapsible Subagents list with status glyphs and an elapsed clock; clicking a row opens that subagent's full transcript in the main pane, the composer steers a running one, and the row menu handles cancel, copy id, export, and reveal. After a reload a finished subagent replays its whole transcript from its session log. (Retires the old task-panel overlay.)
-
-- **webui - themes and honest icon chrome.** A header switcher moves between the new default "hotdog" palette (warm mustard) and classic purple, applied before first paint so reloads never flash. Header actions are clean SVG icons now -- and they actually render: a namespace bug had silently hidden every inline icon. The sandbox chip reads at a glance: check-shield = confined, red = fence off, amber = probe failed.
-
-- **webui - keyboard and screen-reader access.** Sidebar rows, their context menus, and the settings panel are operable without a mouse, the composer is no longer a focus trap, and a polite live region announces the run: "Working", then "Reply complete" / "Run failed" / "Work stopped" / "Connection lost" -- never a streamed token.
-
-- **webui - steering is always on.** The Steer checkbox is gone; every message ships steered. A Disconnected badge appears beside send only when the socket is actually down.
-
-- **cli - you see what the agent is doing by default.** Tool calls and results print in fresh sessions (`hideTools` default flipped; `hideTools: true` or `--hide-tools` opts out). Edit calls render a bounded colored diff -- the same diff the approval prompt shows, so you approve what you can read -- and provider retries announce themselves before each backoff sleep.
+- **cli - you see what the agent is doing by default.** Tool calls and results print in fresh sessions (`hideTools` default flipped; `hideTools: true` or `--hide-tools` opts out). 
 
 - **core - the status row's `#N` is now an address.** `/rewind` and `/fork` take a visible-message index: `/fork #5` cuts through message 5, `/rewind -2` goes back two, bare `/rewind` is `-1`. An out-of-range target names the valid range instead of changing anything.
 
 - **llm - `delta.reasoning` streams too.** Routers that echo `reasoning` instead of `reasoning_content` (the vLLM/Ollama family) produced invisible thinking; both spellings parse now.
 
-- **tasks - cancelled means cancelled, and results arrive as content.** Killing a workflow worker settles the node CANCELLED instead of logging a failure and respawning a fresh worker to burn tokens on work you just stopped. A subagent that ends on a handoff tool delivers that tool's actual content to its manager instead of the bare word "return".
+- **tasks - cancelled means cancelled, and handoff results arrive as content.** Killing a workflow worker settles the node CANCELLED instead of logging a failure and respawning a fresh worker to burn tokens on work you just stopped. A subagent that ends on a handoff tool delivers that tool's actual content to its manager instead of the bare word "return".
 
-- **core - the sandboxed tool runner loads only what it's told to.** The pooled runner boots with zero extension code inside the fence and imports exactly what a tool descriptor names, refusing any module outside the project root. Note: the pool's tool set is fixed at daemon start, so adding an extension needs a restart.
+- **extensions - published API, four entrypoints: `@read-receipt/hotdog`, `/sdk`, `/utils/*`, `/testing`.** Everything else under `src/` is internal. The new `/testing` kit lets an external bundle boot its extension in `bun test` with zero deep imports.
 
-- **extensions - the published API is four doors: `@read-receipt/hotdog`, `/sdk`, `/utils/*`, `/testing`.** The `exports` map pins the surface; everything else under `src/` is internal and moves freely between minors. The new `/testing` kit lets an external bundle boot its extension in `bun test` with zero deep imports.
-
-- **extensions - version ranges, a validator, two worked examples.** `extension.json` gained an optional `"sdk": ">=0.16"` claim (mismatch warns at load); `hotdog extension validate <dir>` diagnoses one extension or a whole bundle and works even with a broken `defaults.json`; an `extensionPaths` entry may now name a single extension directory. New examples: `extension-starter` and `extension-redactor`.
+- **extensions - version ranges, a validator, two examples.** `extension.json` gained an optional `"sdk": ">=0.16"` claim, mismatch warns at load. `hotdog extension validate <dir>` diagnoses one extension or a whole bundle and works even with a broken `defaults.json`. An `extensionPaths` entry may now name a single extension directory. New examples: `extension-starter` and `extension-redactor`.
 
 - **tools - domain tags.** Tools can declare domain tags (`files`, `network`, `system`, ...), and `/tools list` prints them.
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.16.0...main
+
+- **compaction - the ctx gauge, the trigger, and the overflow rescue finally see images.** Image payloads now count in the token estimate -- an image-heavy session could blow its 262k window while the gauge read 25% and the rescue deleted text that was never the problem.
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.16.0...v0.17.0
 
 ## [v0.16.0] - 2026-11-06
 

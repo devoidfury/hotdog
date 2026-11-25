@@ -41,6 +41,7 @@ import {
 import { errorExcerpt, findJsonError, lineColAt } from "../config/rescue.ts";
 import { parseVersionRange, rangeMatches } from "@utils/version.ts";
 import { formatError } from "../error.ts";
+import { classifyExtensionSpec, extensionsInstallRoot, installedExtensionDir } from "./install.ts";
 import pkg from "@package.json" with { type: "json" };
 
 export interface ExtensionValidateOptions {
@@ -87,7 +88,8 @@ export interface ExtensionValidateEnvelope {
 const USAGE = [
   "usage: hotdog extension validate <dir> [--json]",
   "",
-  "<dir> is one extension directory (extension.json + index.ts) or a bundle root to scan.",
+  "<dir> is one extension directory (extension.json + index.ts), a bundle root to scan,",
+  "or an installed npm/git/file specifier (the copy in the extension root is validated; never installed).",
   "Validates the manifest (strict JSON, field types, sdk range), the entry point, the",
   "config defaults, the service contracts, and dry-loads through the real extension loader.",
 ].join("\n");
@@ -408,7 +410,32 @@ export async function runExtensionValidate(opts: ExtensionValidateOptions): Prom
   log("hotdog extension validate - extension diagnostics");
   log();
 
-  const dir = path.resolve(dirArg);
+  // A specifier names the INSTALLED copy. Validate is diagnostics: it never
+  // installs; an uninstalled spec gets a finding pointing at the command.
+  const cls = classifyExtensionSpec(dirArg);
+  let dir: string;
+  if (cls.kind === "npm" || cls.kind === "git" || cls.kind === "file") {
+    const installed = await installedExtensionDir(dirArg);
+    if (!installed) {
+      log(`Target: ${dirArg}`);
+      addTop({
+        severity: "problem",
+        stage: "dir",
+        message: `"${dirArg}" is not installed in the extension root (${extensionsInstallRoot()})`,
+        hint: `hotdog extension install ${dirArg} -- validate reads the installed copy, it never installs itself`,
+      });
+      const envelope: ExtensionValidateEnvelope = {
+        dir: dirArg, mode: "empty", hotdog_version: pkg.version as string,
+        findings: topFindings, extensions: [], problems: 1, warnings: 0,
+      };
+      if (opts.json) console.log(JSON.stringify(envelope, null, 2));
+      else log(`\n1 problem(s) found.`);
+      return 1;
+    }
+    dir = installed;
+  } else {
+    dir = path.resolve(dirArg);
+  }
   let dirExists = false;
   try {
     dirExists = (await fsPromises.stat(dir)).isDirectory();

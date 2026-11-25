@@ -5,6 +5,7 @@ import { suggestCandidates } from "@utils/strings.ts";
 import { createToolRegistry } from "./extensions/tool-registry.ts";
 import {
   createExtensionLoader,
+  extensionSelection,
   registerExtensionMetadata,
   resolveExtensionsToLoad,
   sdkCompatibilityWarning,
@@ -24,6 +25,7 @@ import { registerConfigApplyHook } from "./config/apply-hooks.ts";
 import { peekLogBootPosture } from "./config/boot-posture.ts";
 import { enumHintsFromValidationErrors, runRescue } from "./config/rescue.ts";
 import { runExtensionValidate } from "./extensions/validate.ts";
+import { runExtensionInstall, runExtensionList, runExtensionUpdate } from "./extensions/install.ts";
 import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
 import type { ProviderDef } from "./config/providers.ts";
@@ -322,15 +324,29 @@ export async function main(): Promise<number> {
     handler: rescueHandler,
   });
   // Extension diagnostics ride the same above-the-config seat: validating an
-  // extension directory must work even when defaults.json is broken.
-  const extensionHandler = (cliArgs: CliArgv) =>
-    runExtensionValidate({
-      args: Array.isArray(cliArgs.args) ? (cliArgs.args as string[]) : [],
-      json: cliArgs.wantsJson === true,
-    });
+  // extension directory must work even when defaults.json is broken. The
+  // distribution verbs (install/update/list) also ride it: installing must
+  // work while the config is being fixed, and list reads the config only to
+  // cross-reference, degrading to the install tree alone when broken.
+  const extensionHandler = (cliArgs: CliArgv) => {
+    const args = Array.isArray(cliArgs.args) ? (cliArgs.args as string[]) : [];
+    const json = cliArgs.wantsJson === true;
+    const verb = args[0];
+    if (verb === "install") return runExtensionInstall({ specs: args.slice(1), json });
+    if (verb === "update") return runExtensionUpdate({ names: args.slice(1), json });
+    if (verb === "list") {
+      return runExtensionList({
+        json,
+        extensionPaths: earlyConfigError
+          ? undefined
+          : extensionSelection(minimalConfig as CoreConfigWithExtensions).extensionPaths,
+      });
+    }
+    return runExtensionValidate({ args, json });
+  };
   cliSubcommandRegistry.register("extension", {
     description:
-      "Extension diagnostics: 'validate <dir>' checks the manifest (strict JSON, field types, sdk range), the entry point, config defaults, service contracts, and dry-loads through the real loader; names unanchored SDK imports with the bun link fix",
+      "Extensions: 'validate <dir|spec>' diagnoses a bundle (strict JSON, field types, sdk range, entry point, config defaults, service contracts, dry-load through the real loader; names unanchored SDK imports with the bun link fix); 'install <spec>' / 'update [name]' / 'list' manage the npm/git/file install tree",
     handler: extensionHandler,
   });
   await registerExtensionMetadata(

@@ -24,9 +24,23 @@ hotdog extension validate <dir>  # Diagnose an extension (or a bundle root to sc
                                  # with line/column findings, field types, sdk-range verdict, entry point,
                                  # config defaults, service contracts, then a dry-load through the real
                                  # loader. Unanchored "@read-receipt/hotdog" imports get the bun link fix.
-                                 # Works with a broken defaults.json (above-the-config seat, like rescue)
+                                 # Also accepts an installed npm/git/file spec (validates the installed
+                                 # copy; never installs). Works with a broken defaults.json
+                                 # (above-the-config seat, like rescue)
 hotdog extension validate <dir> --json
                                  # ...as a JSON envelope (per-extension reports, findings, totals)
+hotdog extension install <spec>...
+                                 # Install extension bundles into the user-level tree (~/.hotdog/extensions,
+                                 # HOTDOG_EXTENSIONS_DIR) from npm (npm:<name>[@version]; the prefix is
+                                 # required, no implicit registry lookup), git
+                                 # (github:user/repo#ref, git+https://...), or file:<path>. --ignore-scripts
+                                 # always; floating requests are pinned and the pin is reported
+hotdog extension update [name]...
+                                 # Reconcile the tree within recorded ranges; recorded pins never move
+                                 # silently -- install <name>@<version> to move one deliberately
+hotdog extension list            # The install tree with resolved versions, cross-referenced against the
+                                 # configured extensionPaths (uninstalled specs are named with the fix)
+                                 # All three take --json for a machine envelope
 hotdog webui                     # Start the web UI server
 hotdog rpc                       # Machine interface: JSONL commands on stdin, records on stdout
                                  # (versioned protocol: prompts, cancel, status, question answers;

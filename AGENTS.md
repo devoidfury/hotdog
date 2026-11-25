@@ -11,6 +11,7 @@
   - `bun bin/hotdog profiles` — list all available profiles
   - `bun bin/hotdog rescue` — diagnose config files (paths, resolution chain, JSON syntax, unknown keys); `rescue fix` repairs comments/trailing commas; `rescue --json` prints a machine envelope (stdout carries only JSON; diagnostics go to stderr in `--json` mode everywhere)
   - `bun bin/hotdog extension validate <dir>` — diagnose one extension directory or a bundle root: strict-JSON manifest findings with line/column, field types, sdk-range verdict, entry point, config defaults, service contracts, dry-load through the real loader; names unanchored SDK imports with the bun link fix; `--json` envelope; runs above the config layer (works with a broken defaults.json)
+  - `bun bin/hotdog extension install <spec>... | update [name]... | list` — third-party bundle distribution: extensionPaths entries may be npm/git/file specifiers, installed with `bun add --ignore-scripts` into ~/.hotdog/extensions (HOTDOG_EXTENSIONS_DIR), pinned (floating requests resolved once and pinned loudly), loaded offline once installed; the tree anchors @read-receipt/hotdog to the running checkout; `--json` envelopes (docs/agents/extensions.md)
   - `bun bin/hotdog prompt "text"` — one-shot mode
   - `bun bin/hotdog rpc` — machine interface: JSONL commands/events over stdin/stdout (docs/machine-rpc.md)
 - Run Tests: `bun run test` (expected runtime < 10 seconds)

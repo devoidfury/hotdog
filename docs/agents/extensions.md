@@ -93,9 +93,40 @@ extension loader uses `extension.json` presence to identify valid extensions; lo
 
 **Discovery flow**: `extension.json` exists → valid extension (load additionally requires `index.ts`).
 
-Check any manifest + entry point + config schema with `hotdog extension validate <dir>` (a bundle root scans; `--json` for the envelope). It runs above the config layer, so it works even when `defaults.json` is broken.
+Check any manifest + entry point + config schema with `hotdog extension validate <dir>` (a bundle root scans; an installed npm/git/file specifier validates its installed copy; `--json` for the envelope). It runs above the config layer, so it works even when `defaults.json` is broken.
 
 **Static discovery**: CLI flags, subcommand declarations, and config params from `configSchema` are read at startup without loading extension code. This enables `--help`, subcommand discovery, and config defaults to work immediately.
+
+### Distribution: npm / git / file entries in `extensionPaths`
+
+Beyond filesystem paths and the `@extensions`/`@experimental` aliases, an `extensionPaths` entry may name an installable specifier:
+
+| Entry | Example | Notes |
+|-------|---------|-------|
+| npm | `npm:@read-receipt/example-extension@1.2.3`, unscoped `npm:left-pad@^1.0.0` | the `npm:` prefix is required; there is no implicit registry lookup |
+| git | `github:read-receipt/example-extension#v1.0.0`, `git:github.com/read-receipt/example-extension#<commit>`, `git+https://host/repo.git#ref` | tags and commits are pins; a bare URL follows the default branch at install time only |
+| file | `file:./checkout`, `file:/abs/path` | the same machinery, offline |
+
+```json
+{ "extensionPaths": ["@extensions", "npm:@read-receipt/example-extension@1.2.3", "github:read-receipt/example-extension#v2.0.0"] }
+```
+
+**How it works** (`src/core/extensions/install.ts`): specifiers install with `bun add --ignore-scripts` into a user-level opt-in tree at `~/.hotdog/extensions` (`HOTDOG_EXTENSIONS_DIR` overrides; env-only, because `extensionPaths` resolves during config loading). The tree is a private bun project: `package.json` records what was requested (and what was pinned), `node_modules/` holds the copies. Each installed package is then just another bundle root: discovery scans it, the loader loads it, nothing downstream knows where the bytes came from. A package may be a single extension (root `extension.json` + `index.ts`) or a bundle root with several extensions nested; a nested `node_modules/` is never scanned.
+
+**There is no implicit registry access**: an entry installs from npm only behind the explicit `npm:` prefix. Everything else that is not a git prefix or a `file:` source is a filesystem path, even a token that looks exactly like a package (`@read-receipt/example-extension`, `my-ext@1.0.0` are paths). The registry is never consulted by guessing, which closes the dependency-confusion direction entirely.
+
+**Install lifecycle** (above the config layer too, like `rescue`):
+
+```
+hotdog extension install <spec>...   # install now; reports the pin it chose
+hotdog extension update [name]...    # reconcile within recorded ranges (pins never move silently)
+hotdog extension list                # the tree, cross-referenced against extensionPaths
+hotdog extension validate <spec>     # validator over the installed copy (never installs)
+```
+
+**Supply-chain posture** (full writeup: [docs/supply-chain.md](../supply-chain.md)): lifecycle scripts never run (`--ignore-scripts`); floating requests (`npm:pkg`, `npm:pkg@latest`) are pinned to the resolved version at install and the pin is named loudly; an installed dependency is never re-resolved, so boots are offline once the tree is populated; a spec that cannot install at boot is skipped with a loud error and a retry command, never a silent drop and never a dead session. The core's `dependencies` stays empty -- everything lands in the tree you opted into.
+
+**The SDK anchor**: the tree carries `node_modules/@read-receipt/hotdog` as a symlink to the running checkout, so an installed extension's `@read-receipt/hotdog/sdk` import resolves to the same module graph the harness runs (one `sdk`, no duplicated error classes or registries). It is created on first install and retargeted if it goes stale; for hand-managed trees, the `bun link` story still works unchanged.
 
 ### Configuration
 

@@ -1004,8 +1004,10 @@ Name of the active profile. Can reference either a profile defined in the `profi
 
 Paths to extension directories. `"@extensions"` loads built-in extensions, `"@experimental"` loads bundled-but-opt-in experimental extensions (`src/experimental/`); neither is loaded when overridden, so include both to keep the builtins: `["@extensions", "@experimental"]`. Add paths to load custom extensions.
 
+An entry may also be an installable **specifier**: an npm package **behind the explicit `npm:` prefix** (`"npm:@read-receipt/example-extension@1.2.3"`, `"npm:left-pad@^1.0.0"`; there is no implicit registry lookup -- `@read-receipt/example-extension` and `my-pkg@1.0.0` without the prefix are paths), a git URL (`"github:read-receipt/example-extension#v1.0.0"`, `"git+https://host/repo.git#ref"`), or `"file:<path>"`. Specifiers install with `bun add --ignore-scripts` into the user-level tree at `~/.hotdog/extensions` (`HOTDOG_EXTENSIONS_DIR`, env-only), pin floating requests to the resolved version, and never touch the network once installed. Manage the tree with `hotdog extension install|update|list`; see [agents/extensions.md](agents/extensions.md) and the supply-chain note in [supply-chain.md](supply-chain.md).
+
 ```json
-{ "extensionPaths": ["@extensions", "@experimental", "./my-extensions"] }
+{ "extensionPaths": ["@extensions", "@experimental", "./my-extensions", "npm:@read-receipt/example-extension@1.2.3"] }
 ```
 
 ### `extensionAutoload`

@@ -681,7 +681,7 @@
   },
   "extensionPaths": {
     "type": "array",
-    "description": "Directories scanned for extensions: @extensions is the built-in set, @experimental the opt-in bundles, anything else a custom path. The value REPLACES the default, so list both aliases to keep the builtins while adding experimental.",
+    "description": "Directories scanned for extensions: @extensions is the built-in set, @experimental the opt-in bundles, anything else a custom path. Entries may also be installable specifiers (npm:<name>[@version] with the explicit npm: prefix, git URLs like github:user/repo#ref, or file:<path>), which install into ~/.hotdog/extensions (HOTDOG_EXTENSIONS_DIR) and load offline. The value REPLACES the default, so list both aliases to keep the builtins while adding more.",
     "layers": [
       { "source": "config", "key": "extensionPaths" },
       { "default": ["@extensions"] }

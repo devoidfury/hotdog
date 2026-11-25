@@ -14,6 +14,7 @@ import type { CliSubcommandRegistry } from "./registries.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { ExtensionInstance, ExtensionMetadata } from "./types.ts";
 import { WIRE_FACTORIES_EXPORT, type WireToolDescriptor } from "../tool-exec-protocol.ts";
+import { classifyExtensionSpec, ensureExtensionSourceDir } from "./install.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../../");
@@ -34,6 +35,19 @@ export function resolveExtensionPath(spec: string): string {
     return spec;
   }
   return path.resolve(process.cwd(), spec);
+}
+
+/**
+ * spec -> bundle directory, installing npm/git/file specifiers on miss (see
+ * install.ts). Null means the entry is unavailable right now (install failed,
+ * e.g. offline); callers skip it loudly and boot continues without it.
+ */
+export async function resolveExtensionSpec(spec: string): Promise<string | null> {
+  const kind = classifyExtensionSpec(spec).kind;
+  if (kind === "npm" || kind === "git" || kind === "file") {
+    return ensureExtensionSourceDir(spec);
+  }
+  return resolveExtensionPath(spec);
 }
 
 /**
@@ -61,7 +75,8 @@ export async function getExtensionConfigDefaults(extensionPaths?: string[]): Pro
   const params: SchemaDefaultEntry[] = [];
 
   for (const spec of extensionPaths || ["@extensions"]) {
-    const resolved = resolveExtensionPath(spec);
+    const resolved = await resolveExtensionSpec(spec);
+    if (!resolved) continue;
     const discovered = await discoverExtensionsInDir(resolved);
 
     for (const ext of discovered) {
@@ -264,6 +279,9 @@ export async function discoverExtensionsInDir(dirPath: string): Promise<Discover
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      // node_modules never holds first-party extensions: the install tree's
+      // transitive deps (and a bun-link anchor) must not be scanned.
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
 
       const dirFull = path.join(currentDir, entry.name);
       const relativePath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
@@ -457,7 +475,8 @@ export async function discoverExtensions(
   const allExtensions: ExtensionMetadata[] = [];
 
   for (const spec of extensionPaths) {
-    const resolved = resolveExtensionPath(spec);
+    const resolved = await resolveExtensionSpec(spec);
+    if (!resolved) continue;
     const discovered = await discoverExtensionsInDir(resolved);
 
     for (const ext of discovered) {
@@ -499,7 +518,8 @@ export async function getExtensionConfigSchemas(
   const schemas: Record<string, Record<string, unknown>> = {};
 
   for (const spec of extensionPaths) {
-    const resolved = resolveExtensionPath(spec);
+    const resolved = await resolveExtensionSpec(spec);
+    if (!resolved) continue;
     const discovered = await discoverExtensionsInDir(resolved);
 
     for (const ext of discovered) {

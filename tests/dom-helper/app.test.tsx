@@ -29,6 +29,7 @@ import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts
 import {
   applyStoredTheme,
   DEFAULT_THEME_ID,
+  THEME_CUSTOM_STORAGE_KEY,
   THEME_REGISTRY,
   THEME_STORAGE_KEY,
 } from "@extensions/webui/ui/theme-pref.ts";
@@ -4696,77 +4697,246 @@ describe("header reasoning-visibility chip", () => {
   });
 });
 
-// ── Header theme switcher (ui/theme-pref.ts + THEME_REGISTRY) ──────────────
-// Per-browser palette: click cycles the registry, persisting to the store
-// and re-tagging documentElement's data-theme. The default hotdog renders
-// from the bare :root (attribute REMOVED); index.html's inline script
-// pre-paints a stored pref and boot re-applies the same value. init() ran
-// once per file (single-booter doctrine), so the "boot with a stored pref"
-// cases call applyStoredTheme() -- the exact line init() runs.
+// ── Header theme editor dialog (ui/theme-pref.ts + ui/theme-view.tsx) ──────
+// Per-browser palettes: the header button OPENS the editor (it no longer
+// cycles). The swatch strip applies themes (built-in + saved customs), color
+// inputs preview live as inline custom properties on <html>, Save persists a
+// NEW custom theme, and custom swatches delete in two steps. The default
+// hotdog renders from the bare :root (attribute REMOVED) with NO inline
+// vars; a custom theme sets its data-theme id AND writes its palette
+// inline. index.html's inline script pre-paints a stored pref and boot
+// re-applies the same value. init() ran once per file (single-booter
+// doctrine), so the "boot with a stored pref" cases call applyStoredTheme()
+// -- the exact line init() runs. Everything here stays off the wire.
 
-describe("header theme switcher", () => {
+describe("header theme editor dialog", () => {
   const root = document.documentElement;
+  const rootStyle = root.style as unknown as { getPropertyValue(name: string): string };
   const btn = () => el("#theme-btn");
+  const view = () => document.querySelector("#theme-view");
+  const swatchLabels = () => els("#theme-view .theme-swatch-label").map((l) => l.textContent);
+  const colorInput = (token: string) =>
+    el(`#theme-view [data-token="${token}"]`) as unknown as HTMLElement & { value: string };
+  function pickColor(token: string, hex: string): void {
+    const input = colorInput(token);
+    input.value = hex;
+    input.dispatchEvent({ type: "input" } as unknown as Event);
+  }
+  function openEditor(): void {
+    if (!view()) btn().click();
+  }
+  const FOREST: { id: string; label: string; builtIn: boolean; colors: Record<string, string> } = {
+    id: "forest",
+    label: "Forest",
+    builtIn: false,
+    colors: {
+      ...THEME_REGISTRY[0]!.colors,
+      "--bg-base": "#04120a",
+      "--accent": "#00ff00",
+      "--text-inverse": "#07120a",
+    },
+  };
+  function clearThemeKeys(): void {
+    store.delete(THEME_STORAGE_KEY);
+    store.delete(THEME_CUSTOM_STORAGE_KEY);
+    applyStoredTheme();
+  }
 
-  it("boots hotdog with no stored pref and renders the glyph control", async () => {
+  it("boots hotdog with no stored pref; the button opens the dialog, palette untouched", async () => {
     await attach();
     // init() ran with no THEME_STORAGE_KEY: the bare-:root default means NO
-    // attribute, and boot writes nothing to storage.
+    // attribute, no inline vars, and boot writes nothing to storage.
     expect(root.getAttribute("data-theme")).toBeNull();
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
     expect(store.get(THEME_STORAGE_KEY)).toBeUndefined();
     expect(btn().localName).toBe("button"); // native: Enter/Space activate
     const title = btn().getAttribute("title")!;
     expect(title).toContain("Hotdog");
     expect(btn().getAttribute("aria-label")).toBe(title);
+    expect(btn().getAttribute("aria-haspopup")).toBe("dialog");
+    expect(btn().getAttribute("aria-expanded")).toBe("false");
     const glyph = btn().querySelector("svg[aria-hidden='true']");
     expect(glyph).toBeTruthy(); // the inline palette glyph
     expect(glyph!.getAttribute("tabindex")).toBe("-1"); // no svg tab stops
     // Sits in the top band's group without disturbing the pinned slots.
     const group = el("#session-info .header-status-group")!;
     expect(Array.from(group.children).some((c) => c.getAttribute("id") === "theme-btn")).toBe(true);
-  });
-
-  it("click applies purple: attribute flips, title follows, persists, wire silent", async () => {
+    // Open: the dialog mounts, the button flips expanded, nothing else moves.
     const before = ws.sent.length;
     btn().click();
     await tick();
-    expect(root.getAttribute("data-theme")).toBe("purple");
-    expect(btn().getAttribute("title")).toContain("Purple");
-    expect(store.get(THEME_STORAGE_KEY)).toBe("purple");
+    expect(view()!.getAttribute("role")).toBe("dialog");
+    expect(view()!.getAttribute("aria-modal")).toBe("true");
+    expect(btn().getAttribute("aria-expanded")).toBe("true");
+    expect(root.getAttribute("data-theme")).toBeNull(); // opening is not an edit
+    expect(store.get(THEME_STORAGE_KEY)).toBeUndefined();
     expect(ws.sent.length).toBe(before); // a view toggle never touches the wire
   });
 
-  it("click again cycles back to hotdog: attribute removed, persisted", async () => {
-    btn().click();
+  it("the strip previews the shipped palettes; clicking a swatch applies it", async () => {
+    openEditor();
+    await tick();
+    expect(swatchLabels()).toEqual(["Hotdog", "Purple"]);
+    const swatches = els("#theme-view .theme-swatch");
+    expect(swatches[0]!.getAttribute("aria-pressed")).toBe("true");
+    expect(swatches[1]!.getAttribute("aria-pressed")).toBe("false");
+    expect(swatches[1]!.getAttribute("title")).toBe("Apply the Purple theme");
+    swatches[1]!.click();
+    await tick();
+    expect(root.getAttribute("data-theme")).toBe("purple");
+    expect(store.get(THEME_STORAGE_KEY)).toBe("purple"); // persisted, wire-silent
+    expect(els("#theme-view .theme-swatch")[1]!.getAttribute("aria-pressed")).toBe("true");
+    expect(btn().getAttribute("title")).toContain("Purple");
+    // Built-ins carry no delete affordance.
+    expect(view()!.querySelectorAll(".theme-swatch-del").length).toBe(0);
+    // And back to the default: attribute lifted again.
+    els("#theme-view .theme-swatch")[0]!.click();
     await tick();
     expect(root.getAttribute("data-theme")).toBeNull();
-    expect(btn().getAttribute("title")).toContain("Hotdog");
     expect(store.get(THEME_STORAGE_KEY)).toBe("hotdog");
   });
 
-  it("a boot with the pref stored applies purple (init's exact line)", async () => {
-    store.set(THEME_STORAGE_KEY, "purple");
-    expect(applyStoredTheme()).toBe("purple");
-    expect(root.getAttribute("data-theme")).toBe("purple");
-    // A stored DEFAULT (hotdog) is an attribute no-op: hotdog IS the bare
-    // :root now, so no attribute appears even when the id was saved.
-    store.set(THEME_STORAGE_KEY, "hotdog");
-    expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
-    expect(root.getAttribute("data-theme")).toBeNull();
-    // Leave for the suites that follow: hotdog (default) path, key cleared.
-    store.delete(THEME_STORAGE_KEY);
-    expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
-    expect(root.getAttribute("data-theme")).toBeNull();
+  it("a color edit previews live; Save persists a NEW custom theme and switches to it", async () => {
+    openEditor();
+    await tick();
+    const before = ws.sent.length;
+    pickColor("--bg-base", "#001122");
+    await tick();
+    // Live: the inline custom property lands on <html> straight away...
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe("#001122");
+    // ...and the row's hex mirror follows.
+    expect(el("#theme-view .theme-color-hex").textContent).toBe("#001122");
+    // An accent pick auto-flips the ink to the readable side (the recipe's
+    // rule) and re-derives the hover/soft slots.
+    pickColor("--accent", "#e0a32e");
+    await tick();
+    expect(rootStyle.getPropertyValue("--text-inverse")).toBe("#161312");
+    expect(rootStyle.getPropertyValue("--accent-hover")).toMatch(/^#[0-9a-f]{6}$/);
+    expect(rootStyle.getPropertyValue("--accent-soft")).toBe("rgba(224, 163, 46, 0.12)");
+    // Dirty: the Revert affordance appears; Save still needs a name.
+    expect(view()!.querySelector(".theme-revert")).toBeTruthy();
+    const save = el("#theme-view .theme-save");
+    expect(save.getAttribute("disabled")).not.toBeNull();
+    const name = el("#theme-view .theme-name") as unknown as HTMLElement & { value: string };
+    name.value = "Midnight Blue";
+    name.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+    expect(el("#theme-view .theme-save").getAttribute("disabled")).toBeNull();
+    els("#theme-view .theme-save")[0]!.click();
+    await tick();
+    const customs = JSON.parse(store.get(THEME_CUSTOM_STORAGE_KEY)!);
+    expect(customs.length).toBe(1);
+    expect(customs[0].id).toBe("midnight-blue"); // slug of the label
+    expect(customs[0].label).toBe("Midnight Blue");
+    expect(customs[0].colors["--bg-base"]).toBe("#001122");
+    expect(store.get(THEME_STORAGE_KEY)).toBe("midnight-blue");
+    expect(root.getAttribute("data-theme")).toBe("midnight-blue");
+    expect(rootStyle.getPropertyValue("--accent")).toBe("#e0a32e");
+    // A third swatch, marked active; the name field cleared by hand; the
+    // draft no longer dirty (no Revert button).
+    expect(swatchLabels()).toEqual(["Hotdog", "Purple", "Midnight Blue"]);
+    expect(els("#theme-view .theme-swatch")[2]!.getAttribute("aria-pressed")).toBe("true");
+    expect((el("#theme-view .theme-name") as unknown as { value: string }).value).toBe("");
+    expect(view()!.querySelector(".theme-revert")).toBeNull();
+    expect(ws.sent.length).toBe(before); // still zero wire
   });
 
-  it("a garbage stored value falls back to hotdog", async () => {
-    store.set(THEME_STORAGE_KEY, "ketchup");
-    expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
-    expect(root.getAttribute("data-theme")).toBeNull();
-    store.delete(THEME_STORAGE_KEY);
+  it("a saved custom theme's swatch re-applies it after visiting another", async () => {
+    openEditor();
+    await tick();
+    els("#theme-view .theme-swatch")[0]!.click(); // back to hotdog
+    await tick();
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe(""); // inline lifted
+    els("#theme-view .theme-swatch")[2]!.click(); // onto Midnight Blue
+    await tick();
+    expect(root.getAttribute("data-theme")).toBe("midnight-blue");
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe("#001122"); // rewritten inline
+    // The header label reads the CUSTOM name from storage.
+    expect(btn().getAttribute("title")).toContain("Midnight Blue");
   });
 
-  it("throwing storage degrades to the default and never breaks anything", async () => {
+  it("custom swatches delete in two steps; the active theme falls back to default", async () => {
+    openEditor();
+    await tick();
+    const dels = els("#theme-view .theme-swatch-del");
+    expect(dels.length).toBe(1); // customs only, midnight-blue
+    const del = dels[0]!;
+    expect(del.getAttribute("aria-label")).toContain("Delete Midnight Blue");
+    del.click();
+    await tick();
+    // Armed, not deleted: the button asks, storage keeps the entry.
+    expect(del.textContent).toBe("Sure?");
+    expect(del.classList.contains("armed")).toBe(true);
+    expect((JSON.parse(store.get(THEME_CUSTOM_STORAGE_KEY)!) as unknown[]).length).toBe(1);
+    // Escape disarms (step one of the ladder).
+    key(el("#theme-view"), "Escape");
+    await tick();
+    expect(els("#theme-view .theme-swatch-del")[0]!.textContent).toBe("✕");
+    expect((JSON.parse(store.get(THEME_CUSTOM_STORAGE_KEY)!) as unknown[]).length).toBe(1);
+    // Click-away disarms too...
+    els("#theme-view .theme-swatch-del")[0]!.click();
+    await tick();
+    el("#theme-view").dispatchEvent({
+      type: "mousedown",
+      target: els("#theme-view .theme-swatch")[0]!,
+    } as unknown as Event);
+    await tick();
+    expect(els("#theme-view .theme-swatch-del")[0]!.textContent).toBe("✕");
+    // ...but arming and pressing the delete itself CONFIRMS: the entry
+    // leaves storage and the screen falls back to the default palette
+    // (attribute AND inline vars lifted).
+    els("#theme-view .theme-swatch-del")[0]!.click();
+    await tick();
+    els("#theme-view .theme-swatch-del")[0]!.click();
+    await tick();
+    expect(store.get(THEME_CUSTOM_STORAGE_KEY)).toBe("[]");
+    expect(store.get(THEME_STORAGE_KEY)).toBe("hotdog");
+    expect(root.getAttribute("data-theme")).toBeNull();
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
+    expect(swatchLabels()).toEqual(["Hotdog", "Purple"]);
+    expect(btn().getAttribute("title")).toContain("Hotdog");
+    // The swatch button itself is gone (re-render unmounted the wrap).
+    expect(els("#theme-view .theme-swatch-del").length).toBe(0);
+  });
+
+  it("Escape steps: revert the draft first, then close onto the palette button", async () => {
+    openEditor();
+    await tick();
+    pickColor("--bg-primary", "#102030");
+    await tick();
+    expect(rootStyle.getPropertyValue("--bg-primary")).toBe("#102030");
+    key(el("#theme-view"), "Escape");
+    await tick();
+    // Step one: the preview reverts to the base palette; the dialog stays.
+    expect(rootStyle.getPropertyValue("--bg-primary")).toBe("");
+    expect(view()).toBeTruthy();
+    key(el("#theme-view"), "Escape");
+    await tick();
+    // Step two: clean state closes; focus lands back on the opener.
+    expect(view()).toBeNull();
+    expect(document.activeElement).toBe(el("#theme-btn"));
+    // Closing discards: nothing was ever stored for a throwaway edit.
+    expect(store.get(THEME_STORAGE_KEY)).toBe("hotdog");
+    expect((JSON.parse(store.get(THEME_CUSTOM_STORAGE_KEY) ?? "[]") as unknown[]).length).toBe(0);
+  });
+
+  it("a boot with a stored custom pref applies it (init's exact line)", () => {
+    store.set(THEME_CUSTOM_STORAGE_KEY, JSON.stringify([FOREST]));
+    store.set(THEME_STORAGE_KEY, "forest");
+    expect(applyStoredTheme()).toBe("forest");
+    expect(root.getAttribute("data-theme")).toBe("forest");
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe("#04120a");
+    expect(rootStyle.getPropertyValue("--accent-soft")).toBe("rgba(0, 255, 0, 0.12)");
+    // A garbage custom list: the stored id resolves to nothing and degrades
+    // to the default -- attribute AND inline palette both lifted.
+    store.set(THEME_CUSTOM_STORAGE_KEY, "{nope");
+    expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
+    expect(root.getAttribute("data-theme")).toBeNull();
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
+    clearThemeKeys();
+  });
+
+  it("throwing storage degrades everywhere and never breaks anything", async () => {
     const win = window as unknown as { localStorage: unknown };
     const prev = win.localStorage;
     try {
@@ -4783,39 +4953,30 @@ describe("header theme switcher", () => {
       };
       expect(() => applyStoredTheme()).not.toThrow();
       expect(root.getAttribute("data-theme")).toBeNull();
-      // The switcher stays fully operable; a failed save only costs the reload.
+      // The editor opens and operates; failed saves only cost the reload.
       expect(() => btn().click()).not.toThrow();
       await tick();
-      expect(root.getAttribute("data-theme")).toBe("purple");
-      expect(btn().getAttribute("title")).toContain("Purple");
-      expect(store.get(THEME_STORAGE_KEY)).toBeUndefined(); // nothing got through
-    } finally {
-      win.localStorage = prev;
-    }
-    // Sync back to hotdog (the default) for the suites that follow (real
-    // storage again).
-    btn().click();
-    await tick();
-    expect(root.getAttribute("data-theme")).toBeNull();
-  });
-
-  it("a third registry entry joins the cycle without touching the switcher", async () => {
-    THEME_REGISTRY.push({ id: "mustard", label: "Mustard" });
-    try {
-      btn().click();
-      await tick(); // hotdog -> purple: the title promises the new entry
-      expect(btn().getAttribute("title")).toContain("Mustard");
-      btn().click();
-      await tick(); // purple -> mustard
-      expect(root.getAttribute("data-theme")).toBe("mustard");
-      expect(btn().getAttribute("title")).toContain("Mustard");
-      expect(store.get(THEME_STORAGE_KEY)).toBe("mustard");
-      btn().click();
-      await tick(); // wraps back to the default (atom hotdog, store "hotdog")
+      expect(view()).toBeTruthy();
+      expect(swatchLabels()).toEqual(["Hotdog", "Purple"]); // customs read empty
+      expect(() => pickColor("--bg-base", "#001122")).not.toThrow();
+      await tick();
+      expect(rootStyle.getPropertyValue("--bg-base")).toBe("#001122"); // preview still live
+      const name = el("#theme-view .theme-name") as unknown as HTMLElement & { value: string };
+      name.value = "Doomed";
+      name.dispatchEvent({ type: "input" } as unknown as Event);
+      await tick();
+      // Saving cannot persist; the apply path resolves the new id against
+      // the (throwing) storage, gets nothing, and renders the default.
+      expect(() => els("#theme-view .theme-save")[0]!.click()).not.toThrow();
+      await tick();
+      expect(store.get(THEME_CUSTOM_STORAGE_KEY)).toBeUndefined(); // nothing got through
       expect(root.getAttribute("data-theme")).toBeNull();
     } finally {
-      THEME_REGISTRY.pop();
+      win.localStorage = prev;
+      clearThemeKeys();
     }
+    expect(root.getAttribute("data-theme")).toBeNull();
+    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
   });
 });
 

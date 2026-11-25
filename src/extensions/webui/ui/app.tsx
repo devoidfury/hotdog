@@ -29,12 +29,30 @@ import {
 } from "./login.tsx";
 import { loadDraft, loadDraftCaret, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave, type DraftCaret } from "./draft.ts";
 import {
+  THEME_REGISTRY,
   applyStoredTheme,
   applyThemeId,
   labelForTheme,
-  nextThemeId,
+  loadCustomThemes,
+  newThemeId,
+  saveCustomThemes,
   saveThemeId,
+  writeInlineTheme,
+  type WebUITheme,
 } from "./theme-pref.ts";
+import {
+  ThemeEditor,
+  adoptThemeDraft,
+  armThemeDelete,
+  cancelThemeDelete,
+  closeThemeEditor,
+  initialThemeEditorState,
+  openThemeEditor,
+  setThemeDraftColor,
+  setThemeName,
+  themeDraftDirty,
+  type ThemeEditorState,
+} from "./theme-view.tsx";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, logsListNearBottom, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import { Combobox, ComboboxPopup, comboboxAtom } from "./combobox.tsx";
@@ -3395,20 +3413,110 @@ function onCopySessionId(sessionId: string): void {
   });
 }
 
-// ── Theme switcher ──────────────────────────────────────────────────────────
-// A per-browser palette (theme-pref.ts): click cycles THEME_REGISTRY order,
-// each step persisting to localStorage and re-tagging <html> data-theme.
-// The header button re-renders off the atom so its title names the CURRENT
-// palette and the one the next click brings; boot applies the stored pref
-// (init) after an index.html inline mirror already painted it.
+// ── Theme editor dialog ─────────────────────────────────────────────────────
+// A per-browser palette (theme-pref.ts). The header button opens the editor
+// dialog (theme-view.tsx): the swatch strip applies themes, the color inputs
+// preview live as inline custom properties on <html>, Save persists the
+// draft as a NEW custom theme, and custom swatches delete in two steps.
+// Boot applies the stored pref (init) after the index.html inline mirror
+// already painted it. Zero wire throughout: themes are view state.
 
 const themeIdAtom = reactiveState<string>("");
+const themeEditorAtom = reactiveState<ThemeEditorState>(initialThemeEditorState);
 
-function cycleTheme(): void {
-  const next = nextThemeId(themeIdAtom());
-  themeIdAtom(next);
-  saveThemeId(next);
-  applyThemeId(next);
+// Imperative handle on the dialog root (focus-in on open, the settings
+// dialog's idiom). Also the field the Save path clears by hand: the
+// controlled value ATTRIBUTE never rewrites a dirty input.
+let themeRootEl: HTMLElement | null = null;
+const themeRootRef = domRef<HTMLElement>((el) => {
+  themeRootEl = el;
+});
+
+function openThemeDialog(): void {
+  themeEditorAtom(openThemeEditor(themeIdAtom()));
+  queueMicrotask(() => themeRootEl?.focus());
+}
+
+/** ✕/Escape leave the dialog the way they entered: focus back on the palette
+ *  button. Unsaved draft edits are discarded with it, and discarding means
+ *  re-applying the base palette -- a live preview must never outlive its
+ *  dialog. */
+function closeThemeDialog(): void {
+  const st = themeEditorAtom();
+  if (themeDraftDirty(st)) applyThemeId(st.baseId);
+  themeEditorAtom(closeThemeEditor());
+  document.getElementById("theme-btn")?.focus();
+}
+
+/** Swatch click: the theme lands on the page and in storage; the draft
+ *  re-seeds onto it (unsaved preview edits are gone with the switch). */
+function applyThemeChoice(id: string): void {
+  saveThemeId(id);
+  applyThemeId(id);
+  themeIdAtom(id);
+  themeEditorAtom(adoptThemeDraft(themeEditorAtom(), id));
+}
+
+/** A color input moved: draft update + live preview (writeInlineTheme
+ *  re-writes the whole palette, the accent derivatives included, so
+ *  hover/active/soft/glow track every accent pick). Garbage hex already
+ *  failed validation in the pure fn -- no atom, no DOM touch. */
+function onThemeColor(token: string, hex: string): void {
+  const prev = themeEditorAtom();
+  const next = setThemeDraftColor(prev, token, hex);
+  if (next === prev) return;
+  themeEditorAtom(next);
+  writeInlineTheme(next.draft, document.documentElement);
+}
+
+/** Revert button / Escape's middle step: the base palette back on screen,
+ *  draft re-seeded. The dialog stays open. */
+function revertThemeDraft(): void {
+  const st = themeEditorAtom();
+  applyThemeId(st.baseId);
+  themeEditorAtom(adoptThemeDraft(st, st.baseId));
+}
+
+/** Save the draft as a NEW custom theme and switch onto it. Built-in
+ *  palettes are never written: they live in styles.css; storage holds only
+ *  user palettes. The label slug becomes the data-theme id, uniquified. */
+function onSaveThemeDraft(): void {
+  const st = themeEditorAtom();
+  const label = st.name.trim().slice(0, 40);
+  if (label === "") return; // the button is disabled for this; belt anyway
+  const customs = loadCustomThemes();
+  const theme: WebUITheme = {
+    id: newThemeId(label, [...THEME_REGISTRY.map((t) => t.id), ...customs.map((t) => t.id)]),
+    label,
+    colors: { ...st.draft },
+    builtIn: false,
+  };
+  saveCustomThemes([...customs, theme]);
+  saveThemeId(theme.id);
+  applyThemeId(theme.id);
+  themeIdAtom(theme.id);
+  themeEditorAtom(adoptThemeDraft({ ...st, name: "" }, theme.id));
+  // Clear the name field by hand (the settings search-clear's lesson: the
+  // attribute patch never rewrites a dirty input).
+  const box = themeRootEl?.querySelector(".theme-name") as unknown as { value: string } | null;
+  if (box) box.value = "";
+}
+
+/** Two-step delete confirmed: the entry leaves storage; deleting the theme
+ *  on screen falls back to the default palette (its draft with it). The
+ *  registry head IS the default (no DEFAULT_* import; house lint). */
+function onConfirmThemeDelete(id: string): void {
+  saveCustomThemes(loadCustomThemes().filter((t) => t.id !== id));
+  const defaultId = THEME_REGISTRY[0]!.id;
+  const st = themeEditorAtom();
+  if (st.baseId === id) {
+    saveThemeId(defaultId);
+    applyThemeId(defaultId);
+    themeIdAtom(defaultId);
+    themeEditorAtom(adoptThemeDraft({ ...st, confirmDeleteId: null }, defaultId));
+  } else {
+    themeEditorAtom({ ...st, confirmDeleteId: null });
+  }
 }
 
 // ── View ────────────────────────────────────────────────────────────────────
@@ -3459,9 +3567,10 @@ function App() {
   // Reasoning visibility (localStorage; survives reload, applies to live transcripts and browsed cold logs alike).
   const hideThinking = chat?.hideThinkingAtom() ?? false;
   // Active color theme (localStorage view setting, see theme-pref.ts); the
-  // title names where the next click lands so the cycle is discoverable.
+  // title names the palette on screen, the click opens the theme editor.
   const themeId = themeIdAtom();
-  const themeTitle = `Theme: ${labelForTheme(themeId)} -- click to switch to ${labelForTheme(nextThemeId(themeId))}`;
+  const themeTitle = `Theme: ${labelForTheme(themeId)} -- click to edit themes`;
+  const themeEditor = themeEditorAtom();
   // The strip becomes a control exactly when the ATTACHED live session shows a worker-plane fence;
   // inline/degraded postures and either browse mode stay inert.
   const fenceClickable =
@@ -3563,20 +3672,23 @@ function App() {
                   text renders. */}
               <IconGear />
             </button>
-            {/* Theme switcher: cycles the palette registry (hotdog ->
-                purple -> ...); a click persists and re-tags <html>.
-                Native button = Enter/Space work for free. The inline SVG
-                glyph is tinted by currentColor, so it recolors with
-                whatever palette is on screen (see .theme-btn in
-                styles.css). Position rides after settings so the header
-                group's pinned children keep their slots. */}
+            {/* Theme editor opener: the palette button opens the dialog
+                (swatch strip, live color editing, save-as-new + delete for
+                custom themes; theme-view.tsx). Native button = Enter/Space
+                work for free. The inline SVG glyph is tinted by
+                currentColor, so it recolors with whatever palette is on
+                screen (see .theme-btn in styles.css). Position rides after
+                settings so the header group's pinned children keep their
+                slots. */}
             <button
               type="button"
               id="theme-btn"
               className="icon-btn theme-btn"
               title={themeTitle}
               aria-label={themeTitle}
-              onClick={cycleTheme}
+              aria-haspopup="dialog"
+              aria-expanded={themeEditor.open ? "true" : "false"}
+              onClick={openThemeDialog}
             >
               <IconPalette />
             </button>
@@ -4327,6 +4439,29 @@ function App() {
             onProviderRemoveCancel={providerRemoveCancel}
           />
         ) : null}
+
+        {/* Theme editor dialog (palette button in the header): mounted only
+            while open. customThemes reads localStorage per OPEN render only
+            (the dialog is unmounted otherwise, so streaming frames pay
+            nothing). Escape steps: disarm delete -> revert draft -> close. */}
+        {themeEditor.open ? (
+          <ThemeEditor
+            activeId={themeId}
+            customThemes={loadCustomThemes()}
+            state={themeEditor}
+            dirty={themeDraftDirty(themeEditor)}
+            rootRef={themeRootRef}
+            onApply={applyThemeChoice}
+            onColor={onThemeColor}
+            onName={(text) => themeEditorAtom(setThemeName(themeEditorAtom(), text))}
+            onSave={onSaveThemeDraft}
+            onRevert={revertThemeDraft}
+            onArmDelete={(id) => themeEditorAtom(armThemeDelete(themeEditorAtom(), id))}
+            onConfirmDelete={onConfirmThemeDelete}
+            onCancelDelete={() => themeEditorAtom(cancelThemeDelete(themeEditorAtom()))}
+            onClose={closeThemeDialog}
+          />
+        ) : null}
       </div>
 
       {menu ? <ContextMenu menu={menu} rootRef={contextMenuRef} onClose={dismissContextMenu} /> : null}
@@ -4407,6 +4542,7 @@ async function init(): Promise<void> {
     whitespaceOnAtom,
     stashQuotaAtom,
     themeIdAtom,
+    themeEditorAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

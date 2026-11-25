@@ -195,22 +195,28 @@
 }
 
 /* ── Theme palettes ─────────────────────────────────────────────────────────
-   RECIPE. A theme is EXACTLY two things:
+   RECIPE. A built-in theme is EXACTLY two things:
    1. one `:root[data-theme="<id>"]` block here defining the per-theme color
       set (--bg-base/primary/secondary/tertiary/elevated/hover/active,
       --text-primary/secondary/muted/inverse, --accent + hover/active/soft/
       glow, --border/--border-light) and nothing else: unlisted tokens fall
       back to the bare :root; --border-focus/--shadow-glow follow the accent
       vars, never restate them;
-   2. one {id, label} entry in THEME_REGISTRY in ui/theme-pref.ts (first =
-      default, rendered from the bare :root with NO attribute). The
-      switcher/validation are data-driven, but the shipped-palette cycle
-      expectations are pinned in tests (webui-theme-pref.test.ts cycle-wrap,
-      app.test.tsx header-cycle): a new theme updates those arrays too.
+   2. one {id, label, colors} entry in THEME_REGISTRY in ui/theme-pref.ts
+      (first = default, rendered from the bare :root with NO attribute),
+      whose `colors` mirror the block's 14 editable tokens VERBATIM -- the
+      theme editor's swatches render from the mirror, and the CSS-sync test
+      in webui-theme-pref.test.ts fails if the two drift.
+   CUSTOM themes (saved in the theme editor) never touch this file: they
+   live in localStorage and apply as data-theme + inline custom properties
+   on <html> (inline wins over every block here; the index.html pre-paint
+   script mirrors that write).
    ACCENT: a good dark-base accent sits around L50-70. A dark accent fails
    as a line/border color (#704920 measured ~2.4:1 vs the bg). A BRIGHT
    accent must flip --text-inverse to dark ink (hotdog: #161312) so
-   filled-button text stays readable; darker keeps #ffffff. */
+   filled-button text stays readable; darker keeps #ffffff. The editor
+   applies that rule automatically for customs (inkForAccent, by relative
+   luminance; the ink row stays user-editable). */
 
 :root[data-theme="purple"] {
     /* Darker accent: keeps #ffffff ink on filled buttons (guidance above). */
@@ -5504,6 +5510,231 @@ body.sidebar-resizing #tree-col-resize {
 
 @media (max-width: 400px) {
     .composer-actions .profile-selector {
+        display: none;
+    }
+}
+
+/* ── Theme editor dialog (palette button in the chat header) ───────────────
+   Shares the settings dialog's shell (classes settings-view /
+   settings-view-header / settings-btn ride along on purpose -- same fixed
+   overlay, header and button skin). Layout top to bottom: the swatch strip
+   (live mini previews of built-in + custom themes), the color grid, and a
+   pinned footer (save-as-new / revert). LATER in the file than
+   .settings-view on purpose: .theme-view only re-sizes the shared shell. */
+.theme-view {
+    width: min(720px, 94vw);
+}
+
+.theme-swatches {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.theme-swatch-wrap {
+    position: relative;
+    flex: none;
+}
+
+.theme-swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 8px 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.78rem;
+}
+
+.theme-swatch:hover {
+    border-color: var(--border-light);
+}
+
+.theme-swatch[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--text-primary);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* The mini palette sample: a mock chat card painted with the theme's own
+   (inline-styled) tokens. Sizes are deliberately fixed -- the preview is a
+   constant, not a responsive surface. */
+.theme-swatch-card {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 96px;
+    padding: 8px;
+    border-radius: 6px;
+}
+
+.theme-swatch-top {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.theme-swatch-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex: none;
+}
+
+.theme-swatch-line {
+    height: 5px;
+    border-radius: 3px;
+    width: 82%;
+}
+
+.theme-swatch-line-title {
+    width: 52%;
+    height: 6px;
+}
+
+.theme-swatch-line-short {
+    width: 60%;
+}
+
+.theme-swatch-pill {
+    align-self: flex-start;
+    padding: 0 8px;
+    border-radius: var(--radius-full);
+    font-size: 10px;
+    line-height: 16px;
+}
+
+/* The two-step delete on custom swatches: a small ✕ cornering the card;
+   when armed it grows into "Sure?" (the provider-Remove doctrine). */
+.theme-swatch-del {
+    position: absolute;
+    top: -7px;
+    right: -7px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-light);
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 16px;
+    cursor: pointer;
+}
+
+.theme-swatch-del:hover {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.theme-swatch-del.armed {
+    color: var(--error);
+    border-color: var(--error);
+    font-size: 9px;
+    font-weight: 600;
+}
+
+.theme-view-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 14px;
+}
+
+.theme-color-group + .theme-color-group {
+    margin-top: 14px;
+}
+
+.theme-color-group-title {
+    margin: 0 0 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.theme-colors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 24px;
+}
+
+.theme-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 3px 0;
+}
+
+.theme-color-label {
+    flex: 1;
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+}
+
+.theme-color-row input[type="color"] {
+    width: 52px;
+    height: 26px;
+    padding: 2px;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    cursor: pointer;
+}
+
+.theme-color-hex {
+    width: 74px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.theme-editor-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.theme-name {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 5px 8px;
+}
+
+.theme-name:focus {
+    border-color: var(--border-focus);
+    outline: none;
+}
+
+.theme-foot-status {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+    .theme-colors {
+        grid-template-columns: 1fr;
+    }
+    .theme-foot-status {
         display: none;
     }
 }

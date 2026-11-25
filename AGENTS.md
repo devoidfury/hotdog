@@ -12,6 +12,7 @@
   - `bun bin/hotdog rescue` — diagnose config files (paths, resolution chain, JSON syntax, unknown keys); `rescue fix` repairs comments/trailing commas; `rescue --json` prints a machine envelope (stdout carries only JSON; diagnostics go to stderr in `--json` mode everywhere)
   - `bun bin/hotdog extension validate <dir>` — diagnose one extension directory or a bundle root: strict-JSON manifest findings with line/column, field types, sdk-range verdict, entry point, config defaults, service contracts, dry-load through the real loader; names unanchored SDK imports with the bun link fix; `--json` envelope; runs above the config layer (works with a broken defaults.json)
   - `bun bin/hotdog prompt "text"` — one-shot mode
+  - `bun bin/hotdog rpc` — machine interface: JSONL commands/events over stdin/stdout (docs/machine-rpc.md)
 - Run Tests: `bun run test` (expected runtime < 10 seconds)
   - with Coverage report: `bun run coverage`
   - NOTE: uses `--only-failures`, which runs all tests, prints failures, and supresses green test output.
@@ -89,3 +90,4 @@ All error catches must use `formatError()` from `src/core/error.ts`:
 | `docs/config-reference.md` | Complete `defaults.json` config reference — all settings, extensions, providers |
 | `docs/config-live.md` | Live config application: what a settings-panel save does without restart, reply attestation, the restart-required list |
 | `docs/hook-lifecycle.md` | Hook system lifecycle and extension registration patterns |
+| `docs/machine-rpc.md` | Machine interface: `hotdog rpc` JSONL protocol + one-shot `--json-events` |

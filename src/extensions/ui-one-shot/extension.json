@@ -32,6 +32,11 @@
       "long": "--json-schema",
       "description": "Structured one-shot output: JSON schema (inline or file path); the run ends when the model returns a valid payload",
       "type": "string"
+    },
+    {
+      "long": "--json-events",
+      "description": "Machine-readable JSONL event stream on stdout (see docs/machine-rpc.md); stdout carries only records",
+      "type": "boolean"
     }
   ],
   "cli:subcommands": [

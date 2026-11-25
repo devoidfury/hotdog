@@ -1,15 +1,20 @@
 import { Channel, ChannelSessionManager } from "@core/channel.ts";
 import { OutputEvent } from "@core/context/output.ts";
 import { CliOutputSink } from "@utils/cli/cli.ts";
+import type { JsonlEventWriter } from "../ui-rpc/protocol.ts";
+
+/** A one-shot turn writes to a human sink (CliOutputSink) or to the machine
+ *  event writer; both satisfy emit(event), and nothing else is used here. */
+export type OneShotSink = CliOutputSink | JsonlEventWriter;
 
 export interface OneShotChannelOptions {
   sessionManager: ChannelSessionManager;
   sessionId: string;
-  sink: CliOutputSink;
+  sink: OneShotSink;
 }
 
 export class OneShotChannel extends Channel {
-  #sink: CliOutputSink;
+  #sink: OneShotSink;
 
   constructor(options: OneShotChannelOptions) {
     super({ sessionManager: options.sessionManager });
@@ -30,7 +35,7 @@ export class OneShotChannel extends Channel {
     // No resources to release
   }
 
-  get sink(): CliOutputSink {
+  get sink(): OneShotSink {
     return this.#sink;
   }
 }

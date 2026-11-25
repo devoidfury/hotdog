@@ -79,6 +79,7 @@ Then point it at your inference server (`HOTDOG_AI_URL`/`HOTDOG_API_KEY` or `pro
 - **One-shot CLI** -- non-interactive single prompt (`hotdog -p "your prompt"`). _(stable)_
 - **Interactive CLI** -- readline-based interactive session (`hotdog` or `hotdog cli`). _(stable)_
 - **Web UI** -- webserver mode (`hotdog webui`). _(beta)_
+- **Machine interface** -- JSONL over stdio: `hotdog rpc` (persistent) or `-p --json-events` (single turn). _(stable)_
 
 ### Features
 - **Tool calling** -- File operations, bash, HTTP requests, web search, and more
@@ -89,6 +90,7 @@ Then point it at your inference server (`HOTDOG_AI_URL`/`HOTDOG_API_KEY` or `pro
 - **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
 - **Subagents and Workflow graphs** -- Delegate work to background task agents, workflows for long-horizon tasks with reviewed steps. Automatic fan out to all configured providers.
 - **Handoff tool** -- Clear context and restart with a prepared plan for multi-phase tasks
+- **Machine interface** -- `hotdog rpc`: versioned JSONL commands/events over stdin/stdout, plus one-shot `--json-events` streams ([spec](docs/machine-rpc.md))
 - **Tool-call approvals** -- Opt-in `userGate`: allow / deny / ask before a tool call runs
 - **File attachments** -- Reference files inline with @filepath syntax in user input
 - **Session logging** -- JSONL session logs for debugging and auditing

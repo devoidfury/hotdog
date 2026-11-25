@@ -12,6 +12,7 @@ import { restoreSessionIntoAgent } from "@core/session/session-log.ts";
 import { getSessionRow } from "@core/session/session-index.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
+import { JsonlEventWriter, resultRecord } from "../ui-rpc/protocol.ts";
 import { StructuredOutputTool, resolveOutputSchema, STRUCTURED_OUTPUT_TOOL_NAME } from "./structured-output.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "@core/extensions/types.ts";
 import type { PaletteOptions } from "@utils/cli/colors.ts";
@@ -29,7 +30,7 @@ async function runOneShot(
   resolved: ResolvedConfig,
   config: CoreConfigWithExtensions,
   modelRegistry: Record<string, ModelConfig>,
-  sink: CliOutputSink | null,
+  sink: CliOutputSink | JsonlEventWriter | null,
   buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike>,
   llmClient: LlmClient,
   structured: StructuredRun | null,
@@ -52,10 +53,13 @@ async function runOneShot(
   // (and their tools) were loaded before this session existed.
   registerTaskManagerService(core, sessionManager.getTaskManager());
 
-  // --json-schema: one turn is the whole contract. The bus loop otherwise only ends on cancel(),
+  // Machine mode: stdout is records only -- no bare newline, no "Session:" trailer.
+  const isJsonl = sink instanceof JsonlEventWriter;
+
+  // --json-schema and --json-events: one turn is the whole contract. The bus loop otherwise only ends on cancel(),
   // so end the main session's first stopped turn by cancelling the bus; that resolves runUntilCancelled deterministically
-  // rather than relying on event-loop drain so the payload print below always runs. Subagent TURN_ENDs are filtered by session id.
-  if (structured) {
+  // rather than relying on event-loop drain so the payload / result record below always runs. Subagent TURN_ENDs are filtered by session id.
+  if (structured || isJsonl) {
     const mainSessionId = sessionManager.sessionId();
     core.hooks.on(HOOKS.TURN_END, ({ stopped, agent }: { stopped: boolean; agent?: { sessionId?: string } }) => {
       if (!stopped || !mainSessionId) return;
@@ -83,12 +87,14 @@ async function runOneShot(
     if (bus) {
       await bus.runUntilCancelled();
     }
-    if (!structured) console.log("\n");
+    if (!structured && !isJsonl) console.log("\n");
   } catch (e: unknown) {
     logger.error(formatError(e));
     exitCode = (e as { exitCode?: number }).exitCode ?? 1;
   } finally {
-    if (!structured) {
+    if (isJsonl) {
+      sink!.writeRecord(resultRecord(sessionManager.sessionId(), exitCode));
+    } else if (!structured) {
       const oneShotSessionId = sessionManager.sessionId();
       if (oneShotSessionId) {
         console.log(`Session: ${oneShotSessionId}`);
@@ -121,6 +127,13 @@ async function handlePromptSubcommand(
 
   const modelRegistry = resolved.modelRegistry;
 
+  const jsonEvents = cli.jsonEvents === true;
+  // Two stdout contracts cannot share one stdout.
+  if (jsonEvents && (cli as Record<string, unknown>).jsonSchema) {
+    console.error("--json-events cannot be combined with --json-schema");
+    return 1;
+  }
+
   // --json-schema: register the synthetic terminal tool and capture its payload. When present, the normal CLI sink is dropped so stdout carries only the bare JSON.
   let structured: StructuredRun | null = null;
   const schemaArg = (cli as Record<string, unknown>).jsonSchema;
@@ -138,8 +151,10 @@ async function handlePromptSubcommand(
     core.toolRegistry.register(STRUCTURED_OUTPUT_TOOL_NAME, tool);
   }
 
-  let sink: CliOutputSink | null = null;
-  if (!structured) {
+  let sink: CliOutputSink | JsonlEventWriter | null = null;
+  if (jsonEvents) {
+    sink = new JsonlEventWriter();
+  } else if (!structured) {
     const palette = await CliOutputSink.resolve(
       cli.colors !== false,
       (cli.theme || config.theme || "dark") as string,

@@ -1,0 +1,29 @@
+{
+  "name": "ui-rpc",
+  "provides": ["cli:subcommands"],
+  "loadOrder": 10,
+  "description": "Machine interface: versioned JSONL records over stdin/stdout (hotdog rpc)",
+  "configSchema": {
+    "uiRpc": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "uiRpc" },
+        { "default": {} }
+      ]
+    }
+  },
+  "cli:subcommands": [
+    {
+      "name": "rpc",
+      "description": "Machine interface: persistent JSONL command/event session over stdin/stdout (see docs/machine-rpc.md)"
+    }
+  ]
+}

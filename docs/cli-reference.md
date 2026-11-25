@@ -28,6 +28,9 @@ hotdog extension validate <dir>  # Diagnose an extension (or a bundle root to sc
 hotdog extension validate <dir> --json
                                  # ...as a JSON envelope (per-extension reports, findings, totals)
 hotdog webui                     # Start the web UI server
+hotdog rpc                       # Machine interface: JSONL commands on stdin, records on stdout
+                                 # (versioned protocol: prompts, cancel, status, question answers;
+                                 # see docs/machine-rpc.md)
 hotdog desktop                   # Experimental (@experimental): the WebUI in a desktop window. Hosts a private
                                  # loopback server (ephemeral port, one-boot key, token handed to the window in
                                  # the URL fragment); window closed = clean shutdown with the commit-point drain
@@ -100,6 +103,8 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 --json                       Output as JSON for the subcommands that support it (info, profiles,
                                sessions, rescue); stdout carries only the JSON, diagnostics go to stderr
     --json-schema <json|path>  One-shot structured output: a JSON Schema (inline or file path); the run ends when the model returns a valid payload, printed as bare JSON
+    --json-events              One-shot machine-readable event stream on stdout (JSONL, see docs/machine-rpc.md);
+                               ends with a terminal {"type":"result"} record; not combinable with --json-schema
 --show-tools                 Show tool calls in output (default; overrides hideTools)
 --show-thinking              Show reasoning/thinking output
 --no-colors                  Disable colors (also honors NO_COLOR / TERM=dumb env)

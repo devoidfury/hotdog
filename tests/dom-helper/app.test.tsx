@@ -4731,9 +4731,9 @@ describe("header theme editor dialog", () => {
     builtIn: false,
     colors: {
       ...THEME_REGISTRY[0]!.colors,
-      "--bg-base": "#04120a",
+      "--bg-canvas": "#04120a",
       "--accent": "#00ff00",
-      "--text-inverse": "#07120a",
+      "--accent-ink": "#07120a",
     },
   };
   function clearThemeKeys(): void {
@@ -4747,7 +4747,7 @@ describe("header theme editor dialog", () => {
     // init() ran with no THEME_STORAGE_KEY: the bare-:root default means NO
     // attribute, no inline vars, and boot writes nothing to storage.
     expect(root.getAttribute("data-theme")).toBeNull();
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("");
     expect(store.get(THEME_STORAGE_KEY)).toBeUndefined();
     expect(btn().localName).toBe("button"); // native: Enter/Space activate
     const title = btn().getAttribute("title")!;
@@ -4767,6 +4767,9 @@ describe("header theme editor dialog", () => {
     await tick();
     expect(view()!.getAttribute("role")).toBe("dialog");
     expect(view()!.getAttribute("aria-modal")).toBe("true");
+    // Clean state: no footer, no buttons, no stars -- just the palettes.
+    expect(view()!.querySelector(".theme-editor-foot")).toBeNull();
+    expect(els("#theme-view .theme-color-changed").length).toBe(0);
     expect(btn().getAttribute("aria-expanded")).toBe("true");
     expect(root.getAttribute("data-theme")).toBeNull(); // opening is not an edit
     expect(store.get(THEME_STORAGE_KEY)).toBeUndefined();
@@ -4800,23 +4803,31 @@ describe("header theme editor dialog", () => {
     openEditor();
     await tick();
     const before = ws.sent.length;
-    pickColor("--bg-base", "#001122");
+    pickColor("--bg-canvas", "#001122");
     await tick();
     // Live: the inline custom property lands on <html> straight away...
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe("#001122");
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("#001122");
     // ...and the row's hex mirror follows.
     expect(el("#theme-view .theme-color-hex").textContent).toBe("#001122");
     // An accent pick auto-flips the ink to the readable side (the recipe's
     // rule) and re-derives the hover/soft slots.
     pickColor("--accent", "#e0a32e");
     await tick();
-    expect(rootStyle.getPropertyValue("--text-inverse")).toBe("#161312");
+    expect(rootStyle.getPropertyValue("--accent-ink")).toBe("#161312");
     expect(rootStyle.getPropertyValue("--accent-hover")).toMatch(/^#[0-9a-f]{6}$/);
     expect(rootStyle.getPropertyValue("--accent-soft")).toBe("rgba(224, 163, 46, 0.12)");
-    // Dirty: the Revert affordance appears; Save still needs a name.
+    // Dirty: the footer rides up with the primary Save-as-new entry; the
+    // name field only exists once that entry is clicked. Stars mark the
+    // moved rows (just --bg-canvas: the accent pick equals hotdog's own).
+    expect(view()!.querySelector(".theme-editor-foot")).toBeTruthy();
     expect(view()!.querySelector(".theme-revert")).toBeTruthy();
+    expect(els("#theme-view .theme-color-changed").length).toBe(1);
+    expect(view()!.querySelector(".theme-name")).toBeNull();
+    els("#theme-view .theme-save-new")[0]!.click();
+    await tick();
+    expect(document.activeElement).toBe(el("#theme-view .theme-name")); // focus follows the entry
     const save = el("#theme-view .theme-save");
-    expect(save.getAttribute("disabled")).not.toBeNull();
+    expect(save.getAttribute("disabled")).not.toBeNull(); // a name is still owed
     const name = el("#theme-view .theme-name") as unknown as HTMLElement & { value: string };
     name.value = "Midnight Blue";
     name.dispatchEvent({ type: "input" } as unknown as Event);
@@ -4828,16 +4839,17 @@ describe("header theme editor dialog", () => {
     expect(customs.length).toBe(1);
     expect(customs[0].id).toBe("midnight-blue"); // slug of the label
     expect(customs[0].label).toBe("Midnight Blue");
-    expect(customs[0].colors["--bg-base"]).toBe("#001122");
+    expect(customs[0].colors["--bg-canvas"]).toBe("#001122");
     expect(store.get(THEME_STORAGE_KEY)).toBe("midnight-blue");
     expect(root.getAttribute("data-theme")).toBe("midnight-blue");
     expect(rootStyle.getPropertyValue("--accent")).toBe("#e0a32e");
-    // A third swatch, marked active; the name field cleared by hand; the
-    // draft no longer dirty (no Revert button).
+    // A third swatch, marked active; the name entry collapsed with the save;
+    // the clean draft drops the whole footer (stars included).
     expect(swatchLabels()).toEqual(["Hotdog", "Purple", "Midnight Blue"]);
     expect(els("#theme-view .theme-swatch")[2]!.getAttribute("aria-pressed")).toBe("true");
-    expect((el("#theme-view .theme-name") as unknown as { value: string }).value).toBe("");
-    expect(view()!.querySelector(".theme-revert")).toBeNull();
+    expect(view()!.querySelector(".theme-name")).toBeNull();
+    expect(view()!.querySelector(".theme-editor-foot")).toBeNull();
+    expect(els("#theme-view .theme-color-changed").length).toBe(0);
     expect(ws.sent.length).toBe(before); // still zero wire
   });
 
@@ -4846,13 +4858,56 @@ describe("header theme editor dialog", () => {
     await tick();
     els("#theme-view .theme-swatch")[0]!.click(); // back to hotdog
     await tick();
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe(""); // inline lifted
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe(""); // inline lifted
     els("#theme-view .theme-swatch")[2]!.click(); // onto Midnight Blue
     await tick();
     expect(root.getAttribute("data-theme")).toBe("midnight-blue");
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe("#001122"); // rewritten inline
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("#001122"); // rewritten inline
     // The header label reads the CUSTOM name from storage.
     expect(btn().getAttribute("title")).toContain("Midnight Blue");
+  });
+
+  it("edits over a custom base update it IN PLACE (same id, same swatch); built-ins offer only Save-as-new", async () => {
+    openEditor();
+    await tick();
+    // Built-in base: a dirty draft gets no Update button (styles.css owns
+    // those palettes; Save-as-new is the only path).
+    els("#theme-view .theme-swatch")[0]!.click(); // hotdog
+    await tick();
+    pickColor("--bg-canvas", "#001122");
+    await tick();
+    expect(view()!.querySelector(".theme-save-new")).toBeTruthy(); // primary entry
+    expect(view()!.querySelector(".theme-update")).toBeNull();
+    expect(view()!.querySelector(".theme-revert")).toBeTruthy();
+    key(el("#theme-view"), "Escape"); // revert; the dialog stays open
+    await tick();
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("");
+    // Custom base: Update writes the draft onto the SAME theme, riding
+    // alongside the Save-as-new entry.
+    els("#theme-view .theme-swatch")[2]!.click(); // onto Midnight Blue
+    await tick();
+    expect(view()!.querySelector(".theme-update")).toBeNull(); // clean on adopt
+    pickColor("--text-primary", "#39ff14");
+    await tick();
+    expect(view()!.querySelector(".theme-save-new")).toBeTruthy(); // BOTH affordances
+    expect(els("#theme-view .theme-color-changed").length).toBe(1); // the one moved row
+    const update = el("#theme-view .theme-update");
+    expect(update.textContent).toContain("Midnight Blue");
+    const before = ws.sent.length;
+    update.click();
+    await tick();
+    const customs = JSON.parse(store.get(THEME_CUSTOM_STORAGE_KEY)!);
+    expect(customs.length).toBe(1); // the same entry updated, NOT a neon-2
+    expect(customs[0].id).toBe("midnight-blue");
+    expect(customs[0].label).toBe("Midnight Blue");
+    expect(customs[0].colors["--text-primary"]).toBe("#39ff14");
+    expect(store.get(THEME_STORAGE_KEY)).toBe("midnight-blue");
+    expect(rootStyle.getPropertyValue("--text-primary")).toBe("#39ff14"); // still on screen
+    // Clean now: the whole footer (entry, Update, Revert, stars) is gone.
+    // Wire silent.
+    expect(view()!.querySelector(".theme-editor-foot")).toBeNull();
+    expect(els("#theme-view .theme-color-changed").length).toBe(0);
+    expect(ws.sent.length).toBe(before);
   });
 
   it("custom swatches delete in two steps; the active theme falls back to default", async () => {
@@ -4892,27 +4947,33 @@ describe("header theme editor dialog", () => {
     expect(store.get(THEME_CUSTOM_STORAGE_KEY)).toBe("[]");
     expect(store.get(THEME_STORAGE_KEY)).toBe("hotdog");
     expect(root.getAttribute("data-theme")).toBeNull();
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("");
     expect(swatchLabels()).toEqual(["Hotdog", "Purple"]);
     expect(btn().getAttribute("title")).toContain("Hotdog");
     // The swatch button itself is gone (re-render unmounted the wrap).
     expect(els("#theme-view .theme-swatch-del").length).toBe(0);
   });
 
-  it("Escape steps: revert the draft first, then close onto the palette button", async () => {
+  it("Escape steps: collapse the name entry, revert the draft, then close onto the palette button", async () => {
     openEditor();
     await tick();
-    pickColor("--bg-primary", "#102030");
+    pickColor("--bg-surface-1", "#102030");
     await tick();
-    expect(rootStyle.getPropertyValue("--bg-primary")).toBe("#102030");
+    els("#theme-view .theme-save-new")[0]!.click(); // open the name entry
+    await tick();
     key(el("#theme-view"), "Escape");
     await tick();
-    // Step one: the preview reverts to the base palette; the dialog stays.
-    expect(rootStyle.getPropertyValue("--bg-primary")).toBe("");
+    // Step one: the name entry collapses; the dirty preview is untouched.
+    expect(view()!.querySelector(".theme-name")).toBeNull();
+    expect(rootStyle.getPropertyValue("--bg-surface-1")).toBe("#102030");
+    key(el("#theme-view"), "Escape");
+    await tick();
+    // Step two: the preview reverts to the base palette; the dialog stays.
+    expect(rootStyle.getPropertyValue("--bg-surface-1")).toBe("");
     expect(view()).toBeTruthy();
     key(el("#theme-view"), "Escape");
     await tick();
-    // Step two: clean state closes; focus lands back on the opener.
+    // Step three: clean state closes; focus lands back on the opener.
     expect(view()).toBeNull();
     expect(document.activeElement).toBe(el("#theme-btn"));
     // Closing discards: nothing was ever stored for a throwaway edit.
@@ -4920,19 +4981,48 @@ describe("header theme editor dialog", () => {
     expect((JSON.parse(store.get(THEME_CUSTOM_STORAGE_KEY) ?? "[]") as unknown[]).length).toBe(0);
   });
 
+  it("Enter in the name field saves the new theme (no click needed)", async () => {
+    openEditor();
+    await tick();
+    expect(swatchLabels()).toEqual(["Hotdog", "Purple"]);
+    pickColor("--accent", "#39ff14");
+    await tick();
+    // The name field exists only while the save-as-new entry is open.
+    expect(view()!.querySelector(".theme-name")).toBeNull();
+    els("#theme-view .theme-save-new")[0]!.click();
+    await tick();
+    const name = el("#theme-view .theme-name") as unknown as HTMLElement & { value: string };
+    name.value = "Sunbeam";
+    name.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+    name.dispatchEvent({ type: "keydown", key: "Enter" } as unknown as Event);
+    await tick();
+    const customs = JSON.parse(store.get(THEME_CUSTOM_STORAGE_KEY)!);
+    expect(customs.length).toBe(1);
+    expect(customs[0].id).toBe("sunbeam");
+    expect(store.get(THEME_STORAGE_KEY)).toBe("sunbeam");
+    expect(rootStyle.getPropertyValue("--accent")).toBe("#39ff14");
+    expect(swatchLabels()).toEqual(["Hotdog", "Purple", "Sunbeam"]);
+    // The entry collapsed with the save: a clean draft carries no footer.
+    expect(view()!.querySelector(".theme-name")).toBeNull();
+    expect(view()!.querySelector(".theme-editor-foot")).toBeNull();
+    clearThemeKeys();
+    expect(store.get(THEME_STORAGE_KEY)).toBeUndefined();
+  });
+
   it("a boot with a stored custom pref applies it (init's exact line)", () => {
     store.set(THEME_CUSTOM_STORAGE_KEY, JSON.stringify([FOREST]));
     store.set(THEME_STORAGE_KEY, "forest");
     expect(applyStoredTheme()).toBe("forest");
     expect(root.getAttribute("data-theme")).toBe("forest");
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe("#04120a");
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("#04120a");
     expect(rootStyle.getPropertyValue("--accent-soft")).toBe("rgba(0, 255, 0, 0.12)");
     // A garbage custom list: the stored id resolves to nothing and degrades
     // to the default -- attribute AND inline palette both lifted.
     store.set(THEME_CUSTOM_STORAGE_KEY, "{nope");
     expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
     expect(root.getAttribute("data-theme")).toBeNull();
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("");
     clearThemeKeys();
   });
 
@@ -4958,9 +5048,12 @@ describe("header theme editor dialog", () => {
       await tick();
       expect(view()).toBeTruthy();
       expect(swatchLabels()).toEqual(["Hotdog", "Purple"]); // customs read empty
-      expect(() => pickColor("--bg-base", "#001122")).not.toThrow();
+      expect(() => pickColor("--bg-canvas", "#001122")).not.toThrow();
       await tick();
-      expect(rootStyle.getPropertyValue("--bg-base")).toBe("#001122"); // preview still live
+      expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("#001122"); // preview still live
+      // The dirty draft raises the primary entry; opening it cannot throw.
+      expect(() => els("#theme-view .theme-save-new")[0]!.click()).not.toThrow();
+      await tick();
       const name = el("#theme-view .theme-name") as unknown as HTMLElement & { value: string };
       name.value = "Doomed";
       name.dispatchEvent({ type: "input" } as unknown as Event);
@@ -4976,7 +5069,7 @@ describe("header theme editor dialog", () => {
       clearThemeKeys();
     }
     expect(root.getAttribute("data-theme")).toBeNull();
-    expect(rootStyle.getPropertyValue("--bg-base")).toBe("");
+    expect(rootStyle.getPropertyValue("--bg-canvas")).toBe("");
   });
 });
 

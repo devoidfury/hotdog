@@ -5,8 +5,8 @@
 //       pane. #workbench-body must stop being the scroller for those kinds and
 //       become a definite-height flex COLUMN (overflow hidden), the tab body a
 //       flex:1 column, the sheet flex:1 -- a ratio chain, no magic px. The tree
-//       tab keeps #workbench-body's own y-scroll (unchanged). --bg-base paints
-//       the empty area, --bg-secondary must never show between content and bar.
+//       tab keeps #workbench-body's own y-scroll (unchanged). --bg-canvas paints
+//       the empty area, --bg-surface-2 must never show between content and bar.
 //
 //   (B) CARET CELL MODEL: the caret/hit cell needs one code unit == one
 //       fixed advance, i.e. a MONOSPACE face with ligatures OFF and no
@@ -69,19 +69,19 @@ describe("workbench file tabs own the full pane (styles.css)", () => {
     expect(body).not.toContain("height: 100%"); // no content-sized collapse
   });
 
-  it("the editor viewport scrolls itself and paints the sheet to --bg-base", () => {
+  it("the editor viewport scrolls itself and paints the sheet to --bg-canvas", () => {
     const body = declarations(".editor-viewport");
     expect(body).toContain("flex: 1");
     expect(body).toContain("min-height: 0");
     expect(body).toContain("overflow: auto");
-    expect(body).toContain("background: var(--bg-base)");
+    expect(body).toContain("background: var(--bg-canvas)");
   });
 
   it("the read-only viewer fills the pane and its rows scroll under the foot", () => {
     const view = declarations(".file-view");
     expect(view).toContain("display: flex");
     expect(view).toContain("flex: 1");
-    expect(view).toContain("background: var(--bg-base)");
+    expect(view).toContain("background: var(--bg-canvas)");
     const rows = declarations(".file-view-rows");
     expect(rows).toContain("flex: 1 1 auto");
     expect(rows).toContain("min-height: 0");

@@ -1,13 +1,13 @@
 // Item-3 structural pin (run 20261113-0701): the floating composer's attach
 // and mic glyph buttons must BLEND into the field at rest -- the removed
-// slab's --bg-tertiary tint made them read as mini-slabs on the transparent
+// slab's --bg-surface-3 tint made them read as mini-slabs on the transparent
 // floating form (the same "slab is gone" doctrine .input-area/.chat-form
 // already follow: transparent fill, no box). Hover/focus return the
 // affordance per the composer-blend idiom (real fill + border on hover, the
 // --border-focus token on focus-visible), and the 1px border keeps its WIDTH
 // at rest so nothing shifts -- pinned here as: the rest rules carry
 // `background: transparent` + `border: 1px solid transparent`, the hover
-// rules restore --bg-active / --border-light, and the recorded shape is
+// rules restore --bg-active / --border-strong, and the recorded shape is
 // untouched (padding values unchanged in the same blocks).
 //
 // Same read-the-CSS doctrine as webui-theme-pref.test.ts's token-split pin:
@@ -37,7 +37,7 @@ describe("floating composer glyph buttons blend at rest (no mini-slabs)", () => 
       const body = ruleBody(sel);
       expect(body).toContain("background: transparent");
       expect(body).toContain("border: 1px solid transparent");
-      expect(body).not.toContain("--bg-tertiary");
+      expect(body).not.toContain("--bg-surface-3");
       // No size/movement changes: the buttons keep their padding (the blend
       // is color-only -- the border WIDTH is retained, just invisible).
       expect(body).toMatch(/padding: 6px (10|12)px/);
@@ -46,10 +46,10 @@ describe("floating composer glyph buttons blend at rest (no mini-slabs)", () => 
 
   it("hover/focus return the affordance (composer-blend idiom)", () => {
     expect(CSS).toMatch(/\.attach-btn:hover:not\(:disabled\)[^{]*\{[^}]*--bg-active[^}]*\}/);
-    expect(CSS).toMatch(/\.attach-btn:hover:not\(:disabled\)[^{]*\{[^}]*--border-light[^}]*\}/);
+    expect(CSS).toMatch(/\.attach-btn:hover:not\(:disabled\)[^{]*\{[^}]*--border-strong[^}]*\}/);
     expect(CSS).toMatch(/\.attach-btn:focus-visible[^{]*\{[^}]*--border-focus[^}]*\}/);
     expect(CSS).toMatch(/\.mic-btn:hover:not\(:disabled\)[^{]*\{[^}]*--bg-active[^}]*\}/);
-    expect(CSS).toMatch(/\.mic-btn:hover:not\(:disabled\):not\(\.recording\)[^{]*\{[^}]*--border-light[^}]*\}/);
+    expect(CSS).toMatch(/\.mic-btn:hover:not\(:disabled\):not\(\.recording\)[^{]*\{[^}]*--border-strong[^}]*\}/);
     expect(CSS).toMatch(/\.mic-btn:focus-visible:not\(\.recording\)[^{]*\{[^}]*--border-focus[^}]*\}/);
     // The recording state keeps its RED border (the only live-recording cue).
     expect(CSS).toMatch(/\.mic-btn\.recording[^{]*\{[^}]*--error[^}]*\}/);

@@ -46,8 +46,10 @@ import {
   armThemeDelete,
   cancelThemeDelete,
   closeThemeEditor,
+  closeThemeNameEntry,
   initialThemeEditorState,
   openThemeEditor,
+  openThemeNameEntry,
   setThemeDraftColor,
   setThemeName,
   themeDraftDirty,
@@ -3477,6 +3479,16 @@ function revertThemeDraft(): void {
   themeEditorAtom(adoptThemeDraft(st, st.baseId));
 }
 
+/** The "Save New" click: opens the name field + Save and
+ *  moves focus in (the openSettings focus idiom, scoped to the dialog). */
+function onStartSaveAsNew(): void {
+  themeEditorAtom(openThemeNameEntry(themeEditorAtom()));
+  queueMicrotask(() => {
+    const box = themeRootEl?.querySelector(".theme-name") as unknown as { focus?: () => void } | null;
+    box?.focus?.();
+  });
+}
+
 /** Save the draft as a NEW custom theme and switch onto it. Built-in
  *  palettes are never written: they live in styles.css; storage holds only
  *  user palettes. The label slug becomes the data-theme id, uniquified. */
@@ -3495,11 +3507,25 @@ function onSaveThemeDraft(): void {
   saveThemeId(theme.id);
   applyThemeId(theme.id);
   themeIdAtom(theme.id);
+  // adoptThemeDraft collapses the name entry with the (now clean) draft;
+  // the typed text is gone with the field.
   themeEditorAtom(adoptThemeDraft({ ...st, name: "" }, theme.id));
-  // Clear the name field by hand (the settings search-clear's lesson: the
-  // attribute patch never rewrites a dirty input).
-  const box = themeRootEl?.querySelector(".theme-name") as unknown as { value: string } | null;
-  if (box) box.value = "";
+}
+
+/** Write the draft onto the CUSTOM theme it was opened on (the Update
+ *  button; hidden unless the base is one of the user's themes and the draft
+ *  is dirty). Same id, same swatch: no new entry, no rename. The page
+ *  already renders the draft (live preview), so updating is a storage write
+ *  and a clean-draft re-seed. A base deleted elsewhere vanishes the button
+ *  next render; a built-in base never reaches this (never overwritten). */
+function onUpdateThemeDraft(): void {
+  const st = themeEditorAtom();
+  const customs = loadCustomThemes();
+  const idx = customs.findIndex((t) => t.id === st.baseId);
+  if (idx < 0) return;
+  customs[idx] = { ...customs[idx]!, colors: { ...st.draft } };
+  saveCustomThemes(customs);
+  themeEditorAtom(adoptThemeDraft(st, st.baseId));
 }
 
 /** Two-step delete confirmed: the entry leaves storage; deleting the theme
@@ -4454,7 +4480,10 @@ function App() {
             onApply={applyThemeChoice}
             onColor={onThemeColor}
             onName={(text) => themeEditorAtom(setThemeName(themeEditorAtom(), text))}
+            onSaveNew={onStartSaveAsNew}
+            onCancelNew={() => themeEditorAtom(closeThemeNameEntry(themeEditorAtom()))}
             onSave={onSaveThemeDraft}
+            onUpdate={onUpdateThemeDraft}
             onRevert={revertThemeDraft}
             onArmDelete={(id) => themeEditorAtom(armThemeDelete(themeEditorAtom(), id))}
             onConfirmDelete={onConfirmThemeDelete}

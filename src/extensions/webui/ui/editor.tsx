@@ -56,8 +56,8 @@
 // ── FULL-HEIGHT PANE ─────────────────────────────────────────────────────────
 // The editor fills the workbench pane edge to edge and top to bottom: the
 // :has(.editor) flex chain in styles.css makes the tab body a definite-height
-// column, so .editor-viewport (flex:1) grows to the pane and --bg-base paints
-// the sheet down to the foot bar on a three-line file (no --bg-secondary gap).
+// column, so .editor-viewport (flex:1) grows to the pane and --bg-canvas paints
+// the sheet down to the foot bar on a three-line file (no --bg-surface-2 gap).
 // Scrolling lives ONLY in the viewport; #workbench-body stops scrolling for a
 // file tab (no double scrollbar). A click in the empty area BELOW the last
 // line lands the caret at the buffer's END (never a phantom row): the viewport
@@ -866,7 +866,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
                   gap: "4px",
                   flexWrap: "wrap",
                   padding: "4px 8px",
-                  background: "var(--bg-base)",
+                  background: "var(--bg-canvas)",
                   borderBottom: "1px solid var(--border)",
                   fontSize: "12px",
                   color: "var(--text-muted)",

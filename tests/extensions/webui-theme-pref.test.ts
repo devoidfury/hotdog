@@ -176,13 +176,15 @@ describe("registry", () => {
     }
   });
 
-  it("THEME_VARS is the 14 editable tokens plus the four accent derivatives", () => {
+  it("THEME_VARS is the 17 editable tokens plus the accent and status derivatives", () => {
     expect(THEME_VARS).toEqual([
       ...EDITABLE_TOKENS.map((t) => t.name),
       "--accent-hover",
       "--accent-active",
       "--accent-soft",
       "--accent-glow",
+      "--success-soft",
+      "--error-soft",
     ]);
   });
 
@@ -212,6 +214,22 @@ describe("custom theme storage", () => {
     expect(back[0]!.colors).toEqual(theme.colors);
   });
 
+  it("a palette missing the status slots falls back to the default's values", () => {
+    // The status hues joined the set after the storage shape shipped; an
+    // older (or hand-written) palette without them loads whole.
+    const partial = customColors();
+    delete partial["--success"];
+    delete partial["--warning"];
+    delete partial["--error"];
+    const s = new FakeStorage();
+    s.map.set(CUSTOM_KEY, JSON.stringify([{ id: "forest", label: "Forest", colors: partial }]));
+    const back = loadCustomThemes(s);
+    expect(back.length).toBe(1);
+    expect(back[0]!.colors["--success"]).toBe(THEME_REGISTRY[0]!.colors["--success"]);
+    expect(back[0]!.colors["--warning"]).toBe(THEME_REGISTRY[0]!.colors["--warning"]);
+    expect(back[0]!.colors["--error"]).toBe(THEME_REGISTRY[0]!.colors["--error"]);
+  });
+
   it("unreadable JSON is the empty list, never a throw", () => {
     const s = new FakeStorage();
     for (const junk of ["{", "null", '"forest"', "[", "{}", "42"]) {
@@ -232,7 +250,7 @@ describe("custom theme storage", () => {
         { id: "forest", label: "duplicate id", colors: customColors() },
         { id: "no-colors", label: "no palette" },
         { id: "bad-hex", label: "one bad token", colors: { ...customColors(), "--accent": "red" } },
-        { id: "missing-token", label: "incomplete", colors: { "--bg-base": "#010203" } },
+        { id: "missing-token", label: "incomplete", colors: { "--bg-canvas": "#010203" } },
         { id: "", label: "empty id", colors: customColors() },
         { id: "ok2", label: "  Padded  ", colors: { ...customColors(), "--text-muted": "#A9A9A9" } },
       ]),
@@ -315,7 +333,7 @@ describe("applyThemeId / applyStoredTheme", () => {
       win.localStorage = prev;
     }
     expect(root.attrs.get("data-theme")).toBe("forest");
-    expect(root.props.get("--bg-base")).toBe("#202020");
+    expect(root.props.get("--bg-canvas")).toBe("#202020");
     expect(root.props.get("--accent")).toBe("#00ff00");
     expect(root.props.get("--accent-hover")).toBe("#00db00");
     expect(root.props.get("--accent-soft")).toBe("rgba(0, 255, 0, 0.12)");
@@ -335,11 +353,19 @@ describe("applyThemeId / applyStoredTheme", () => {
 
   it("writeInlineTheme skips garbage tokens instead of writing them", () => {
     const root = new FakeRoot();
-    writeInlineTheme({ "--bg-base": "red", "--accent": "#0000ff" } as ThemeColors, root);
-    expect(root.props.has("--bg-base")).toBe(false);
+    writeInlineTheme({ "--bg-canvas": "red", "--accent": "#0000ff" } as ThemeColors, root);
+    expect(root.props.has("--bg-canvas")).toBe(false);
     expect(root.props.get("--accent")).toBe("#0000ff");
     clearInlineTheme(root);
     expect(root.props.size).toBe(0);
+  });
+
+  it("writeInlineTheme derives the status washes from the palette's hues", () => {
+    const root = new FakeRoot();
+    writeInlineTheme(customColors({ "--success": "#00ff00", "--error": "#ff0000" }), root);
+    expect(root.props.get("--success-soft")).toBe("rgba(0, 255, 0, 0.12)");
+    expect(root.props.get("--error-soft")).toBe("rgba(255, 0, 0, 0.12)");
+    clearInlineTheme(root);
   });
 
   it("an id nothing resolves to renders the default (a custom deleted elsewhere)", () => {

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **webui - the palette button opens a full theme editor.** Clicking it no longer cycles two built-in palettes; it opens a dialog (settings-style): a strip of small live swatch previews of the built-in and saved themes up top, a grid of color inputs below that preview every pick live across the whole app, a save-as-new-theme footer, and a two-step delete on custom themes. Custom themes are per-browser (localStorage), never overwrite a built-in, apply with zero wire traffic, and survive a reload without a flash (the pre-paint script mirrors them). Accent picks auto-flip the filled-button ink to the readable side; deleting the theme on screen falls back to the default.
+- **webui - the palette button opens a full theme editor.** Clicking it no longer cycles two built-in palettes; it opens a dialog (settings-style): a strip of small live swatch previews of the built-in and saved themes up top.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.17.0...main
 

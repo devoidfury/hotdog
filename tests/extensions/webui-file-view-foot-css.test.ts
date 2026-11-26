@@ -52,7 +52,7 @@ describe("file viewer: head is pure sheet, chrome rides the foot (styles.css)", 
     const body = declarations(".file-view-bar");
     expect(body).toContain("position: sticky");
     expect(body).toContain("bottom: 0");
-    expect(body).toContain("background: var(--bg-secondary)");
+    expect(body).toContain("background: var(--bg-surface-2)");
     expect(body).toContain("border-top: 1px solid var(--border)");
   });
 

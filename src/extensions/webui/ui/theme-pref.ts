@@ -23,30 +23,42 @@
 import type { DraftStorage } from "./draft.ts";
 
 /** One of the per-theme color slots the editor exposes. `name` is the CSS
- *  custom property; a custom theme is a complete map over these (the four
- *  accent derivatives below are COMPUTED on apply, never stored). */
+ *  custom property; `hint` is the muted aside under the label saying what
+ *  the slot paints. A custom theme is a complete map over these (the accent
+ *  and status derivatives below are COMPUTED on apply, never stored). */
 export interface ThemeTokenDef {
   name: string;
   label: string;
+  hint?: string;
   group: string;
 }
 
 export const EDITABLE_TOKENS: readonly ThemeTokenDef[] = [
-  { name: "--bg-base", label: "Base", group: "Backgrounds" },
-  { name: "--bg-primary", label: "Panel", group: "Backgrounds" },
-  { name: "--bg-secondary", label: "Dialog", group: "Backgrounds" },
-  { name: "--bg-tertiary", label: "Raised", group: "Backgrounds" },
-  { name: "--bg-elevated", label: "Elevated", group: "Backgrounds" },
-  { name: "--bg-hover", label: "Hover fill", group: "Backgrounds" },
-  { name: "--bg-active", label: "Active fill", group: "Backgrounds" },
+  { name: "--bg-canvas", label: "Canvas", hint: "base background, editor", group: "Backgrounds" },
+  { name: "--bg-surface-1", label: "Surface 1", hint: "chat, header, active file tab", group: "Backgrounds" },
+  { name: "--bg-surface-2", label: "Surface 2", hint: "sidebars, dialogs", group: "Backgrounds" },
+  { name: "--bg-surface-3", label: "Surface 3", hint: "context menus, toggles, inputs", group: "Backgrounds" },
+  { name: "--bg-surface-4", label: "Surface 4", hint: "popups, toasts, inline-code chips", group: "Backgrounds" },
+  { name: "--bg-hover", label: "Hover fill", hint: "row and menu-item hover/focus", group: "Backgrounds" },
+  { name: "--bg-active", label: "Active fill", hint: "pressed / selected items", group: "Backgrounds" },
   { name: "--text-primary", label: "Text", group: "Text" },
   { name: "--text-secondary", label: "Secondary text", group: "Text" },
   { name: "--text-muted", label: "Muted text", group: "Text" },
-  { name: "--text-inverse", label: "Ink on accent", group: "Text" },
   { name: "--accent", label: "Accent", group: "Accent & borders" },
+  { name: "--accent-ink", label: "Ink on accent", group: "Accent & borders" },
   { name: "--border", label: "Border", group: "Accent & borders" },
-  { name: "--border-light", label: "Strong border", group: "Accent & borders" },
+  { name: "--border-strong", label: "Strong border", group: "Accent & borders" },
+  // The meaning hues: every status cue (Stop button, error chips, recording
+  // border) and the .tk-/.tok- syntax highlighters ride these.
+  { name: "--success", label: "Success", group: "Status & syntax" },
+  { name: "--warning", label: "Warning", group: "Status & syntax" },
+  { name: "--error", label: "Error", group: "Status & syntax" },
 ];
+
+/** Tokens the set grew after the first storage shape shipped: a saved
+ *  palette without one decodes to the default palette's value (exactly
+ *  what that theme used to render) instead of dying at validation. */
+const TOKEN_FALLBACKS: readonly string[] = ["--success", "--warning", "--error"];
 
 /** The accent slots every palette carries besides --accent itself: hover/
  *  active scale the base toward black (~0.86 / ~0.72, the CSS recipe's
@@ -55,8 +67,16 @@ export const EDITABLE_TOKENS: readonly ThemeTokenDef[] = [
  *  blocks spell the same numbers out as literals. */
 const ACCENT_DERIVED: readonly string[] = ["--accent-hover", "--accent-active", "--accent-soft", "--accent-glow"];
 
+/** The status washes, same 0.12 alpha idiom, derived from --success/--error
+ *  on write (--warning ships without one; nothing styles against it). */
+const STATUS_DERIVED: readonly string[] = ["--success-soft", "--error-soft"];
+
 /** Every custom property inline theme application touches (clear + write). */
-export const THEME_VARS: readonly string[] = [...EDITABLE_TOKENS.map((t) => t.name), ...ACCENT_DERIVED];
+export const THEME_VARS: readonly string[] = [
+  ...EDITABLE_TOKENS.map((t) => t.name),
+  ...ACCENT_DERIVED,
+  ...STATUS_DERIVED,
+];
 
 export type ThemeColors = Record<string, string>;
 
@@ -83,20 +103,23 @@ export const THEME_REGISTRY: WebUITheme[] = [
     label: "Hotdog",
     builtIn: true,
     colors: {
-      "--bg-base": "#0f0e0d",
-      "--bg-primary": "#161412",
-      "--bg-secondary": "#1e1b18",
-      "--bg-tertiary": "#26221e",
-      "--bg-elevated": "#302b26",
+      "--bg-canvas": "#0f0e0d",
+      "--bg-surface-1": "#12100c",
+      "--bg-surface-2": "#211b17",
+      "--bg-surface-3": "#26221e",
+      "--bg-surface-4": "#302b26",
       "--bg-hover": "#362f2a",
       "--bg-active": "#3f3832",
       "--text-primary": "#edeae8",
       "--text-secondary": "#d4cec9",
       "--text-muted": "#a9a9a9",
-      "--text-inverse": "#161312",
+      "--accent-ink": "#161312",
       "--accent": "#e0a32e",
       "--border": "#38302a",
-      "--border-light": "#4a3f36",
+      "--border-strong": "#4a3f36",
+      "--success": "#34d399",
+      "--warning": "#fbbf24",
+      "--error": "#f87171",
     },
   },
   {
@@ -104,20 +127,23 @@ export const THEME_REGISTRY: WebUITheme[] = [
     label: "Purple",
     builtIn: true,
     colors: {
-      "--bg-base": "#0d0d0f",
-      "--bg-primary": "#121216",
-      "--bg-secondary": "#18181e",
-      "--bg-tertiary": "#1e1e26",
-      "--bg-elevated": "#262630",
+      "--bg-canvas": "#0d0d0f",
+      "--bg-surface-1": "#121216",
+      "--bg-surface-2": "#18181e",
+      "--bg-surface-3": "#1e1e26",
+      "--bg-surface-4": "#262630",
       "--bg-hover": "#2a2a36",
       "--bg-active": "#32323f",
       "--text-primary": "#e8e8ed",
       "--text-secondary": "#9a9ab0",
       "--text-muted": "#a9a9a9",
-      "--text-inverse": "#ffffff",
+      "--accent-ink": "#ffffff",
       "--accent": "#7c5cff",
       "--border": "#2a2a38",
-      "--border-light": "#36364a",
+      "--border-strong": "#36364a",
+      "--success": "#34d399",
+      "--warning": "#fbbf24",
+      "--error": "#f87171",
     },
   },
 ];
@@ -170,8 +196,17 @@ function decodeCustomTheme(raw: unknown, takenIds: Set<string>): WebUITheme | nu
   const colors = e.colors as Record<string, unknown>;
   const decoded: ThemeColors = {};
   for (const token of EDITABLE_TOKENS) {
-    if (!isThemeHex(colors[token.name])) return null;
-    decoded[token.name] = (colors[token.name] as string).toLowerCase();
+    const raw = colors[token.name];
+    if (raw === undefined) {
+      // Tokens the set grew since (status hues) fall back to the default
+      // palette -- what those palettes always rendered. Any other gap
+      // stays the incomplete-entry death it always was.
+      if (!TOKEN_FALLBACKS.includes(token.name)) return null;
+      decoded[token.name] = THEME_REGISTRY[0]!.colors[token.name]!;
+      continue;
+    }
+    if (!isThemeHex(raw)) return null;
+    decoded[token.name] = raw.toLowerCase();
   }
   return { id: e.id, label, colors: decoded, builtIn: false };
 }
@@ -313,6 +348,22 @@ export function accentDerivedTokens(accent: string): ThemeColors {
   };
 }
 
+/** The two derived status washes (0.12 alpha, the accent idiom) for the
+ *  palette's success/error bases. A base that is missing or bad contributes
+ *  nothing: the bare :root wash (the default hue's) simply stays. */
+export function statusDerivedTokens(colors: ThemeColors): ThemeColors {
+  const out: ThemeColors = {};
+  const pairs: readonly [string, string][] = [
+    ["--success", "--success-soft"],
+    ["--error", "--error-soft"],
+  ];
+  for (const [base, wash] of pairs) {
+    const rgb = isThemeHex(colors[base]) ? hexToRgb(colors[base] as string) : null;
+    if (rgb) out[wash] = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.12)`;
+  }
+  return out;
+}
+
 /** Slug from a display label ("My Cool Theme!" -> "my-cool-theme"), then
  *  uniquified against the taken ids with -2, -3... suffixes. An all-punctuation
  *  label still yields a usable id. */
@@ -348,9 +399,9 @@ export function clearInlineTheme(root: ThemeRoot): void {
   for (const name of THEME_VARS) root.style.removeProperty(name);
 }
 
-/** Write a palette as inline custom properties (the four accent derivatives
- *  computed from --accent). Unresolvable token values are skipped rather
- *  than written garbage. */
+/** Write a palette as inline custom properties (the accent derivatives
+ *  computed from --accent, the status washes from --success/--error).
+ *  Unresolvable token values are skipped rather than written garbage. */
 export function writeInlineTheme(colors: ThemeColors, root: ThemeRoot): void {
   for (const token of EDITABLE_TOKENS) {
     const value = colors[token.name];
@@ -361,6 +412,9 @@ export function writeInlineTheme(colors: ThemeColors, root: ThemeRoot): void {
     for (const [name, value] of Object.entries(accentDerivedTokens(accent))) {
       root.style.setProperty(name, value);
     }
+  }
+  for (const [name, value] of Object.entries(statusDerivedTokens(colors))) {
+    root.style.setProperty(name, value);
   }
 }
 

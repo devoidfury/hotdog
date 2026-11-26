@@ -4,15 +4,21 @@
 // themes; click applies), a grid of color inputs editing the palette on the
 // fly (every pick re-writes <html> inline custom properties through
 // theme-pref's writeInlineTheme, so the whole app previews live), and a
-// footer that saves the current draft as a NEW custom theme. Custom swatches
-// carry a two-step delete (arm, then confirm; Escape or clicking elsewhere
-// disarms -- the provider-Remove doctrine).
+// footer that RIDES THE DRAFT: while the theme is unmodified there is no
+// footer at all; the first change brings it up -- "Save New" (a normal
+// button with accent text; clicking it opens the name field + Save beside
+// it), the accented primary Update "name" on a custom base (writes the
+// draft onto that same theme; built-ins ship in styles.css and are never
+// overwritten), and Revert.
+// Rows whose draft value differs from the base palette carry a "*".
+// Custom swatches carry a two-step delete (arm, then confirm; Escape or
+// clicking elsewhere disarms -- the provider-Remove doctrine).
 //
 // Doctrine: themes are per-browser view state (theme-pref.ts) -- zero wire.
 // The dialog never mutates the theme it opened on: edits live in the draft
-// over the base palette; Save creates a new theme, Escape closes in stages
-// (disarm -> revert draft -> close), applying another theme re-seeds the
-// draft. Unsaved edits are discarded on close and on switching themes.
+// over the base palette; Escape closes in stages (disarm -> collapse the
+// name entry -> revert the draft -> close), applying another theme re-seeds
+// the draft. Unsaved edits are discarded on close and on switching themes.
 //
 // The pure state helpers below are exported for tests; every one of them
 // returns the same object when nothing would change, so a garbage color
@@ -42,6 +48,8 @@ export interface ThemeEditorState {
   draft: ThemeColors;
   /** The "save as new theme" name field. */
   name: string;
+  /** Whether the save-as-new NAME ENTRY (input + Save button) is open. */
+  nameOpen: boolean;
   /** The custom theme whose delete is armed (two-step confirm), or null. */
   confirmDeleteId: string | null;
 }
@@ -52,6 +60,7 @@ export const initialThemeEditorState: ThemeEditorState = {
   baseId: THEME_REGISTRY[0]!.id,
   draft: { ...THEME_REGISTRY[0]!.colors },
   name: "",
+  nameOpen: false,
   confirmDeleteId: null,
 };
 
@@ -63,6 +72,7 @@ export function openThemeEditor(activeId: string): ThemeEditorState {
     baseId: activeId,
     draft: { ...paletteOf(activeId) },
     name: "",
+    nameOpen: false,
     confirmDeleteId: null,
   };
 }
@@ -71,26 +81,40 @@ export function closeThemeEditor(): ThemeEditorState {
   return { ...initialThemeEditorState, draft: { ...initialThemeEditorState.draft } };
 }
 
-/** Re-seed the draft onto another (or the same, post-revert) base. */
+/** Re-seed the draft onto another (or the same, post-revert) base: the
+ *  delete arm is dropped and the name entry collapses with the draft. */
 export function adoptThemeDraft(s: ThemeEditorState, baseId: string): ThemeEditorState {
-  return { ...s, baseId, draft: { ...paletteOf(baseId) }, confirmDeleteId: null };
+  return { ...s, baseId, draft: { ...paletteOf(baseId) }, nameOpen: false, confirmDeleteId: null };
 }
 
 /** Paint one token into the draft. An accent pick also flips
- *  --text-inverse to readable ink (the CSS recipe's rule; the ink row is
+ *  --accent-ink to readable ink (the CSS recipe's rule; the ink row is
  *  editable too, so the auto-suggestion is only ever a default). Garbage
  *  hex (should not happen from a color input) returns the state untouched. */
 export function setThemeDraftColor(s: ThemeEditorState, token: string, hex: string): ThemeEditorState {
   if (!isThemeHex(hex) || !(token in s.draft)) return s;
   const value = hex.toLowerCase();
   const draft = { ...s.draft, [token]: value };
-  if (token === "--accent") draft["--text-inverse"] = inkForAccent(value);
+  if (token === "--accent") draft["--accent-ink"] = inkForAccent(value);
   return { ...s, draft };
 }
 
 export function setThemeName(s: ThemeEditorState, text: string): ThemeEditorState {
   if (text === s.name) return s;
   return { ...s, name: text };
+}
+
+/** The "Save New" entry click: opens the name field + Save. */
+export function openThemeNameEntry(s: ThemeEditorState): ThemeEditorState {
+  if (s.nameOpen) return s;
+  return { ...s, nameOpen: true };
+}
+
+/** Collapse the name entry (Escape's step; the typed name survives the
+ *  collapse -- reopening picks up where it left off). */
+export function closeThemeNameEntry(s: ThemeEditorState): ThemeEditorState {
+  if (!s.nameOpen) return s;
+  return { ...s, nameOpen: false };
 }
 
 export function armThemeDelete(s: ThemeEditorState, id: string): ThemeEditorState {
@@ -103,8 +127,8 @@ export function cancelThemeDelete(s: ThemeEditorState): ThemeEditorState {
   return { ...s, confirmDeleteId: null };
 }
 
-/** Draft vs the base palette's stored values: what the Revert affordance,
- *  the dirty hint and the staged Escape read. */
+/** Draft vs the base palette's stored values: what the footer, the row
+ *  stars and the staged Escape read. */
 export function themeDraftDirty(s: ThemeEditorState): boolean {
   const base = paletteOf(s.baseId);
   return EDITABLE_TOKENS.some((t) => s.draft[t.name] !== base[t.name]);
@@ -139,7 +163,7 @@ function insideDeleteAffordance(node: unknown): boolean {
  *  what the page currently renders). */
 function SwatchCard({ colors }: { colors: ThemeColors }) {
   const card = {
-    background: colors["--bg-primary"],
+    background: colors["--bg-surface-1"],
     border: `1px solid ${colors["--border"]}`,
   };
   return (
@@ -152,7 +176,7 @@ function SwatchCard({ colors }: { colors: ThemeColors }) {
       <span className="theme-swatch-line theme-swatch-line-short" style={{ background: colors["--text-muted"] }} />
       <span
         className="theme-swatch-pill"
-        style={{ background: colors["--accent"], color: colors["--text-inverse"] }}
+        style={{ background: colors["--accent"], color: colors["--accent-ink"] }}
       >
         Aa
       </span>
@@ -173,7 +197,14 @@ export interface ThemeEditorProps {
   onApply: (id: string) => void;
   onColor: (token: string, hex: string) => void;
   onName: (text: string) => void;
+  /** The "Save New" entry click: opens the name field + Save. */
+  onSaveNew: () => void;
+  /** Collapse the name entry (Escape's step). */
+  onCancelNew: () => void;
+  /** Persist the draft under the entered name as a NEW theme. */
   onSave: () => void;
+  /** Write the draft onto the custom base (in place, same id). */
+  onUpdate: () => void;
   onRevert: () => void;
   onArmDelete: (id: string) => void;
   onConfirmDelete: (id: string) => void;
@@ -190,7 +221,10 @@ export function ThemeEditor({
   onApply,
   onColor,
   onName,
+  onSaveNew,
+  onCancelNew,
   onSave,
+  onUpdate,
   onRevert,
   onArmDelete,
   onConfirmDelete,
@@ -198,6 +232,10 @@ export function ThemeEditor({
   onClose,
 }: ThemeEditorProps) {
   const choices = [...THEME_REGISTRY, ...customThemes];
+  const baseCustom = customThemes.some((t) => t.id === state.baseId);
+  // The stars compare the draft against the base palette's STORED values
+  // (for a custom base, whatever is saved -- not the live preview).
+  const baseColors = paletteOf(state.baseId);
   return (
     <div
       id="theme-view"
@@ -209,13 +247,15 @@ export function ThemeEditor({
       ref={rootRef}
       onKeydown={(e: KeyboardEvent) => {
         // Staged retreat (the settings dialog's ladder): a pending delete
-        // disarms first, then unsaved draft edits revert to the base
-        // palette, and only a clean dialog closes (the app hands focus back
-        // to the palette button). Pure client state -- zero wire.
+        // disarms first, then an open save-as-new name entry collapses,
+        // then unsaved draft edits revert to the base palette, and only a
+        // clean dialog closes (the app hands focus back to the palette
+        // button). Pure client state -- zero wire.
         if (e.key !== "Escape") return;
         e.preventDefault();
         e.stopPropagation();
         if (state.confirmDeleteId !== null) onCancelDelete();
+        else if (state.nameOpen) onCancelNew();
         else if (dirty) onRevert();
         else onClose();
       }}
@@ -274,64 +314,101 @@ export function ThemeEditor({
           <div className="theme-color-group" key={g.title}>
             <h3 className="theme-color-group-title">{g.title}</h3>
             <div className="theme-colors">
-              {g.tokens.map((token) => (
-                <label className="theme-color-row" key={token.name}>
-                  <span className="theme-color-label">{token.label}</span>
-                  <input
-                    type="color"
-                    data-token={token.name}
-                    value={state.draft[token.name] ?? "#000000"}
-                    title={token.name}
-                    aria-label={token.label}
-                    onInput={(e: Event) => {
-                      const src = ((e as { currentTarget?: unknown }).currentTarget ?? (e as { target?: unknown }).target) as
-                        | { value?: string }
-                        | null;
-                      const hex = src?.value ?? "";
-                      if (isThemeHex(hex)) onColor(token.name, hex);
-                    }}
-                  />
-                  <code className="theme-color-hex">{state.draft[token.name]}</code>
-                </label>
-              ))}
+              {g.tokens.map((token) => {
+                const value = state.draft[token.name];
+                const changed = value !== baseColors[token.name];
+                return (
+                  <label className="theme-color-row" key={token.name}>
+                    <span className="theme-color-label">
+                      {token.label}
+                      {changed ? (
+                        <span className="theme-color-changed" title="Different from the saved theme">
+                          *
+                        </span>
+                      ) : null}
+                      {token.hint ? <span className="theme-color-hint">{token.hint}</span> : null}
+                    </span>
+                    <input
+                      type="color"
+                      data-token={token.name}
+                      value={value ?? "#000000"}
+                      title={token.name}
+                      aria-label={token.hint ? `${token.label} (${token.hint})` : token.label}
+                      onInput={(e: Event) => {
+                        const src = ((e as { currentTarget?: unknown }).currentTarget ?? (e as { target?: unknown }).target) as
+                          | { value?: string }
+                          | null;
+                        const hex = src?.value ?? "";
+                        if (isThemeHex(hex)) onColor(token.name, hex);
+                      }}
+                    />
+                    <code className="theme-color-hex">{value}</code>
+                  </label>
+                );
+              })}
             </div>
           </div>
         ))}
       </div>
-      <div className="theme-editor-foot">
-        <input
-          className="theme-name"
-          type="text"
-          placeholder="New theme name"
-          aria-label="New theme name"
-          value={state.name}
-          onInput={(e: Event) => {
-            const src = ((e as { currentTarget?: unknown }).currentTarget ?? (e as { target?: unknown }).target) as
-              | { value?: string }
-              | null;
-            onName(src?.value ?? "");
-          }}
-        />
-        <button
-          type="button"
-          className="settings-btn theme-save"
-          disabled={state.name.trim() === ""}
-          title={dirty ? "Save the edited palette as a new theme" : "Save the current palette as a new theme"}
-          onClick={onSave}
-        >
-          Save as new theme
-        </button>
-        {dirty ? (
+      {dirty ? (
+        <div className="theme-editor-foot">
+          {state.nameOpen ? (
+            <>
+              <input
+                className="theme-name"
+                type="text"
+                placeholder="New theme name"
+                aria-label="New theme name"
+                value={state.name}
+                onInput={(e: Event) => {
+                  const src = ((e as { currentTarget?: unknown }).currentTarget ?? (e as { target?: unknown }).target) as
+                    | { value?: string }
+                    | null;
+                  onName(src?.value ?? "");
+                }}
+                onKeydown={(e: KeyboardEvent) => {
+                  // Enter saves the new theme (a no-op while the name is
+                  // empty, same as the disabled button).
+                  if (e.key !== "Enter") return;
+                  e.preventDefault(); // never a form default; the dialog owns keys
+                  onSave();
+                }}
+              />
+              <button
+                type="button"
+                className="settings-btn theme-save"
+                disabled={state.name.trim() === ""}
+                title="Save the edited palette as a new theme"
+                onClick={onSave}
+              >
+                Save
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="settings-btn theme-save-new"
+              title="Save the edited palette as a new theme"
+              onClick={onSaveNew}
+            >
+              Save New
+            </button>
+          )}
+          {baseCustom ? (
+            <button
+              type="button"
+              className="settings-btn theme-update"
+              title={`Save these colors onto ${labelForTheme(state.baseId)} (same theme, same swatch)`}
+              onClick={onUpdate}
+            >
+              Update "{labelForTheme(state.baseId)}"
+            </button>
+          ) : null}
           <button type="button" className="settings-btn theme-revert" onClick={onRevert}>
             Revert changes
           </button>
-        ) : null}
-        <span className="theme-foot-status" role="status">
-          {dirty
-            ? "Unsaved changes -- closing or switching themes discards them."
-            : `Editing ${labelForTheme(state.baseId)} (built-in palettes are never overwritten; saving creates a new theme).`}
-        </span>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -27,7 +27,7 @@
           var pal = customs[ti] && customs[ti].id === storedTheme ? customs[ti].colors : null;
           if (!pal) continue;
           for (var tok in pal) {
-            if (!/^--[a-z-]+$/.test(tok) || !/^#[0-9a-fA-F]{6}$/.test(pal[tok])) continue;
+            if (!/^--[a-z0-9-]+$/.test(tok) || !/^#[0-9a-fA-F]{6}$/.test(pal[tok])) continue;
             document.documentElement.style.setProperty(tok, pal[tok].toLowerCase());
           }
           // The four accent derivatives, same math as theme-pref's
@@ -41,6 +41,19 @@
             document.documentElement.style.setProperty("--accent-active", "#" + hex2(sc(r, 0.72)) + hex2(sc(g, 0.72)) + hex2(sc(b, 0.72)));
             document.documentElement.style.setProperty("--accent-soft", "rgba(" + r + ", " + g + ", " + b + ", 0.12)");
             document.documentElement.style.setProperty("--accent-glow", "rgba(" + r + ", " + g + ", " + b + ", 0.25)");
+          }
+          // The status washes, when the palette carries retuned status
+          // hues (theme-pref's statusDerivedTokens, same 0.12 alpha).
+          for (var si = 0; si < 2; si++) {
+            var base = si === 0 ? "--success" : "--error";
+            var shx = pal[base];
+            if (shx && /^#[0-9a-fA-F]{6}$/.test(shx)) {
+              var sn = parseInt(shx.slice(1), 16);
+              document.documentElement.style.setProperty(
+                base + "-soft",
+                "rgba(" + ((sn >> 16) & 255) + ", " + ((sn >> 8) & 255) + ", " + (sn & 255) + ", 0.12)"
+              );
+            }
           }
         }
       }

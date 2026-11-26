@@ -89,11 +89,11 @@
     /* ── Per-theme color tokens (defaults = hotdog) ─────────────────────── */
 
     /* Background layers -- warm, hue ~27 */
-    --bg-base: #0f0e0d;
-    --bg-primary: #161412;
-    --bg-secondary: #1e1b18;
-    --bg-tertiary: #26221e;
-    --bg-elevated: #302b26;
+    --bg-canvas: #0f0e0d;
+    --bg-surface-1: #12100c;
+    --bg-surface-2: #211b17;
+    --bg-surface-3: #26221e;
+    --bg-surface-4: #302b26;
     --bg-hover: #362f2a;
     --bg-active: #3f3832;
 
@@ -101,27 +101,32 @@
     --text-primary: #edeae8;
     --text-secondary: #d4cec9;
     --text-muted: #a9a9a9;
-    --text-inverse: #161312;
+    --accent-ink: #161312;
 
     /* Accent — mustard. Hover/active scale the base toward black
        (~0.86 / ~0.72); mustard is bright, so filled buttons carry dark ink
-       via --text-inverse. */
+       via --accent-ink. */
     --accent: #e0a32e;
     --accent-hover: #c08c28;
     --accent-active: #a17521;
     --accent-soft: rgba(224, 163, 46, 0.12);
     --accent-glow: rgba(224, 163, 46, 0.25);
 
-    /* ── Theme-invariant colors ─────────────────────────────────────────────
-       Semantic and diff-ruler tokens stay shared across palettes: meaning
-       and gutter continuity belong to the product, not a palette. */
-
-    /* Semantic */
+    /* Status -- what success/warning/error mean everywhere AND the syntax
+       hues (the .tk-/.tok- highlighters ride these). The -soft washes are
+       DERIVED: spelled out as literals here, recomputed from the base hex
+       whenever a custom theme applies (0.12 washes, the accent idiom).
+       --danger is not a palette slot, just a legacy alias for --error. */
     --success: #34d399;
     --success-soft: rgba(52, 211, 153, 0.12);
+    --warning: #fbbf24;
     --error: #f87171;
     --error-soft: rgba(248, 113, 113, 0.12);
-    --warning: #fbbf24;
+    --danger: var(--error);
+
+    /* ── Theme-invariant colors ─────────────────────────────────────────────
+       Diff-ruler tokens stay shared across palettes: gutter continuity
+       belongs to the product, not a palette. */
 
     /* Diff body -- GitHub's reading: whisper row fills, near-default line
        text (30 rows of saturated green/red prose is unreadable); meaning
@@ -141,7 +146,7 @@
 
     /* Borders */
     --border: #38302a;
-    --border-light: #4a3f36;
+    --border-strong: #4a3f36;
     --border-focus: var(--accent);
 
     /* Shadows */
@@ -197,14 +202,14 @@
 /* ── Theme palettes ─────────────────────────────────────────────────────────
    RECIPE. A built-in theme is EXACTLY two things:
    1. one `:root[data-theme="<id>"]` block here defining the per-theme color
-      set (--bg-base/primary/secondary/tertiary/elevated/hover/active,
-      --text-primary/secondary/muted/inverse, --accent + hover/active/soft/
-      glow, --border/--border-light) and nothing else: unlisted tokens fall
-      back to the bare :root; --border-focus/--shadow-glow follow the accent
-      vars, never restate them;
+      set (--bg-canvas/surface-1..4/hover/active, --text-primary/secondary/
+      muted, --accent + accent-ink + hover/active/soft/glow, --border/
+      --border-strong, --success/--warning/--error) and nothing else:
+      unlisted tokens fall back to the bare :root; the status -soft washes,
+      --border-focus/--shadow-glow follow their base var, never restate it;
    2. one {id, label, colors} entry in THEME_REGISTRY in ui/theme-pref.ts
       (first = default, rendered from the bare :root with NO attribute),
-      whose `colors` mirror the block's 14 editable tokens VERBATIM -- the
+      whose `colors` mirror the block's 17 editable tokens VERBATIM -- the
       theme editor's swatches render from the mirror, and the CSS-sync test
       in webui-theme-pref.test.ts fails if the two drift.
    CUSTOM themes (saved in the theme editor) never touch this file: they
@@ -213,7 +218,7 @@
    script mirrors that write).
    ACCENT: a good dark-base accent sits around L50-70. A dark accent fails
    as a line/border color (#704920 measured ~2.4:1 vs the bg). A BRIGHT
-   accent must flip --text-inverse to dark ink (hotdog: #161312) so
+   accent must flip --accent-ink to dark ink (hotdog: #161312) so
    filled-button text stays readable; darker keeps #ffffff. The editor
    applies that rule automatically for customs (inkForAccent, by relative
    luminance; the ink row stays user-editable). */
@@ -222,11 +227,11 @@
     /* Darker accent: keeps #ffffff ink on filled buttons (guidance above). */
 
     /* Background layers */
-    --bg-base: #0d0d0f;
-    --bg-primary: #121216;
-    --bg-secondary: #18181e;
-    --bg-tertiary: #1e1e26;
-    --bg-elevated: #262630;
+    --bg-canvas: #0d0d0f;
+    --bg-surface-1: #121216;
+    --bg-surface-2: #18181e;
+    --bg-surface-3: #1e1e26;
+    --bg-surface-4: #262630;
     --bg-hover: #2a2a36;
     --bg-active: #32323f;
 
@@ -234,7 +239,7 @@
     --text-primary: #e8e8ed;
     --text-secondary: #9a9ab0;
     --text-muted: #a9a9a9;
-    --text-inverse: #ffffff;
+    --accent-ink: #ffffff;
 
     /* Accent — refined purple */
     --accent: #7c5cff;
@@ -245,14 +250,20 @@
 
     /* Borders */
     --border: #2a2a38;
-    --border-light: #36364a;
+    --border-strong: #36364a;
+
+    /* Status -- same hues as the default palette here; a themed fork may
+       retune them. The -soft washes inherit from the bare :root. */
+    --success: #34d399;
+    --warning: #fbbf24;
+    --error: #f87171;
 }
 
 html,
 body {
     height: 100%;
     font-family: var(--font-sans);
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     color: var(--text-primary);
     font-size: 16px;
     line-height: 1.6;
@@ -293,7 +304,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--border-light);
+    background: var(--border-strong);
 }
 
 /* ── Screens ──────────────────────────────────────────────────────────────── */
@@ -471,7 +482,7 @@ body {
 #login-screen {
     align-items: center;
     justify-content: center;
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     position: relative;
     overflow: hidden;
 }
@@ -496,7 +507,7 @@ body {
     text-align: center;
     position: relative;
     z-index: 1;
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-lg);
@@ -533,7 +544,7 @@ body {
     padding: 14px 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--bg-tertiary);
+    background: var(--bg-surface-3);
     color: var(--text-primary);
     font-size: 1.075rem;
     font-family: var(--font-sans);
@@ -557,7 +568,7 @@ body {
     border: none;
     border-radius: var(--radius);
     background: var(--accent);
-    color: var(--text-inverse);
+    color: var(--accent-ink);
     font-size: 1.075rem;
     font-weight: 600;
     font-family: var(--font-sans);
@@ -598,7 +609,7 @@ body {
 #main-ui {
     flex-direction: column;
     height: 100vh;
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
 }
 
 #workspace-row {
@@ -613,7 +624,7 @@ body {
 
 #sidebar {
     width: var(--sidebar-width);
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -712,7 +723,7 @@ body.sidebar-resizing {
 
 .new-session-btn:hover {
     background: var(--accent);
-    color: var(--text-inverse);
+    color: var(--accent-ink);
     border-color: var(--accent);
     box-shadow: var(--shadow-glow);
 }
@@ -756,7 +767,7 @@ body.sidebar-resizing {
     padding: 6px 10px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: 0.945rem;
@@ -774,7 +785,7 @@ body.sidebar-resizing {
 
 .search-clear:hover {
     color: var(--text-primary);
-    background: var(--bg-elevated);
+    background: var(--bg-surface-4);
 }
 
 .search-results {
@@ -795,8 +806,8 @@ body.sidebar-resizing {
     border-radius: var(--radius);
     cursor: pointer;
     margin-bottom: 6px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-4);
+    border: 1px solid var(--border-strong);
 }
 
 .search-hit:hover,
@@ -977,8 +988,8 @@ body.sidebar-resizing {
     font-weight: 400;
     font-size: 0.805rem;
     color: var(--text-muted);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-4);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     padding: 0 5px;
     line-height: 1.5;
@@ -1165,7 +1176,7 @@ body.sidebar-resizing {
 
 .session-cancel-btn:hover {
     background: var(--error);
-    color: var(--text-inverse);
+    color: var(--accent-ink);
     border-color: var(--error);
 }
 
@@ -1302,7 +1313,7 @@ body.logs-resizing .sidebar-header-resize {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
 }
 
 /* ── Top Band (global controls) ───────────────────────────────────────────── */
@@ -1315,7 +1326,7 @@ body.logs-resizing .sidebar-header-resize {
     align-items: center;
     justify-content: flex-end;
     padding: 2px 6px;
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
 }
@@ -1359,7 +1370,7 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-muted);
     font-family: var(--font-mono);
     font-size: 0.875rem;
-    background: var(--bg-tertiary);
+    background: var(--bg-surface-3);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
 }
@@ -1483,7 +1494,7 @@ body.logs-resizing .sidebar-header-resize {
     display: flex;
     align-items: center;
     gap: 6px;
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 4px 12px;
@@ -1546,7 +1557,7 @@ body.logs-resizing .sidebar-header-resize {
 
 .model-selector:hover,
 .profile-selector:hover {
-    border-color: var(--border-light);
+    border-color: var(--border-strong);
 }
 
 .model-selector:hover #model-select,
@@ -1562,7 +1573,7 @@ body.logs-resizing .sidebar-header-resize {
 /* ── Combobox popup (profile/model switchers) ─────────────────────────────
    The one popup the switcher comboboxes share. RIDES the session context
    menu's stack: same fixed position, z-9999, clampMenuAnchor correction,
-   outside-mousedown dismissal -- no third stack. Surface: --bg-elevated,
+   outside-mousedown dismissal -- no third stack. Surface: --bg-surface-4,
    --shadow-lg, the 180px scroll ceiling. */
 .combobox-popup {
     position: fixed;
@@ -1571,7 +1582,7 @@ body.logs-resizing .sidebar-header-resize {
     flex-direction: column;
     min-width: 220px;
     max-width: 320px;
-    background: var(--bg-elevated);
+    background: var(--bg-surface-4);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
@@ -1585,7 +1596,7 @@ body.logs-resizing .sidebar-header-resize {
     font-family: var(--font-mono);
     font-size: 0.845rem;
     color: var(--text-primary);
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     outline: none;
@@ -1764,7 +1775,7 @@ body.logs-resizing .sidebar-header-resize {
         var(--accent) 0%,
         var(--accent-hover) 100%
     );
-    color: var(--text-inverse);
+    color: var(--accent-ink);
 }
 
 .message .content {
@@ -1806,7 +1817,7 @@ body.logs-resizing .sidebar-header-resize {
 .user-fold-toggle:hover,
 .user-fold-toggle:focus-visible {
     opacity: 1;
-    background: var(--text-inverse);
+    background: var(--accent-ink);
     color: var(--accent);
 }
 
@@ -1920,7 +1931,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .md-content code.inline-code {
-    background: var(--bg-elevated);
+    background: var(--bg-surface-4);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 1px 5px;
@@ -1930,7 +1941,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .md-content pre.code-block {
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 12px 14px;
@@ -2025,7 +2036,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .md-content table.md-table thead {
-    background: var(--bg-elevated);
+    background: var(--bg-surface-4);
 }
 
 .md-content table.md-table th {
@@ -2033,7 +2044,7 @@ body.logs-resizing .sidebar-header-resize {
     text-align: left;
     font-weight: 600;
     color: var(--text-primary);
-    border-bottom: 2px solid var(--border-light);
+    border-bottom: 2px solid var(--border-strong);
     white-space: nowrap;
 }
 
@@ -2057,7 +2068,7 @@ body.logs-resizing .sidebar-header-resize {
    rows carry a fill (--diff-*). Color stays semantic (diff, error, tok-*). */
 
 .tool-call-block {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border-radius: var(--radius);
     margin: 4px 0 4px var(--space-sm);
     overflow: hidden;
@@ -2302,7 +2313,7 @@ body.logs-resizing .sidebar-header-resize {
 .tool-result-pre {
     margin: 0;
     padding: 8px 10px;
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     font-family: var(--font-mono);
     font-size: 0.905rem;
     white-space: pre-wrap;
@@ -2730,7 +2741,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.command-result .bubble {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border: 1px solid var(--border);
     color: var(--text-secondary);
     font-size: 0.945rem;
@@ -2761,9 +2772,9 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .attachment-box {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     /* The box owns a dark surface inside a parent whose ink may be
-       inverse-oriented (the user bubble's --text-inverse): inheriting it put
+       inverse-oriented (the user bubble's --accent-ink): inheriting it put
        near-black ink on near-black. The surface carries its own ink. */
     color: var(--text-primary);
     border: 1px solid var(--border);
@@ -2782,7 +2793,7 @@ body.logs-resizing .sidebar-header-resize {
 .attachment-box .attachment-content {
     margin: 8px 0 4px;
     padding: 8px;
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border-radius: 4px;
     overflow-x: auto;
     white-space: pre-wrap;
@@ -2797,7 +2808,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.question .bubble {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border: 1px solid var(--border);
 }
 
@@ -2834,7 +2845,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.question .q-option {
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: var(--radius-full);
@@ -2855,7 +2866,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.question .q-text {
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: var(--radius);
@@ -2865,7 +2876,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.question .q-error {
-    color: var(--danger, #e5484d);
+    color: var(--danger);
     font-size: 0.905rem;
     min-height: 0.9em;
 }
@@ -2900,7 +2911,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.task-progress .bubble {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border: 1px solid var(--border);
     color: var(--text-secondary);
     font-size: 0.925rem;
@@ -2910,7 +2921,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.compaction-result .bubble {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border: 1px solid var(--border);
     color: var(--text-muted);
     font-size: 0.925rem;
@@ -2933,7 +2944,7 @@ body.logs-resizing .sidebar-header-resize {
    the worker may be fine, only the live tail is unreachable. Two real
    actions, never a dead end. */
 .message.attach-fallback .bubble {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border: 1px solid var(--border);
     color: var(--text-primary);
 }
@@ -2997,7 +3008,7 @@ body.logs-resizing .sidebar-header-resize {
 .input-area {
     display: flex;
     /* Floating composer: .input-area and .chat-form carry no fill and no
-       box -- the field sits directly on the pane's --bg-primary, which is
+       box -- the field sits directly on the pane's --bg-surface-1, which is
        what #message-list already renders on. Position is the scrim anchor. */
     position: relative;
     padding: 16px 20px;
@@ -3017,7 +3028,7 @@ body.logs-resizing .sidebar-header-resize {
     right: 0;
     bottom: 100%;
     height: 8px;
-    background: linear-gradient(to bottom, transparent, var(--bg-primary));
+    background: linear-gradient(to bottom, transparent, var(--bg-surface-1));
     pointer-events: none;
 }
 
@@ -3036,7 +3047,7 @@ body.logs-resizing .sidebar-header-resize {
     padding: 0 5px 0 10px;
     border: 1px solid var(--border);
     border-radius: var(--radius-full);
-    background: var(--bg-elevated);
+    background: var(--bg-surface-4);
     color: var(--text-muted);
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
@@ -3119,7 +3130,7 @@ body.logs-resizing .sidebar-header-resize {
     right: 0;
     max-height: 180px;
     overflow-y: auto;
-    background: var(--bg-elevated);
+    background: var(--bg-surface-4);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
@@ -3194,7 +3205,7 @@ body.logs-resizing .sidebar-header-resize {
 
 .send-btn {
     background: var(--accent);
-    color: var(--text-inverse);
+    color: var(--accent-ink);
 }
 
 .send-btn:hover {
@@ -3223,7 +3234,7 @@ body.logs-resizing .sidebar-header-resize {
 
 .cancel-btn:hover {
     background: var(--error);
-    color: var(--text-inverse);
+    color: var(--accent-ink);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3231,7 +3242,7 @@ body.logs-resizing .sidebar-header-resize {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* currentColor-tracked ring so it survives the button's hover flip
-   (--error on soft -> --text-inverse on error) without a second rule. */
+   (--error on soft -> --accent-ink on error) without a second rule. */
 .spinner {
     display: inline-block;
     width: 12px;
@@ -3261,7 +3272,7 @@ body.logs-resizing .sidebar-header-resize {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border-left: 1px solid var(--border);
     position: relative; /* anchor for #workbench-resize */
 }
@@ -3533,7 +3544,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .workbench-tab.active {
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
 }
 
 .workbench-tab-label {
@@ -3592,7 +3603,7 @@ body.sidebar-resizing #tree-col-resize {
 /* FULL-HEIGHT FILE TABS: a file tab (editor or read-only viewer) owns the
    WHOLE pane -- sheet full height, its own surface scrolls, foot bar pinned
    at the bottom even on a three-line file. So #workbench-body must NOT be
-   the scroller for those kinds (second scrollbar; --bg-secondary would show
+   the scroller for those kinds (second scrollbar; --bg-surface-2 would show
    under a short sheet). The height is a pure flex chain, never a magic
    number: panel -> body flex:1 -> tab body flex:1 -> sheet flex:1 ->
    surface scrolls, bar last row (EDIT_LINE_H is the only pixel number). The
@@ -3629,7 +3640,7 @@ body.sidebar-resizing #tree-col-resize {
     display: block;
     margin: 8px;
     padding: 4px 10px;
-    background: var(--bg-tertiary);
+    background: var(--bg-surface-3);
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text-secondary);
@@ -3736,12 +3747,12 @@ body.sidebar-resizing #tree-col-resize {
     font-size: 14px;
     /* Full-height flex column (the :has(.file-view) chain on
        #workbench-body): sheet owns the pane, rows scroll, foot bar rides the
-       bottom. --bg-base keeps the area under the last line the code sheet. */
+       bottom. --bg-canvas keeps the area under the last line the code sheet. */
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    background: var(--bg-base);
+    background: var(--bg-canvas);
 }
 
 /* The viewer's whole chrome is this foot bar (the tab names the file):
@@ -3756,7 +3767,7 @@ body.sidebar-resizing #tree-col-resize {
     align-items: center;
     gap: 6px;
     padding: 2px 4px;
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
     /* Narrow-column discipline: the foot bar NEVER wraps (a two-row pile of
@@ -3836,7 +3847,7 @@ body.sidebar-resizing #tree-col-resize {
     flex: 1 1 auto;
     min-height: 0;
     font-family: var(--font-mono);
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     /* Full-bleed: the sheet runs edge to edge with NO frame -- no radius, no
        border. The tab strip's border-bottom is the hairline the code starts
        under (a border-top here would draw that line twice); .file-view-bar
@@ -3851,7 +3862,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .file-line:hover {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
 }
 
 .file-ln {
@@ -3906,7 +3917,7 @@ body.sidebar-resizing #tree-col-resize {
 
 /* Full-height column flex (the :has(.editor) chain on #workbench-body makes
    the tab body definite-height, so flex:1 fills the WHOLE pane): the
-   viewport scrolls, its --bg-base sheet paints under the last line, and
+   viewport scrolls, its --bg-canvas sheet paints under the last line, and
    the foot bar (shared .file-view-bar chrome) is the column's last row.
    Heights are ratios; the ONE pixel number is the row box (EDIT_LINE_H),
    trusted by JS hit-testing and the caret/selection overlay. */
@@ -3933,7 +3944,7 @@ body.sidebar-resizing #tree-col-resize {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     line-height: 20px;
     outline: none;
 }
@@ -3958,7 +3969,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .editor-line:hover {
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
 }
 
 /* Block + min-width: the row spans at least the viewport, so a full-line
@@ -4125,7 +4136,7 @@ body.sidebar-resizing #tree-col-resize {
     /* one full row:col spec of room (the file cap is six digits); longer
        input scrolls inside the box instead of widening the bar */
     width: 10ch;
-    background: var(--bg-base);
+    background: var(--bg-canvas);
     border-color: var(--border);
     outline-offset: -1px;
 }
@@ -4315,7 +4326,7 @@ body.sidebar-resizing #tree-col-resize {
     position: fixed;
     z-index: 9999;
     min-width: 140px;
-    background: var(--bg-tertiary);
+    background: var(--bg-surface-3);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
@@ -4374,7 +4385,7 @@ body.sidebar-resizing #tree-col-resize {
     z-index: 10000;
     padding: 7px 16px;
     border-radius: var(--radius);
-    background: var(--bg-elevated);
+    background: var(--bg-surface-4);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
     color: var(--text-primary);
@@ -4436,7 +4447,7 @@ body.sidebar-resizing #tree-col-resize {
 
 .image-stub-failed {
     border-style: solid;
-    color: var(--danger, #e5484d);
+    color: var(--danger);
 }
 
 /* ── Composer file uploads ────────────────────────────────────────────────── */
@@ -4457,7 +4468,7 @@ body.sidebar-resizing #tree-col-resize {
     padding: 2px 8px;
     border: 1px solid var(--border);
     border-radius: 12px;
-    background: var(--bg-secondary, #2a2a2a);
+    background: var(--bg-surface-2, #2a2a2a);
     font-size: 0.925rem;
     max-width: 240px;
 }
@@ -4491,7 +4502,7 @@ body.sidebar-resizing #tree-col-resize {
    transparent fill, the 1px border kept at the SAME width but
    color-invisible (never absent->present, so nothing shifts; the
    .chat-form idiom). Hover/focus return the affordance: fill change plus
-   a real border (hover --border-light, focus var-driven --border-focus). */
+   a real border (hover --border-strong, focus var-driven --border-focus). */
 .attach-btn {
     padding: 6px 10px;
     display: inline-flex;
@@ -4506,7 +4517,7 @@ body.sidebar-resizing #tree-col-resize {
 
 .attach-btn:hover:not(:disabled) {
     background: var(--bg-active, #3a3a3a);
-    border-color: var(--border-light);
+    border-color: var(--border-strong);
 }
 
 .attach-btn:focus-visible {
@@ -4534,7 +4545,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .mic-btn:hover:not(:disabled):not(.recording) {
-    border-color: var(--border-light);
+    border-color: var(--border-strong);
 }
 
 .mic-btn:focus-visible:not(.recording) {
@@ -4712,8 +4723,8 @@ body.sidebar-resizing #tree-col-resize {
     max-height: 86vh;
     display: flex;
     flex-direction: column;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     box-shadow: var(--shadow-lg);
     z-index: 200;
@@ -4740,7 +4751,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .settings-btn {
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-secondary);
@@ -4780,7 +4791,7 @@ body.sidebar-resizing #tree-col-resize {
     width: 232px;
     flex-shrink: 0;
     border-right: 1px solid var(--border);
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     padding: 10px 8px;
     gap: 8px;
     overflow-y: auto;
@@ -4790,7 +4801,7 @@ body.sidebar-resizing #tree-col-resize {
     font-family: var(--font-sans);
     font-size: 0.905rem;
     color: var(--text-primary);
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 4px 8px;
@@ -5095,7 +5106,7 @@ body.sidebar-resizing #tree-col-resize {
     font-family: var(--font-mono);
     font-size: 0.885rem;
     color: var(--text-primary);
-    background: var(--bg-input, var(--bg-secondary));
+    background: var(--bg-input, var(--bg-surface-2));
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 2px 6px;
@@ -5123,9 +5134,9 @@ body.sidebar-resizing #tree-col-resize {
     width: 34px;
     height: 18px;
     flex-shrink: 0;
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-full);
-    background: var(--bg-tertiary);
+    background: var(--bg-surface-3);
     cursor: pointer;
     padding: 0;
     transition: background 0.12s var(--ease-out), border-color 0.12s var(--ease-out);
@@ -5158,7 +5169,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .settings-step {
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-secondary);
@@ -5263,7 +5274,7 @@ body.sidebar-resizing #tree-col-resize {
 .settings-edit-error {
     grid-column: 1 / -1;
     font-size: 0.825rem;
-    color: var(--danger, #e05252);
+    color: var(--danger);
     overflow-wrap: anywhere;
 }
 
@@ -5303,7 +5314,7 @@ body.sidebar-resizing #tree-col-resize {
     font-family: var(--font-mono);
     font-size: 0.885rem;
     color: var(--text-primary);
-    background: var(--bg-input, var(--bg-secondary));
+    background: var(--bg-input, var(--bg-surface-2));
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 2px 6px;
@@ -5328,8 +5339,8 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .settings-btn.settings-list-remove:hover {
-    color: var(--danger, #e05252);
-    border-color: var(--danger, #e05252);
+    color: var(--danger);
+    border-color: var(--danger);
 }
 
 /* Search-mode chrome heading: label + mono path, never a value dump. */
@@ -5338,7 +5349,7 @@ body.sidebar-resizing #tree-col-resize {
     align-items: baseline;
     gap: 8px;
     padding: 10px 0 2px;
-    border-top: 1px solid var(--border-light);
+    border-top: 1px solid var(--border-strong);
     margin-top: 8px;
 }
 
@@ -5349,7 +5360,7 @@ body.sidebar-resizing #tree-col-resize {
 .settings-provider-card {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
+    background: var(--bg-surface-2);
     margin: 6px 0;
 }
 
@@ -5428,7 +5439,7 @@ body.sidebar-resizing #tree-col-resize {
     font-family: var(--font-mono);
     font-size: 0.885rem;
     color: var(--text-primary);
-    background: var(--bg-input, var(--bg-secondary));
+    background: var(--bg-input, var(--bg-surface-2));
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 2px 6px;
@@ -5448,7 +5459,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .settings-restart {
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border-strong);
     border-left: 3px solid var(--accent);
     border-radius: var(--radius-sm);
     background: rgba(90, 160, 255, 0.07);
@@ -5555,7 +5566,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .theme-swatch:hover {
-    border-color: var(--border-light);
+    border-color: var(--border-strong);
 }
 
 .theme-swatch[aria-pressed="true"] {
@@ -5622,8 +5633,8 @@ body.sidebar-resizing #tree-col-resize {
     height: 18px;
     padding: 0 4px;
     border-radius: var(--radius-full);
-    border: 1px solid var(--border-light);
-    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    background: var(--bg-surface-4);
     color: var(--text-muted);
     font-size: 10px;
     line-height: 16px;
@@ -5681,21 +5692,38 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-secondary);
 }
 
+/* The muted aside under the row's name (what the slot paints). */
+.theme-color-hint {
+    display: block;
+    font-size: 0.72rem;
+    line-height: 1.3;
+    color: var(--text-muted);
+}
+
 .theme-color-row input[type="color"] {
     width: 52px;
     height: 26px;
     padding: 2px;
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     cursor: pointer;
 }
 
 .theme-color-hex {
-    width: 74px;
+    flex: none;
     font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
+}
+
+/* Star riding a row whose draft value differs from the base palette's
+   stored value (the quick "what did I move" scan). */
+.theme-color-changed {
+    flex: none;
+    color: var(--accent);
+    font-weight: 700;
+    margin-left: 3px;
 }
 
 .theme-editor-foot {
@@ -5707,13 +5735,36 @@ body.sidebar-resizing #tree-col-resize {
     flex-shrink: 0;
 }
 
+/* The name-entry opener (footer only exists while the draft is dirty): a
+   normal button wearing accent text; the generic .settings-btn:hover
+   already turns border + text accent. */
+.theme-save-new {
+    color: var(--accent);
+}
+
+/* The accented primary: shown only when a custom base can take the edits
+   in place. The inverse ink is restated in the hover rule AFTER
+   .settings-btn:hover (same specificity, later wins; this section is
+   last in the file). */
+.theme-update {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+
+.theme-update:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: var(--accent-ink);
+}
+
 .theme-name {
     flex: 1;
     min-width: 0;
     font-family: var(--font-sans);
     font-size: 0.9rem;
     color: var(--text-primary);
-    background: var(--bg-primary);
+    background: var(--bg-surface-1);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 5px 8px;
@@ -5724,17 +5775,8 @@ body.sidebar-resizing #tree-col-resize {
     outline: none;
 }
 
-.theme-foot-status {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    overflow-wrap: anywhere;
-}
-
 @media (max-width: 640px) {
     .theme-colors {
         grid-template-columns: 1fr;
-    }
-    .theme-foot-status {
-        display: none;
     }
 }

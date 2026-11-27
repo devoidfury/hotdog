@@ -71,6 +71,7 @@
 // config key.
 
 import type { JsxChild } from "@utils/jsx";
+import type { SyntaxRun } from "@utils/syntax/index.ts";
 import { IconReload, IconWhitespace } from "./icons.tsx";
 import { fileViewLangChoices, langLabel, tokenizeFileLines } from "./file-view.tsx";
 import { codeSpans } from "./ws-render.tsx";
@@ -229,6 +230,37 @@ interface EditorView {
   findFocus: "query" | "replace" | null;
   queryEl: HTMLInputElement | null;
   replEl: HTMLInputElement | null;
+  /** Stable-identity callback refs (built once per path, below): an inline
+   *  arrow changes identity every render, and the diff detaches/reattaches
+   *  refs on identity change -- which re-ran the viewport's rect reads
+   *  (forced layout) on every keystroke and scroll frame. */
+  vpRef: ((el: unknown) => void) | null;
+  taRef: ((el: unknown) => void) | null;
+  probeRef: ((el: unknown) => void) | null;
+  /** Memoized matchBracket result keyed on (lines identity, caret head).
+   *  Any text edit or caret move misses; scroll/app-tick re-renders reuse
+   *  the previous scan (the capped scan walks up to 200k code units and
+   *  the worst case cost a full millisecond-plus per scroll frame). */
+  matchCache: { lines: string[]; line: number; col: number; result: { a: Pos; b: Pos } | undefined } | null;
+  /** Live slots for the CACHED row vnodes: their event handlers outlive the
+   *  render that built them, so they read the buffer/session/commit here
+   *  instead of capturing a render closure. Refreshed at the top of every
+   *  render -- an event always sees the state of the last completed commit. */
+  live: { buf: TextBuffer; session: EditorSession; commit: (path: string, next: EditorSession) => void } | null;
+  /** Cached row vnodes by line number: an identical vnode object bails out
+   *  of the entire subtree in the diff (see docs/agents/jsx.md), so an
+   *  unchanged row costs a lookup instead of a rebuild. An entry is reused
+   *  only while its text, its tokenizer runs (identity -- the file-view run
+   *  cache makes unchanged lines identity-stable) and its paint signature
+   *  all match; the signature carries the per-row selection geometry, the
+   *  caret cell, the bracket-pair tints, the whitespace-mark pref and the
+   *  cell width. */
+  rows: Map<number, { text: string; runs: SyntaxRun[]; sig: string; node: JsxChild }>;
+  /** Last find scan keyed on (lines identity, query, toggles): findMatches
+   *  is pure and the buffer never mutates a lines array in place, so an
+   *  identity hit is the identical result -- no full-file rescan per
+   *  render while the strip is open. */
+  findCache: { lines: string[]; query: string; cs: boolean; ww: boolean; rx: boolean; result: FindResult } | null;
 }
 
 const editorViews = new Map<string, EditorView>();
@@ -236,7 +268,7 @@ const editorViews = new Map<string, EditorView>();
 function viewOf(path: string): EditorView {
   let v = editorViews.get(path);
   if (!v) {
-    v = { scrollTop: 0, viewportH: 0, vpTop: 0, vpLeft: 0, codeLeft: 0, gutterPx: 0, ta: null, composing: false, dragging: false, boxAnchor: null, repaint: null, vp: null, gotoOpen: false, gotoText: "", gotoEl: null, findOpen: false, findQuery: "", findRepl: "", findCase: false, findWord: false, findRegex: false, findCursor: 0, findFocus: null, queryEl: null, replEl: null };
+    v = { scrollTop: 0, viewportH: 0, vpTop: 0, vpLeft: 0, codeLeft: 0, gutterPx: 0, ta: null, composing: false, dragging: false, boxAnchor: null, repaint: null, vp: null, gotoOpen: false, gotoText: "", gotoEl: null, findOpen: false, findQuery: "", findRepl: "", findCase: false, findWord: false, findRegex: false, findCursor: 0, findFocus: null, queryEl: null, replEl: null, live: null, rows: new Map(), findCache: null, matchCache: null, vpRef: null, taRef: null, probeRef: null };
     editorViews.set(path, v);
   }
   return v;
@@ -329,6 +361,85 @@ const clearInput = (v: EditorView): void => {
   }
 };
 
+/** Cached-row commit: same rules as the render-scope act (identity gate,
+ *  textarea clear, session handoff), but resolved from the live slots --
+ *  a cached row's handler was built before the current commit. */
+function rowAct(v: EditorView, next: TextBuffer): void {
+  const live = v.live;
+  if (live === null || next === live.buf) return;
+  clearInput(v);
+  live.commit(live.session.path, { ...live.session, buffer: next });
+}
+
+/** Row-vnode cache bound. Scrolling churns line numbers; entries outside
+ *  the window are dropped when the map reaches this size (correctness
+ *  never rides the cache -- a dropped entry just rebuilds). */
+const ROW_CACHE_MAX = 256;
+
+// ── Stable-identity refs ─────────────────────────────────────────────────────
+// The diff detaches/reattaches callback refs when their identity changes,
+// and an inline arrow changes identity EVERY render. The viewport ref
+// re-ran getBoundingClientRect x3 + a microtask re-read on every keystroke
+// and scroll frame (forced layout flushes right after DOM mutation); the
+// probe re-read offsetWidth the same way. One callback per path attaches
+// once per mount -- the deferred microtask read stays for that attach (the
+// ref fires before the node joins the tree, so the first synchronous read
+// is the documented zero-rect one; without the deferred pass vpTop/gutterPx
+// ride 0 until some other render). viewportH refreshes on scroll; the
+// probe keeps its document.fonts-driven re-measure for the webfont.
+
+function vpRefOf(v: EditorView): (el: unknown) => void {
+  if (v.vpRef === null) {
+    v.vpRef = (el: unknown): void => {
+      const node = el as HTMLElement | null;
+      v.vp = node; // the jump path scrolls this node when the caret lands off-window
+      if (!node) return;
+      const measure = (): void => {
+        const r = node.getBoundingClientRect();
+        if (r.width <= 0 && r.height <= 0) return; // zero-rect fallback
+        v.viewportH = node.clientHeight;
+        v.vpTop = r.top;
+        v.vpLeft = r.left;
+        // The gutter offset: caretX lives in .editor-code space while
+        // the parked textarea positions against .editor-canvas.
+        const canvas = node.querySelector(".editor-canvas") as unknown as HTMLElement | null;
+        const code = node.querySelector(".editor-code") as unknown as HTMLElement | null;
+        if (canvas && code) {
+          const g = code.getBoundingClientRect().left - canvas.getBoundingClientRect().left;
+          if (g > 0) v.gutterPx = g;
+        }
+      };
+      measure();
+      queueMicrotask(() => {
+        if ((node as unknown as { isConnected?: boolean }).isConnected !== false) measure();
+      });
+    };
+  }
+  return v.vpRef;
+}
+
+function taRefOf(v: EditorView): (el: unknown) => void {
+  if (v.taRef === null) {
+    v.taRef = (el: unknown): void => {
+      v.ta = el as HTMLTextAreaElement | null;
+    };
+  }
+  return v.taRef;
+}
+
+function probeRefOf(v: EditorView): (el: unknown) => void {
+  if (v.probeRef === null) {
+    v.probeRef = (el: unknown): void => {
+      const node = el as HTMLElement | null;
+      if (!node) return; // unmount: a stale probe reads offsetWidth 0 (a
+      // no-op remeasure that keeps the last good advance), so leave it.
+      probeNode = node;
+      queueMicrotask(() => remeasureCharWidth());
+    };
+  }
+  return v.probeRef;
+}
+
 /** The foot bar's jump grammar: `N` (line only, column kept) or `N:M`, both
  *  1-based with positive integers. Anything else is null (the caller refuses
  *  by keeping the box open); clamping to the buffer is setCaret's job. */
@@ -404,11 +515,26 @@ export function FileEditor(p: FileEditorProps): JsxChild {
   // The poke the shared cell width uses to repaint this editor when the
   // webfont settles; refreshed every render so it captures the live props.
   v.repaint = () => p.onCommit(p.path, p.session);
+  // The live slots cached row handlers read through (see EditorView.live).
+  v.live = { buf, session: p.session, commit: p.onCommit };
 
   const act = (next: TextBuffer): void => {
     if (next === buf) return;
     clearInput(v);
     p.onCommit(p.path, { ...p.session, buffer: next });
+  };
+  /** The find scan for the widget's current state, memoized on (lines
+   *  identity, query, toggles). The strip re-renders on every commit
+   *  (scrolls included); without this the pure finder would rescan the
+   *  whole file per render. */
+  const findNow = (): FindResult => {
+    const c = v.findCache;
+    if (c !== null && c.lines === buf.lines && c.query === v.findQuery && c.cs === v.findCase && c.ww === v.findWord && c.rx === v.findRegex) {
+      return c.result;
+    }
+    const result = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    v.findCache = { lines: buf.lines, query: v.findQuery, cs: v.findCase, ww: v.findWord, rx: v.findRegex, result };
+    return result;
   };
   // Click -> column: THE shared mapping (editor-buffer colForX), the exact
   // inverse of the caret's xForCol below, so they cannot diverge.
@@ -422,9 +548,17 @@ export function FileEditor(p: FileEditorProps): JsxChild {
   const head = buf.sels[buf.primary]?.head ?? { line: 0, col: 0 };
   const caretX = xForCol(buf.lines[head.line] ?? "", head.col, cw);
   // Matched-bracket highlight: the pair adjacent to the (primary) caret and
-  // its mate, recomputed every render -- so it appears on adjacency and
-  // vanishes on move for free, and never lags the buffer.
-  const match = matchBracket(buf.lines, head);
+  // its mate. Memoized on (lines identity, caret head) -- it still appears
+  // on adjacency and vanishes on move for free, and never lags the buffer
+  // (any text edit builds a fresh lines array, which misses the cache).
+  const mc = v.matchCache;
+  let match: { a: Pos; b: Pos } | undefined;
+  if (mc !== null && mc.lines === buf.lines && mc.line === head.line && mc.col === head.col) {
+    match = mc.result;
+  } else {
+    match = matchBracket(buf.lines, head);
+    v.matchCache = { lines: buf.lines, line: head.line, col: head.col, result: match };
+  }
 
   // HOT EXIT: when the stash is off (quota), a dirty buffer says so -- the
   // reload-safety that normally hides behind "edited" is honestly missing.
@@ -483,7 +617,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
   const openFind = (): void => {
     v.findOpen = true;
     v.findFocus = "query";
-    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    const found = findNow();
     if (found.ok && found.matches.length > 0) {
       // Re-aim at the first occurrence at/after the caret (wrap otherwise)
       // instead of always snapping back to the top of the file.
@@ -501,7 +635,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
     p.onCommit(p.path, p.session);
   };
   const stepFind = (dir: 1 | -1): void => {
-    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    const found = findNow();
     if (!found.ok || found.matches.length === 0) return;
     const n = found.matches.length;
     findGo(buf, found.matches, (clampFindCursor(v.findCursor, n) + dir + n) % n);
@@ -510,7 +644,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
    *  toggling share this); a miss (or an error) just repaints the strip. */
   const refreshFind = (): void => {
     v.findCursor = 0;
-    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    const found = findNow();
     if (found.ok && found.matches.length > 0) {
       findGo(buf, found.matches, 0);
       return;
@@ -518,7 +652,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
     p.onCommit(p.path, p.session);
   };
   const doReplaceOne = (): void => {
-    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    const found = findNow();
     if (!found.ok || found.matches.length === 0) return;
     const m = found.matches[clampFindCursor(v.findCursor, found.matches.length)]!;
     const repl = v.replEl?.value ?? v.findRepl;
@@ -535,7 +669,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
     act(next);
   };
   const doReplaceAll = (): void => {
-    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    const found = findNow();
     if (!found.ok || found.matches.length === 0) return;
     const repl = v.replEl?.value ?? v.findRepl;
     v.findRepl = repl;
@@ -543,7 +677,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
     act(replaceAll(buf, found.matches, repl, Date.now()));
   };
   const doSelectAllOccurrences = (): void => {
-    const found = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+    const found = findNow();
     if (!found.ok || found.matches.length === 0) return;
     const i = clampFindCursor(v.findCursor, found.matches.length);
     // The widget yields: with every occurrence selected as a caret, focus
@@ -559,36 +693,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
     <div className="editor" data-path={p.path}>
       <div
         className="editor-viewport"
-        ref={(el) => {
-          const node = el as unknown as HTMLElement | null;
-          v.vp = node; // the jump path scrolls this node when the caret lands off-window
-          if (!node) return;
-          // The ref fires BEFORE the node joins the tree (the house JSX
-          // create path), so every rect read here is zero; the same read
-          // lands again in a microtask, once insertion + layout exist
-          // (the probe's own deferral pattern). Without it the viewport
-          // rode vpTop/gutterPx = 0 until the first re-render, and the
-          // parked textarea sat a gutter left of the caret for the IME.
-          const measure = (): void => {
-            const r = node.getBoundingClientRect();
-            if (r.width <= 0 && r.height <= 0) return; // zero-rect fallback
-            v.viewportH = node.clientHeight;
-            v.vpTop = r.top;
-            v.vpLeft = r.left;
-            // The gutter offset: caretX lives in .editor-code space while
-            // the parked textarea positions against .editor-canvas.
-            const canvas = node.querySelector(".editor-canvas") as unknown as HTMLElement | null;
-            const code = node.querySelector(".editor-code") as unknown as HTMLElement | null;
-            if (canvas && code) {
-              const g = code.getBoundingClientRect().left - canvas.getBoundingClientRect().left;
-              if (g > 0) v.gutterPx = g;
-            }
-          };
-          measure();
-          queueMicrotask(() => {
-            if ((node as unknown as { isConnected?: boolean }).isConnected !== false) measure();
-          });
-        }}
+        ref={vpRefOf(v)}
         onScroll={(e: Event) => {
           const node = e.currentTarget as unknown as HTMLElement;
           v.scrollTop = node.scrollTop;
@@ -689,9 +794,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
             autocapitalize="off"
             wrap="off"
             style={{ left: `${caretX + v.gutterPx}px`, top: `${head.line * EDIT_LINE_H}px` }}
-            ref={(el) => {
-              v.ta = el as unknown as HTMLTextAreaElement | null;
-            }}
+            ref={taRefOf(v)}
             onKeydown={(e: KeyboardEvent) => onKeyDown(e, p, v, act, { openFind, closeFind })}
             onCompositionstart={() => {
               v.composing = true;
@@ -719,25 +822,49 @@ export function FileEditor(p: FileEditorProps): JsxChild {
           <div className="editor-window" style={{ top: `${start * EDIT_LINE_H}px` }}>
             {slice.map((line, i) => {
               const n = start + i;
-              return (
+              const lineRuns = runs[i]!;
+              const sel = selRects(buf, n, cw);
+              // The paint signature: everything the row's DOM shows besides
+              // text + token runs -- selection-rect geometry, the caret
+              // cell, this row's bracket-pair columns, the whitespace-mark
+              // pref, the cell width. Only the head row renders a caret, so
+              // caretX matters to that row alone.
+              const caretHere = !v.composing && n === head.line;
+              const mCols = match === undefined
+                ? ""
+                : ([match.a, match.b] as const).filter((pt) => pt.line === n).map((pt) => pt.col).join(",");
+              const sig = `${sel.sig}|${caretHere ? `c${caretX}` : ""}|${mCols}|${p.showWs ? "w" : "-"}|${cw}`;
+              const cached = v.rows.get(n);
+              if (cached !== undefined && cached.text === line && cached.runs === lineRuns && cached.sig === sig) {
+                // Identical vnode object: the diff bails out of the whole
+                // row subtree (props, listeners, children -- nothing moves).
+                return cached.node;
+              }
+              const node: JsxChild = (
                 <div
                   key={n}
                   className="editor-line"
                   data-line={n + 1}
                   onMousedown={(e: MouseEvent) => {
+                    // The row vnode can outlive this render: read the live
+                    // slots, never a captured buffer.
+                    const live = v.live;
+                    if (live === null) return;
+                    const now = live.buf;
+                    const w = charWidth();
                     e.preventDefault();
                     v.ta?.focus();
                     const codeEl = (e.currentTarget as unknown as HTMLElement).querySelector(".editor-code");
                     const left = codeEl ? codeEl.getBoundingClientRect().left : v.codeLeft;
                     v.codeLeft = left || v.codeLeft;
-                    const pos = hitFromX(e.clientX - left, n);
+                    const pos: Pos = { line: n, col: colForX(now.lines[n] ?? "", e.clientX - left, w) };
                     if (e.altKey && e.shiftKey) {
                       // Box drag: anchor = line + VISUAL column (the drag's
                       // x / cell width), then every move rebuilds the whole
                       // box from the anchor (never incremental).
-                      v.boxAnchor = { line: n, vcol: Math.max(0, (e.clientX - left) / cw) };
+                      v.boxAnchor = { line: n, vcol: Math.max(0, (e.clientX - left) / w) };
                       v.dragging = true;
-                      act(boxSelect(buf, v.boxAnchor, v.boxAnchor));
+                      rowAct(v, boxSelect(now, v.boxAnchor, v.boxAnchor));
                       return;
                     }
                     v.boxAnchor = null;
@@ -747,31 +874,41 @@ export function FileEditor(p: FileEditorProps): JsxChild {
                       // selection-end remap). Discrete on purpose: no drag
                       // starts, so the next plain drag still extends the
                       // primary range normally.
-                      act(altClickCaret(buf, pos));
+                      rowAct(v, altClickCaret(now, pos));
                       return;
                     }
                     v.dragging = true;
-                    act(e.shiftKey ? extendSelTo(buf, pos) : setCaret(buf, pos));
+                    rowAct(v, e.shiftKey ? extendSelTo(now, pos) : setCaret(now, pos));
                   }}
                   onDblclick={(e: MouseEvent) => {
+                    const live = v.live;
+                    if (live === null) return;
+                    const now = live.buf;
+                    const w = charWidth();
                     e.preventDefault();
                     const codeEl = (e.currentTarget as unknown as HTMLElement).querySelector(".editor-code");
                     const left = codeEl ? codeEl.getBoundingClientRect().left : v.codeLeft;
-                    act(selectWordAt(buf, hitFromX(e.clientX - left, n)));
+                    rowAct(v, selectWordAt(now, { line: n, col: colForX(now.lines[n] ?? "", e.clientX - left, w) }));
                   }}
                 >
                   <span className="file-ln" aria-hidden="true">{n + 1}</span>
                   <code className="editor-code">
-                    {selRects(buf, n, cw)}
+                    {sel.spans}
                     {matchRects(match, n, cw, buf.lines)}
-                    {!v.composing && n === head.line ? (
+                    {caretHere ? (
                       <span className="editor-caret" style={{ left: `${caretX}px`, height: `${EDIT_LINE_H}px` }} aria-hidden="true" />
                     ) : null}
-                    {codeSpans(runs[i]!, p.showWs, line)}
+                    {codeSpans(lineRuns, p.showWs, line)}
                     {line === "" ? "\u00a0" : null}
                   </code>
                 </div>
               );
+              if (v.rows.size >= ROW_CACHE_MAX) {
+                for (const k of v.rows.keys()) if (k < start || k >= end) v.rows.delete(k);
+                if (v.rows.size >= ROW_CACHE_MAX) v.rows.clear();
+              }
+              v.rows.set(n, { text: line, runs: lineRuns, sig, node });
+              return node;
             })}
           </div>
         </div>
@@ -782,13 +919,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
             render instead of re-entering the mount/patch already running. The
             test DOM reports no geometry (offsetWidth 0) and the fallback
             holds; document.fonts drives the real-browser re-measure. */}
-        <span className="editor-measure" aria-hidden="true" ref={(el) => {
-          const node = el as unknown as HTMLElement | null;
-          if (!node) return; // unmount: a stale probe reads offsetWidth 0 (a
-          // no-op remeasure that keeps the last good advance), so leave it.
-          probeNode = node;
-          queueMicrotask(() => remeasureCharWidth());
-        }}>{Array.from({ length: 100 }, () => "0").join("")}</span>
+        <span className="editor-measure" aria-hidden="true" ref={probeRefOf(v)}>{Array.from({ length: 100 }, () => "0").join("")}</span>
       </div>
       {v.findOpen
         ? // The find & replace strip: the house popover idiom (the goto
@@ -802,7 +933,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
           // buffer), and every chord the strip claims stopPropagation's on
           // top of that.
           (() => {
-            const found: FindResult = findMatches(buf.lines, v.findQuery, findOptsOf(v));
+            const found: FindResult = findNow();
             const count = found.ok ? found.matches.length : 0;
             const cursor = clampFindCursor(v.findCursor, count);
             const btnStyle = { width: "auto", minWidth: "24px", height: "22px", padding: "0 4px", fontSize: "12px" };
@@ -1108,9 +1239,12 @@ export function FileEditor(p: FileEditorProps): JsxChild {
 
 /** Selection rectangles for one rendered row, painted from EVERY range in
  *  the list (the multicaret node gets its extra carets painted for free;
- *  only the caret itself rides `primary`). */
-function selRects(buf: TextBuffer, n: number, cw: number): JsxChild[] {
+ *  only the caret itself rides `primary`). Also returns the paint signature
+ *  of those rects -- the row cache reuses its vnode while the signature
+ *  holds, so the sig is built from the very geometry the spans carry. */
+function selRects(buf: TextBuffer, n: number, cw: number): { spans: JsxChild[]; sig: string } {
   const out: JsxChild[] = [];
+  const sigs: string[] = [];
   for (let i = 0; i < buf.sels.length; i++) {
     const r = buf.sels[i]!;
     const [a, b] = r.anchor.line < r.head.line || (r.anchor.line === r.head.line && r.anchor.col <= r.head.col)
@@ -1123,19 +1257,27 @@ function selRects(buf: TextBuffer, n: number, cw: number): JsxChild[] {
     const aLeft = n === a.line ? xForCol(lineText, a.col, cw) : 0;
     if (n === b.line && n === a.line) {
       const w = xForCol(lineText, b.col, cw) - aLeft;
-      if (w > 0) out.push(<span key={i} className="editor-sel" style={{ left: `${aLeft}px`, width: `${w}px` }} aria-hidden="true" />);
+      if (w > 0) {
+        out.push(<span key={i} className="editor-sel" style={{ left: `${aLeft}px`, width: `${w}px` }} aria-hidden="true" />);
+        sigs.push(`${i}:${aLeft}+${w}`);
+      }
     } else if (n === b.line) {
       const w = xForCol(lineText, b.col, cw);
-      if (w > 0) out.push(<span key={i} className="editor-sel" style={{ left: "0px", width: `${w}px` }} aria-hidden="true" />);
+      if (w > 0) {
+        out.push(<span key={i} className="editor-sel" style={{ left: "0px", width: `${w}px` }} aria-hidden="true" />);
+        sigs.push(`${i}:0+${w}`);
+      }
     } else if (n === a.line) {
       // The ANCHOR row of a multi-row range paints from the anchor column,
       // not from 0 -- text left of the anchor is not selected.
       out.push(<span key={i} className="editor-sel" style={{ left: `${aLeft}px`, right: "0px" }} aria-hidden="true" />);
+      sigs.push(`${i}:${aLeft}+R`);
     } else {
       out.push(<span key={i} className="editor-sel" style={{ left: "0px", right: "0px" }} aria-hidden="true" />);
+      sigs.push(`${i}:0+R`);
     }
   }
-  return out;
+  return { spans: out, sig: sigs.join(";") };
 }
 
 /** The matched-pair tints for one rendered row (empty when nothing matches;

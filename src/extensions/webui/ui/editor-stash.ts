@@ -73,8 +73,10 @@ export interface EditorStashDeps {
 }
 
 export interface EditorStash {
-  /** Debounced (trailing, per path) mirror of one dirty buffer. */
-  schedule(path: string, text: string, baseMtimeMs: number): void;
+  /** Debounced (trailing, per path) mirror of one dirty buffer. The text
+   *  may be a thunk: it is resolved when the write lands (or at flush),
+   *  never while the keystroke is still traveling. */
+  schedule(path: string, text: string | (() => string), baseMtimeMs: number): void;
   /** Drop one path NOW (save success / went clean / buffer died). */
   clear(path: string): void;
   /** Follow a rename: the record key moves with the file. */
@@ -93,6 +95,18 @@ const isStashEntry = (v: unknown): v is StashEntry =>
   typeof (v as { text?: unknown }).text === "string" &&
   typeof (v as { baseMtimeMs?: unknown }).baseMtimeMs === "number" &&
   typeof (v as { stashedAt?: unknown }).stashedAt === "number";
+
+/** What a pending schedule holds: the text arrives EAGER (a string) or
+ *  LAZY (a thunk resolved when the debounce lands -- the app passes a
+ *  buffer serializer thunk so typing never joins the whole buffer per
+ *  keystroke; only the coalesced final write pays the join). */
+type PendingEntry = Omit<StashEntry, "text"> & { text: string | (() => string) };
+
+const materialize = (p: PendingEntry): StashEntry => ({
+  text: typeof p.text === "function" ? p.text() : p.text,
+  baseMtimeMs: p.baseMtimeMs,
+  stashedAt: p.stashedAt,
+});
 
 export function createEditorStash(deps: EditorStashDeps): EditorStash {
   const now = deps.now ?? (() => Date.now());
@@ -175,7 +189,7 @@ export function createEditorStash(deps: EditorStashDeps): EditorStash {
     }
   };
 
-  const pending = new Map<string, StashEntry>();
+  const pending = new Map<string, PendingEntry>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const cancelTimer = (path: string): void => {
     const t = timers.get(path);
@@ -196,7 +210,7 @@ export function createEditorStash(deps: EditorStashDeps): EditorStash {
           const entry = pending.get(path);
           if (entry === undefined) return;
           pending.delete(path);
-          writeRecord({ ...readRecord(), [path]: entry });
+          writeRecord({ ...readRecord(), [path]: materialize(entry) });
         }, debounceMs),
       );
     },
@@ -219,7 +233,7 @@ export function createEditorStash(deps: EditorStashDeps): EditorStash {
       const carried = entry ?? rec[from];
       if (carried === undefined) return; // nothing stashed under the old path
       delete rec[from];
-      rec[to] = carried; // an old record at `to` (if any) is replaced: rename wins
+      rec[to] = materialize(carried); // an old record at `to` (if any) is replaced: rename wins
       writeRecord(rec);
     },
 
@@ -233,7 +247,7 @@ export function createEditorStash(deps: EditorStashDeps): EditorStash {
     flush() {
       if (timers.size === 0 && pending.size === 0) return;
       const rec = readRecord();
-      for (const [path, entry] of pending) rec[path] = entry;
+      for (const [path, entry] of pending) rec[path] = materialize(entry);
       pending.clear();
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();

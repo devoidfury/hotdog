@@ -254,3 +254,57 @@ describe("selectOccurrences feeds the multi-caret machine", () => {
     expect(b.primary).toBe(1);
   });
 });
+
+describe("case-sensitive literal fast path (indexOf walk)", () => {
+  it("reproduces the escaped-regex walk: overlap, repeats, start/end edges", () => {
+    // Non-overlapping left-to-right: "aa" in "aaaa" lands at 0 and 2, never 1.
+    expect(spans(["aaaa"], "aa", { caseSensitive: true })).toEqual([[0, 0, 2], [0, 2, 4]]);
+    expect(spans(["xaxaxa"], "a", { caseSensitive: true })).toEqual([[0, 1, 2], [0, 3, 4], [0, 5, 6]]);
+    expect(spans(["hit", "mid hit", "tail"], "hit", { caseSensitive: true })).toEqual([
+      [0, 0, 3],
+      [1, 4, 7],
+    ]);
+    expect(spans(["abc"], "zzz", { caseSensitive: true })).toEqual([]);
+  });
+
+  it("literal metacharacters stay literal (no regex reading of the query)", () => {
+    expect(spans(["a.b $x* (y) [z]"], ".$", { caseSensitive: true })).toEqual([]);
+    expect(spans(["a.b $x* (y) [z]"], ".*", { caseSensitive: true })).toEqual([]);
+    expect(spans(["a.b $x* (y) [z]"], "(y)", { caseSensitive: true })).toEqual([[0, 8, 11]]);
+    expect(spans(["price: $5", "$5x"], "$5", { caseSensitive: true })).toEqual([
+      [0, 7, 9],
+      [1, 0, 2],
+    ]);
+  });
+
+  it("agrees with the case-insensitive regex path where the fold is trivial", () => {
+    // All-lowercase content: cs and ci must return the identical walk.
+    const lines = ["value one", "two value", "nothing here", "valuevalue"];
+    expect(spans(lines, "value", { caseSensitive: true })).toEqual(spans(lines, "value", { caseSensitive: false }));
+  });
+
+  it("case toggle still bites on the fast path", () => {
+    expect(spans(["Cat cat CAT"], "cat", { caseSensitive: true })).toEqual([[0, 4, 7]]);
+    expect(spans(["Cat cat CAT"], "cat", { caseSensitive: false })).toEqual([[0, 0, 3], [0, 4, 7], [0, 8, 11]]);
+  });
+
+  it("whole-word rides the same neighbour rule on the fast path (unicode + surrogate pairs)", () => {
+    expect(spans(["concat cat category"], "cat", { caseSensitive: true, wholeWord: true })).toEqual([[0, 7, 10]]);
+    // é is a LETTER: "café" is not a whole-word "caf".
+    expect(spans(["café café"], "caf", { caseSensitive: true, wholeWord: true })).toEqual([]);
+    // A supplementary-plane LETTER (Deseric capital 𐐀) before the word: the
+    // pair is read whole, so the boundary is a letter and the match drops.
+    expect(spans(["\u{D800}\u{DC00}cat cat"], "cat", { caseSensitive: true, wholeWord: true })).toEqual([[0, 6, 9]]);
+    // And the identical judgement comes out of the regex path too.
+    expect(spans(["concat cat category"], "cat", { caseSensitive: false, wholeWord: true })).toEqual([[0, 7, 10]]);
+  });
+
+  it("a regex query never takes the literal fast path", () => {
+    // "c.t" is only literal-adjacent by accident: as regex it spans "cat" AND "cot".
+    expect(spans(["cat cot c.t"], "c.t", { caseSensitive: true, regex: true })).toEqual([
+      [0, 0, 3],
+      [0, 4, 7],
+      [0, 8, 11],
+    ]);
+  });
+});

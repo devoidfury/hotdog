@@ -261,3 +261,79 @@ describe("editor stash (pure)", () => {
     expect(notices).toBe(0);
   });
 });
+
+describe("lazy schedule text (thunk)", () => {
+  it("the thunk resolves when the debounce lands -- never while pending", async () => {
+    const m = memStorage();
+    m.map.set(STASH_TAB_ID_KEY, "T1");
+    const s = makeStore(m);
+    let calls = 0;
+    s.schedule("/a.ts", () => {
+      calls++;
+      return "materialized";
+    }, 7);
+    expect(calls).toBe(0); // the keystroke path joins nothing
+    expect(m.writeCount()).toBe(0);
+    await sleep(40);
+    expect(calls).toBe(1);
+    expect(readRec(m.map, "T1")).toEqual({ "/a.ts": { text: "materialized", baseMtimeMs: 7, stashedAt: 4242 } });
+  });
+
+  it("coalescing drops intermediate thunks: only the final one resolves", async () => {
+    const m = memStorage();
+    m.map.set(STASH_TAB_ID_KEY, "T1");
+    const s = makeStore(m);
+    const calls: number[] = [];
+    s.schedule("/a.ts", () => {
+      calls.push(1);
+      return "one";
+    }, 7);
+    s.schedule("/a.ts", () => {
+      calls.push(2);
+      return "two";
+    }, 7);
+    await sleep(40);
+    expect(calls).toEqual([2]); // the superseded thunk never runs
+    expect(readRec(m.map, "T1")["/a.ts"]?.text).toBe("two");
+  });
+
+  it("a clear before the window ends NEVER resolves the thunk", async () => {
+    const m = memStorage();
+    m.map.set(STASH_TAB_ID_KEY, "T1");
+    const s = makeStore(m);
+    let calls = 0;
+    s.schedule("/a.ts", () => {
+      calls++;
+      return "gone";
+    }, 7);
+    s.clear("/a.ts"); // the buffer went clean inside the window
+    await sleep(40);
+    expect(calls).toBe(0);
+    expect(m.writeCount()).toBe(0);
+  });
+
+  it("flush and move resolve thunks to their exact bytes", () => {
+    const m = memStorage();
+    m.map.set(STASH_TAB_ID_KEY, "T1");
+    const s = makeStore(m);
+    s.schedule("/a.ts", () => "flushed", 3);
+    s.flush();
+    expect(readRec(m.map, "T1")["/a.ts"]?.text).toBe("flushed");
+    s.schedule("/b.ts", () => "moved", 4);
+    s.move("/b.ts", "/c.ts");
+    expect(readRec(m.map, "T1")).toEqual({
+      "/a.ts": { text: "flushed", baseMtimeMs: 3, stashedAt: 4242 },
+      "/c.ts": { text: "moved", baseMtimeMs: 4, stashedAt: 4242 },
+    });
+    expect(s.entryFor("/b.ts")).toBeNull();
+  });
+
+  it("plain string scheduling keeps its exact historical semantics", async () => {
+    const m = memStorage();
+    m.map.set(STASH_TAB_ID_KEY, "T1");
+    const s = makeStore(m);
+    s.schedule("/a.ts", "eager", 9);
+    await sleep(40);
+    expect(readRec(m.map, "T1")).toEqual({ "/a.ts": { text: "eager", baseMtimeMs: 9, stashedAt: 4242 } });
+  });
+});

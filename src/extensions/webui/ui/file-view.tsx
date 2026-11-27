@@ -25,7 +25,8 @@
 //   legitimately resolve to nothing until their page lands; revealLine
 //   returns false rather than guessing.
 
-import { getTokenizer, guessLangForBase, listRenderableLangs, type SyntaxRun } from "@utils/syntax/index.ts";
+import { getTokenizer, guessLangForBase, listRenderableLangs, type SyntaxRun, type SyntaxTokenizer } from "@utils/syntax/index.ts";
+import type { JsxChild } from "@utils/jsx";
 import { hasFrontmatter, tokenizeMarkdownDoc } from "@utils/syntax/markdown.ts";
 import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
 import { IconReload, IconWhitespace } from "./icons.tsx";
@@ -43,16 +44,67 @@ export function guessLang(path: string): string | undefined {
   return guessLangForBase(path.split(/[/\\]/).pop() ?? "");
 }
 
+// ── Run caches (whole-file memo + per-line) ────────────────────────────────
+// Every render (keystroke, scroll frame, viewer repaint -- including the 1 s
+// ticker) re-tokenizes the same unchanged lines. Two levels:
+//
+//  1. fileRuns memoizes the WHOLE result for (lines array, lang, tokenizer):
+//     an unchanged-content re-render (the viewer's dominant case) hits with
+//     zero work AT ANY SIZE. Edits and page appends build a fresh lines
+//     array and fall through to level 2. A lang override or a
+//     registerTokenizer swap flips the identity check and re-scans honestly.
+//
+//  2. the per-line map keys on TOKENIZER IDENTITY + line text, so typing
+//     re-tokenizes only the edited line and the runs of unchanged lines are
+//     the SAME array objects -- what lets the editor/viewer row caches bail
+//     out. Eviction is FIFO (oldest entry out, NEVER a wholesale clear): a
+//     cap clear on the first overflow makes every later render thrash again,
+//     measurably WORSE than no cache for files above the cap. The cap sits
+//     above EDIT_PAGE_LINES so one full read page of unique lines survives.
+//
+// Consumers treat runs as read-only (verified); markdown's doc-stateful pass
+// is deterministic per (array, hasFrontmatter) so memoizing it is safe too.
+const RUN_CACHE_MAX = 8192;
+const runCache = new WeakMap<SyntaxTokenizer, Map<string, SyntaxRun[]>>();
+// The no-tokenizer path (unknown/langless) still caches: a plain single run
+// per line, keyed by text, so plain files ride the same identity rule.
+const plainRuns = new Map<string, SyntaxRun[]>();
+// Level 1. The stored tokenizer identity also closes the re-registration
+// hole: a swapped scanner is a different function -> miss -> fresh runs.
+const fileRuns = new WeakMap<string[], { lang: string | undefined; tokenizer: SyntaxTokenizer | undefined; runs: SyntaxRun[][] }>();
+
+const cachedRunLookup = (cache: Map<string, SyntaxRun[]>, line: string, make: () => SyntaxRun[]): SyntaxRun[] => {
+  const hit = cache.get(line);
+  if (hit !== undefined) return hit;
+  const runs = make();
+  if (cache.size >= RUN_CACHE_MAX) {
+    // FIFO by Map insertion order: drop the oldest entry, keep the rest of
+    // the working set (a wholesale clear costs every render after it).
+    const oldest = cache.keys().next();
+    if (!oldest.done) cache.delete(oldest.value);
+  }
+  cache.set(line, runs);
+  return runs;
+};
+
 /** Tokenize one line; unknown/absent lang (or a tokenizer-less line) means
- *  one plain run -- the registry contract, never a failure. */
+ *  one plain run -- the registry contract, never a failure. Identical lines
+ *  re-tokenize from the cache (same array identity; see above). */
 export function tokenizeLine(line: string, lang: string | undefined): SyntaxRun[] {
   const tokenizer = lang !== undefined ? getTokenizer(lang) : undefined;
-  if (!tokenizer) return [{ type: "default", text: line }];
-  try {
-    return tokenizer(line);
-  } catch {
-    return [{ type: "default", text: line }];
+  if (!tokenizer) return cachedRunLookup(plainRuns, line, () => [{ type: "default", text: line }]);
+  let byText = runCache.get(tokenizer);
+  if (byText === undefined) {
+    byText = new Map();
+    runCache.set(tokenizer, byText);
   }
+  return cachedRunLookup(byText, line, () => {
+    try {
+      return tokenizer(line);
+    } catch {
+      return [{ type: "default", text: line }];
+    }
+  });
 }
 
 /**
@@ -67,8 +119,15 @@ export function tokenizeLine(line: string, lang: string | undefined): SyntaxRun[
  * path exactly as before.
  */
 export function tokenizeFileLines(lines: string[], lang: string | undefined): SyntaxRun[][] {
-  if (lang === "markdown") return tokenizeMarkdownDoc(lines, hasFrontmatter(lines));
-  return lines.map((line) => tokenizeLine(line, lang));
+  const tokenizer = lang !== undefined ? getTokenizer(lang) : undefined;
+  const hit = fileRuns.get(lines);
+  if (hit !== undefined && hit.lang === lang && hit.tokenizer === tokenizer) return hit.runs;
+  const runs =
+    lang === "markdown"
+      ? tokenizeMarkdownDoc(lines, hasFrontmatter(lines))
+      : lines.map((line) => tokenizeLine(line, lang));
+  fileRuns.set(lines, { lang, tokenizer, runs });
+  return runs;
 }
 
 // ── Pure state ───────────────────────────────────────────────────────────────
@@ -334,16 +393,42 @@ export function langLabel(lang: string): string {
   return lang.charAt(0).toUpperCase() + lang.slice(1);
 }
 
-function LineRow({ n, text, runs, showWs }: { n: number; text: string; runs: SyntaxRun[]; showWs?: boolean }) {
-  return (
-    <div className="file-line" data-line={n}>
+// The viewer rebuilds every loaded row on every app re-render (chat
+// streams tickle the whole page). A row's DOM is pure (n, text, runs,
+// showWs), so identical inputs return the IDENTICAL vnode object -- the
+// diff bails out of the whole subtree (docs/agents/jsx.md). Keyed on the
+// runs array (the run caches make unchanged lines identity-stable; a
+// re-tokenized line is a new key and a fresh build). Bounded per runs
+// array with FIFO eviction -- many identical lines (blank stretches) all
+// share ONE runs array, so the inner map grows with the line count, and a
+// wholesale clear would rebuild every of them on every later render.
+const VIEWER_ROW_CACHE_MAX = 65536;
+const viewerRowCache = new WeakMap<SyntaxRun[], Map<number, { text: string; showWs: boolean; node: JsxChild }>>();
+
+function LineRow({ n, text, runs, showWs }: { n: number; text: string; runs: SyntaxRun[]; showWs?: boolean }): JsxChild {
+  const ws = showWs === true;
+  let byLine = viewerRowCache.get(runs);
+  if (byLine === undefined) {
+    byLine = new Map();
+    viewerRowCache.set(runs, byLine);
+  }
+  const hit = byLine.get(n);
+  if (hit !== undefined && hit.text === text && hit.showWs === ws) return hit.node;
+  const node: JsxChild = (
+    <div key={n} className="file-line" data-line={n}>
       <span className="file-ln" aria-hidden="true">{n}</span>
       <code className="file-code">
-        {codeSpans(runs, showWs === true, text)}
+        {codeSpans(runs, ws, text)}
         {text === "" ? "\u00a0" : null}
       </code>
     </div>
   );
+  if (byLine.size >= VIEWER_ROW_CACHE_MAX) {
+    const oldest = byLine.keys().next();
+    if (!oldest.done) byLine.delete(oldest.value);
+  }
+  byLine.set(n, { text, showWs: ws, node });
+  return node;
 }
 
 export function FileView(p: FileViewProps) {

@@ -24,6 +24,7 @@ import {
   type FileViewsState,
 } from "@extensions/webui/ui/file-view.tsx";
 import { FileEditor } from "@extensions/webui/ui/editor.tsx";
+import { getTokenizer, registerTokenizer } from "@utils/syntax/index.ts";
 import { bufferFromContent, type EditorSession } from "@extensions/webui/ui/editor-buffer.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
 
@@ -678,3 +679,145 @@ describe("editor foot bar syntax chooser", () => {
     ]);
   });
 });
+
+// ── Per-line run cache (the tokenize seam) ──────────────────────────────────
+// The cache keys on TOKENIZER IDENTITY and line text: repeated renders
+// (every keystroke, every scroll frame, every app tick) reuse unchanged
+// lines by reference, which is what makes the row vnode caches bail out.
+// The pins: incremental output is byte-identical to full tokenization,
+// unchanged lines are identity-stable, and a re-registered scanner can
+// never read stale runs.
+
+describe("tokenize run cache", () => {
+  it("re-tokenized windows return identity-stable runs; incremental output equals the full pass", () => {
+    const lines = ["const a = 1;", "// comment line", "if (x) {", "", "return a;"];
+    const full = tokenizeFileLines(lines, "typescript");
+    const again = tokenizeFileLines(lines, "typescript");
+    for (let i = 0; i < lines.length; i++) expect(again[i]).toBe(full[i]);
+    // A typed keystroke re-tokenizes only the visible window; the runs must
+    // be the SAME arrays the full pass produced (identity) and must still
+    // concatenate back to the line bytes exactly.
+    const win = tokenizeFileLines(lines.slice(1, 4), "typescript");
+    expect(win.map((r) => r.map((run) => run.text).join(""))).toEqual(lines.slice(1, 4));
+    for (let i = 0; i < win.length; i++) expect(win[i]).toBe(full[i + 1]);
+  });
+
+  it("the no-tokenizer path caches plain runs by text too (identity-stable, lossless)", () => {
+    const a = tokenizeLine("just text", undefined);
+    expect(tokenizeLine("just text", undefined)).toBe(a);
+    expect(a).toEqual([{ type: "default", text: "just text" }]);
+  });
+
+  it("the cache keys on tokenizer identity: a re-registered scanner never reads stale runs", () => {
+    const orig = getTokenizer("shell");
+    expect(orig).toBeDefined();
+    const before = tokenizeLine("echo one", "shell");
+    registerTokenizer("shell", (t) => [{ type: "swapped", text: t }]);
+    expect(tokenizeLine("echo one", "shell")).toEqual([{ type: "swapped", text: "echo one" }]);
+    registerTokenizer("shell", orig!); // restore the exact function identity
+    expect(tokenizeLine("echo one", "shell")).toBe(before);
+  });
+
+  it("markdown keeps its doc-stateful pass (content-equal across calls, cache is not its path)", () => {
+    const doc = ["---", "title: x", "---", "body"];
+    const first = tokenizeFileLines(doc, "markdown");
+    const second = tokenizeFileLines(doc, "markdown");
+    expect(second.map((r) => r.map((run) => run.text).join(""))).toEqual(doc);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+});
+
+// ── Viewer row vnode cache ───────────────────────────────────────────────────
+// The viewer re-renders with the whole App (stream frames, the 1 s ticker).
+// Unchanged rows must reuse their vnode (the diff bails out of the subtree),
+// the DOM must stay byte-identical to a fresh full mount, and a changed
+// line must rebuild exactly its own row.
+
+describe("viewer row vnode cache", () => {
+  const page = (content: string) => {
+    const { state } = openFileView(emptyFileViews(), PATH);
+    return applyReadFile(state, 1, {
+      type: "readFileResult",
+      requestId: 1,
+      path: PATH,
+      offset: 0,
+      content,
+    }).views[PATH];
+  };
+
+  it("re-render reuses unchanged row nodes and equals a fresh mount; a changed line rebuilds its row only", () => {
+    const content = "echo one\necho two\necho three\n\nlast\n";
+    const view = page(content);
+    const host = document.createElement("div");
+    current = mount(
+      <FileView path={PATH} view={view} onReload={noop} onMore={noop} />,
+      host as unknown as DomNode,
+    );
+    const rowOf = (n: number) => host.querySelector(`.file-line[data-line="${n}"]`);
+    const row2 = rowOf(2);
+    const row4 = rowOf(4);
+    expect(row2).not.toBeNull();
+    // Same view entry, fresh props object: every row must survive untouched.
+    current.render(<FileView path={PATH} view={view} onReload={noop} onMore={noop} />);
+    expect(rowOf(2)).toBe(row2);
+    expect(rowOf(4)).toBe(row4);
+
+    // Change line 4 (was the empty one): the result must match a
+    // from-scratch mount of the new content exactly.
+    const view2 = page("echo one\necho two\necho three\nfilled in\nlast\n");
+    current.render(<FileView path={PATH} view={view2} onReload={noop} onMore={noop} />);
+    expect(rowOf(2)).toBe(row2);
+    expect(text(rowOf(4)!)).toContain("filled in");
+
+    const refHost = document.createElement("div");
+    const refMount = mount(
+      <FileView path={PATH} view={view2} onReload={noop} onMore={noop} />,
+      refHost as unknown as DomNode,
+    );
+    expect(host.innerHTML).toBe(refHost.innerHTML);
+    refMount.unmount();
+  });
+});
+
+  it("large unique files keep cache identity past the old 4096 overflow zone (whole-array memo)", () => {
+    // The 1 s ticker re-renders the SAME lines array: even with more unique
+    // lines than any per-line cap, a repeat pass must return the SAME runs
+    // arrays (a wholesale cache clear made this re-tokenize every line and
+    // rebuilt every row -- slower than the cache-less baseline).
+    const lines = Array.from({ length: 9000 }, (_, i) => "const v" + i + " = f(" + i + ");");
+    const first = tokenizeFileLines(lines, "typescript");
+    const second = tokenizeFileLines(lines, "typescript");
+    expect(second).toBe(first);
+    expect(second[0]).toBe(first[0]); // evicted deep in the first pass, still stable
+    expect(second[8999]).toBe(first[8999]);
+  });
+
+  it("per-line cache overflow evicts ONE entry (FIFO), never the working set, and stays lossless", () => {
+    const lines = Array.from({ length: 8200 }, (_, i) => "plain " + i);
+    for (const line of lines) tokenizeLine(line, undefined);
+    // Past the cap the oldest entry may be gone, but every line re-tokens
+    // to the contract-identical runs (content equality, losslessness).
+    for (const line of lines) {
+      expect(tokenizeLine(line, undefined)).toEqual([{ type: "default", text: line }]);
+    }
+  });
+
+  it("viewer re-render of a 4500-line UNIQUE file preserves row nodes (ticker scenario past the old cap)", () => {
+    const content = Array.from({ length: 4500 }, (_, i) => "echo " + i + " // unique").join(String.fromCharCode(10)) + String.fromCharCode(10);
+    const { state } = openFileView(emptyFileViews(), PATH);
+    const view = applyReadFile(state, 1, {
+      type: "readFileResult",
+      requestId: 1,
+      path: PATH,
+      offset: 0,
+      content,
+    }).views[PATH];
+    const host = document.createElement("div");
+    current = mount(<FileView path={PATH} view={view} onReload={noop} onMore={noop} />, host as unknown as DomNode);
+    const row4200 = host.querySelector(`.file-line[data-line="4200"]`);
+    const last = host.querySelector(`.file-line[data-line="4500"]`);
+    expect(row4200).not.toBeNull();
+    current.render(<FileView path={PATH} view={view} onReload={noop} onMore={noop} />);
+    expect(host.querySelector(`.file-line[data-line="4200"]`)).toBe(row4200);
+    expect(host.querySelector(`.file-line[data-line="4500"]`)).toBe(last);
+  });

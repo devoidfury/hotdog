@@ -1968,7 +1968,7 @@ function setSession(path: string, next: EditorSession): void {
   // buffer going clean clears its record NOW, so a stale stash can never
   // outlive the save/undo that made it false. saveFile success lands here
   // (the session flips clean), which is why there is no separate clear.
-  if (next.buffer.dirty) editorStash.schedule(path, contentOf(next.buffer), next.baseMtimeMs);
+  if (next.buffer.dirty) editorStash.schedule(path, () => contentOf(next.buffer), next.baseMtimeMs);
   else editorStash.clear(path);
 }
 
@@ -2243,6 +2243,16 @@ function requestSave(path: string): void {
  *  session was dropped exactly because the buffer is gone. */
 function onEditorCommit(path: string, next: EditorSession): void {
   if (editorSessionsAtom()[path] === undefined) return;
+  // VIEW-ONLY poke: the session is the SAME object (scroll windowing, the
+  // goto/find strip repaints, the webfont repaint). The map spread, the
+  // tab-dot mirror and the stash schedule all key on session CONTENT --
+  // an identical session changes none of them (a scroll rescheduling the
+  // stash debounce was actively delaying the write). Schedule the render
+  // the windowed slice needs and stop.
+  if (editorSessionsAtom()[path] === next) {
+    render();
+    return;
+  }
   setSession(path, next);
 }
 

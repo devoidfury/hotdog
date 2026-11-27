@@ -97,6 +97,24 @@ export function findMatches(lines: string[], query: string, opts: FindOptions): 
     return { ok: false, error: `Invalid regular expression: ${e instanceof Error ? e.message : String(e)}` };
   }
   const matches: FindMatch[] = [];
+  if (!opts.regex && opts.caseSensitive) {
+    // Literal + exact case: the escaped-literal matchAll below is exactly a
+    // non-overlapping left-to-right indexOf walk, so ride indexOf directly
+    // (no per-line iterator, no per-match array). Case-INSENSITIVE stays on
+    // the regex path -- lowercasing drifts the columns under special case
+    // folding (the doctrine noted up top). Whole-word is the same boundary
+    // filter on the matched span's neighbours.
+    const step = query.length;
+    for (let line = 0; line < lines.length; line++) {
+      const text = lines[line]!;
+      for (let from = text.indexOf(query); from >= 0; from = text.indexOf(query, from + step)) {
+        const to = from + step;
+        if (opts.wholeWord && !wholeWordOk(text, from, to)) continue;
+        matches.push({ line, from, to });
+      }
+    }
+    return { ok: true, matches };
+  }
   for (let line = 0; line < lines.length; line++) {
     const text = lines[line]!;
     // matchAll never mutates the source regex's lastIndex, so every line

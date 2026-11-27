@@ -90,7 +90,7 @@
 
     /* Background layers -- warm, hue ~27 */
     --bg-canvas: #0f0e0d;
-    --bg-surface-1: #12100c;
+    --bg-surface-1: #131110;
     --bg-surface-2: #211b17;
     --bg-surface-3: #26221e;
     --bg-surface-4: #302b26;
@@ -1343,7 +1343,6 @@ body.logs-resizing .sidebar-header-resize {
     gap: 8px;
     min-width: 0;
     padding: 4px 6px;
-    border-bottom: 1px solid var(--border);
     font-size: 0.975rem;
     flex-shrink: 0;
 }

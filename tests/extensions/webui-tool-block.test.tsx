@@ -475,10 +475,12 @@ describe("auto-expand (owner ruling 2026-11-05)", () => {
     expect(at20.block.querySelector(".tool-box-fold-toggle")!.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("empty output stays closed; a past-cap one-line blob stays closed and still toggles", () => {
+  it("empty output shows only the summary line; a past-cap one-line blob stays closed and still toggles", () => {
     const empty = mountBlock({ name: "touch", args: "{}" });
     empty.ctrl.setResult({ output: "" });
-    expect(empty.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(true);
+    expect(empty.block.querySelector(".tool-box-summary")!.textContent).toContain("0 lines");
+    expect(empty.block.querySelector(".tool-result-pre")).toBeNull();
+    expect(empty.block.querySelector(".tool-box-fold-toggle")).toBeNull();
 
     const blob = mountBlock({ name: "blob", args: "{}" });
     blob.ctrl.setResult({ output: "x".repeat(RESULT_PREVIEW_CHARS + 1) });
@@ -487,6 +489,18 @@ describe("auto-expand (owner ruling 2026-11-05)", () => {
     expect(blob.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(false);
     expect(blob.block.querySelector(".tool-result-pre")!.textContent).toContain("more chars");
     expect(blob.block.querySelector(".tool-box-fold-toggle")!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("a result under 12 lines shows in full with no fold toggle; at 12 the toggle returns", () => {
+    const short = mountBlock({ name: "ls", args: "{}" });
+    short.ctrl.setResult({ output: "a\nb\nc" });
+    expect(short.block.querySelector(".tool-result-pre")!.textContent).toBe("a\nb\nc");
+    expect(short.block.querySelector(".tool-result-pre")!.classList.contains("result-folded")).toBe(false);
+    expect(short.block.querySelector(".tool-box-fold-toggle")).toBeNull();
+
+    const at12 = mountBlock({ name: "ls", args: "{}" });
+    at12.ctrl.setResult({ output: Array.from({ length: 12 }, (_, i) => `${i + 1}`).join("\n") });
+    expect(at12.block.querySelector(".tool-box-fold-toggle")!.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("a result-sourced file body under 20 lines is open on arrival; the foot toggle collapses it to a clamp", () => {

@@ -101,6 +101,11 @@ export const FOLD_PREVIEW_CHARS = 2_000;
  *  one-line giant is a blob, and a collapsed summary is its lazy face.
  *  A user toggle is always the explicit override in both directions. */
 export const AUTO_EXPAND_MAX_LINES = 20;
+/** Results under this many lines show in full with NO fold toggle: the
+ *  whole body is already on screen, so there is nothing to expand.
+ *  Past-cap blobs never qualify (their preview is a lie without the
+ *  toggle), and the 12..19-line band keeps its auto-open + toggle. */
+export const RESULT_NO_FOLD_MAX_LINES = 12;
 const underAutoExpand = (text: string): boolean =>
   text !== "" &&
   text.length <= RESULT_PREVIEW_CHARS &&
@@ -767,7 +772,12 @@ export function ToolBlock({ state, onShowFull, onToggleBox, onUnfold, onToggleEn
   const showGenericBox = result !== undefined && !consumed;
   const resultText = result ? (result.error ? `Error: ${result.error}` : result.output ?? "") : "";
   const truncated = !state.fullResult && resultText.length > RESULT_PREVIEW_CHARS;
-  const boxOpen = state.boxes["g"] ?? underAutoExpand(resultText);
+  // Short results are fully on screen: no clamp, no toggle.
+  const noFold =
+    !truncated &&
+    resultText !== "" &&
+    resultText.split("\n").length < RESULT_NO_FOLD_MAX_LINES;
+  const boxOpen = noFold || (state.boxes["g"] ?? underAutoExpand(resultText));
 
   const parts = resolved.map((r, i) => (
     <Part
@@ -783,28 +793,36 @@ export function ToolBlock({ state, onShowFull, onToggleBox, onUnfold, onToggleEn
   const genericBox = showGenericBox ? (
     <div className={"tool-result-box" + (status === "error" ? " tool-result-error" : "")}>
       <div className="tool-box-summary">{genericResultSummary(result)}</div>
-      {/* The body always renders; collapsed it clamps to its first lines
-          (the user-prompt fold grammar). The foot row is the toggle. */}
-      <pre className={"tool-result-pre" + (boxOpen ? "" : " result-folded")}>
-        {truncated
-          ? resultText.slice(0, RESULT_PREVIEW_CHARS) +
-            `\n\n… ${resultText.length - RESULT_PREVIEW_CHARS} more chars`
-          : resultText}
-      </pre>
-      {truncated && boxOpen ? (
-        <button type="button" className="tool-raw-toggle" onClick={onShowFull}>
-          show full result
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className="tool-box-fold-toggle"
-        aria-expanded={boxOpen ? "true" : "false"}
-        aria-label={boxOpen ? "Collapse result" : "Expand result"}
-        onClick={() => onToggleBox("g", boxOpen)}
-      >
-        <IconChevron className="fold-chevron" />
-      </button>
+      {/* Zero-content result is just the summary line: no empty body,
+          no fold affordance over nothing. */}
+      {resultText.trim() === "" ? null : (
+        <>
+          {/* The body always renders; collapsed it clamps to its first lines
+              (the user-prompt fold grammar). The foot row is the toggle. */}
+          <pre className={"tool-result-pre" + (boxOpen ? "" : " result-folded")}>
+            {truncated
+              ? resultText.slice(0, RESULT_PREVIEW_CHARS) +
+                `\n\n… ${resultText.length - RESULT_PREVIEW_CHARS} more chars`
+              : resultText}
+          </pre>
+          {truncated && boxOpen ? (
+            <button type="button" className="tool-raw-toggle" onClick={onShowFull}>
+              show full result
+            </button>
+          ) : null}
+          {noFold ? null : (
+            <button
+              type="button"
+              className="tool-box-fold-toggle"
+              aria-expanded={boxOpen ? "true" : "false"}
+              aria-label={boxOpen ? "Collapse result" : "Expand result"}
+              onClick={() => onToggleBox("g", boxOpen)}
+            >
+              <IconChevron className="fold-chevron" />
+            </button>
+          )}
+        </>
+      )}
     </div>
   ) : null;
 

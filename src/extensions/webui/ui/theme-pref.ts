@@ -104,7 +104,7 @@ export const THEME_REGISTRY: WebUITheme[] = [
     builtIn: true,
     colors: {
       "--bg-canvas": "#0f0e0d",
-      "--bg-surface-1": "#12100c",
+      "--bg-surface-1": "#131110",
       "--bg-surface-2": "#211b17",
       "--bg-surface-3": "#26221e",
       "--bg-surface-4": "#302b26",

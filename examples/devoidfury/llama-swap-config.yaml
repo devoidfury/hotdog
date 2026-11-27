@@ -60,6 +60,26 @@ models:
         - text
       tools: true
       context: 262144
+  flint-40b-a2b:
+    cmd: |
+      ${llama-server}
+      -m ${models}/flint-40b-a2b/flint-Q8_0.gguf
+      -np 1
+      --kv-unified-per-slot 262144
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+    metadata:
+      max_tool_difficulty: 3
+    filters:
+      setParams:
+        temperature: 1.0
+        top_p: 0.95
+        top_k: 20
   glm4.7-flash:
     cmd: |
       ${llama-server}
@@ -239,6 +259,32 @@ models:
         temperature: 0.2
         top_k: 80
         repetition_penalty: 1.05
+  lfm2.5-24b-a2b:
+    cmd: |
+      ${llama-server}
+      -m ${models}/lfm2.5-24b-a2b/LFM2.5-24B-A2B-Q8_0.gguf
+      --spec-type draft-dspark
+      --spec-draft-n-max 9
+      --spec-draft-n-min 0
+      --spec-draft-model ${models}/lfm2.5-24b-a2b/LFM2.5-24B-A2B-DSpark-F16.gguf
+      --n-gpu-layers-draft 99
+      --ctx-size 131072
+      -np 1
+      --warmup
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 131072
+    metadata:
+      max_tool_difficulty: 3
+    filters:
+      setParams:
+        temperature: 0.1
+        top_k: 50
+        repetition_penalty: 1.05
   minimax-m2.7:
     cmd: |
       ${llama-server}
@@ -297,6 +343,28 @@ models:
         "${MODEL_ID}:high":
           chat_template_kwargs:
             reasoning_strength: "high"
+  nanbeige4.3-33b:
+    cmd: |
+      ${llama-server}
+      -m ${models}/nanbeige4.3-33b/Nanbeige4.3-33B-Q8_0.gguf
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --kv-unified-per-slot 393216
+    # --kv-unified-per-slot 524288
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 393216
+    metadata:
+      max_tool_difficulty: 4
+    filters:
+      setParams:
+        temperature: 1.0
+        top_p: 0.95
   nemotron-3-nano-30b-a3b:
     cmd: |
       ${llama-server}
@@ -387,26 +455,6 @@ models:
           temperature: 1.0
           chat_template_kwargs:
             enable_thinking: false
-  ornith-1.0-9b:
-    cmd: |
-      ${llama-server}
-      -m ${models}/ornith-1.0-9b/ornith-1.0-9b-Q8_0.gguf
-      -b 1024
-      -ub 1024
-      --spec-type ngram-mod
-      ${spec-ngram}
-      -np 1
-      --checkpoint-min-step 512
-      --ctx-checkpoints 20
-    metadata:
-      max_tool_difficulty: 2
-    filters:
-      setParams:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        chat_template_kwargs:
-          enable_thinking: true
   qwen3.6-35b-unc:
     cmd: |
       ${qwen-server}
@@ -581,35 +629,23 @@ models:
           presence_penalty: 0.0
           chat_template_kwargs:
             enable_thinking: true
-  qwen3.5-0.8b:
+  spark-x2.6-4b:
     cmd: |
-      ${qwen-server}
-      -m ${models}/qwen3.5-0.8b/Qwen3.5-0.8B-BF16.gguf
-      -b 1024
-      -ub 1024
-      -np 1
-      --ctx-size 262144
-      --no-mmproj
+      ${llama-server}
+      -m /storage/models/spark-x2.6-4b/Spark-X2.6-4B-Q8_0.gguf
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 2
+      --ctx-size 1048576
+      --ctx-checkpoints 10
+      --checkpoint-min-step 4096
     capabilities:
       in:
         - text
       out:
         - text
       tools: true
-      context: 262144
-    metadata:
-      max_tool_difficulty: 1
-    filters:
-      setParams:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 0.0
-        repeat_penalty: 1.0
-        chat_template_kwargs:
-          enable_thinking: true
-          preserve_thinking: true
+      context: 1048576
   supratitle-350M-exp:
     cmd: |
       ${llama-server}
@@ -664,8 +700,6 @@ matrix:
     b: supratitle-350M-exp
     c: qwen3.8-27b
     d: qwen3.8-flash-next
-    e: qwen3.5-0.8b
-    g: qwen3.5-4b
     i: qwen3.6-35b-unc
     k: glm4.7-flash
     l: lfm2.5-8b-a1b
@@ -693,7 +727,7 @@ matrix:
   #   "+llms & v"          → expands llms inline, then applies & v
   sets:
     stt: v
-    tiny: e | g | l | b
+    tiny: l | b
     fast: (+tiny) | u | s
     medium: c | t | k | i | w | n | o
     large: (+medium) & (+stt)

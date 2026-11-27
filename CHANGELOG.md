@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **interactive CLI - `/sessions` is a session browser now.** On the split renderer it opens an interactive picker over live sessions and stored logs; every other surface keeps the plain-text `/sessions` list.
+
+- **interactive CLI - the split renderer's status row follows the session.** It was subscribed to the session the process booted with, so after `/fork` (and now a `/sessions` resume) the working edge, in-flight call rows and queue chip stopped arriving while the abandoned session's cost and context numbers kept painting under the new session. The subscription re-targets on every swap and takes the old session's numbers down with it.
+
 - **webui - the palette button opens a full theme editor.** Clicking it no longer cycles two built-in palettes; it opens a dialog (settings-style): a strip of small live swatch previews of the built-in and saved themes up top.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.17.0...main

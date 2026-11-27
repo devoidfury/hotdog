@@ -220,3 +220,75 @@ describe("handleSlashCommand — fork re-attach", () => {
     expect(touched).toBe(0);
   });
 });
+
+describe("handleSlashCommand — channel commands", () => {
+  // /sessions, /attach, /detach and /switch live on the Channel, not in the
+  // agent's command registry: they must reach Channel.handleChannelCommand
+  // and never sessionManager.executeCommand.
+  function channelDouble(rejectWith?: Error) {
+    const calls: string[] = [];
+    const channel = {
+      handleChannelCommand: async (text: string) => {
+        calls.push(text);
+        if (rejectWith) throw rejectWith;
+      },
+      // Any registry delegation at all shows up here.
+      attach: () => calls.push("REGISTRY-LEAK"),
+    };
+    return { calls, channel: channel as any };
+  }
+
+  function managerDouble(executed: string[]) {
+    return {
+      sessionId: () => "test-session",
+      executeCommand: async (_id: string, cmd: string) => {
+        executed.push(cmd);
+        return 0;
+      },
+    } as any;
+  }
+
+  it("routes all four channel commands to the Channel handler, not the registry", async () => {
+    const { calls, channel } = channelDouble();
+    const executed: string[] = [];
+    const { rl } = createMockRl();
+
+    for (const cmd of ["sessions", "attach abc", "detach abc", "switch abc"]) {
+      handleSlashCommand(cmd, managerDouble(executed), channel, rl as any, () => {});
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    expect(calls).toEqual(["sessions", "attach abc", "detach abc", "switch abc"]);
+    expect(executed).toEqual([]);
+  });
+
+  it("redraws the prompt once the (async) command settles", async () => {
+    const { channel } = channelDouble();
+    const { rl } = createMockRl();
+    let prompted = 0;
+    (rl as any).prompt = () => { prompted++; };
+
+    handleSlashCommand("sessions", managerDouble([]), channel, rl as any, () => {});
+    await new Promise((r) => setTimeout(r, 10));
+    expect(prompted).toBe(1);
+  });
+
+  it("a rejecting channel command lands on the transcript, never an unhandled rejection", async () => {
+    const { channel } = channelDouble(new Error("index unreadable"));
+    const { rl } = createMockRl();
+    let prompted = 0;
+    let printed = "";
+    (rl as any).prompt = () => { prompted++; };
+    const originalLog = console.log;
+    console.log = (...args) => { printed += args.join(" "); };
+    try {
+      handleSlashCommand("sessions", managerDouble([]), channel, rl as any, () => {});
+      await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      console.log = originalLog;
+    }
+    expect(printed).toContain("Command failed");
+    expect(printed).toContain("index unreadable");
+    // The prompt comes back even on the failure path.
+    expect(prompted).toBe(1);
+  });
+});

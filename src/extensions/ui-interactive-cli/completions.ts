@@ -5,6 +5,10 @@ import {
   parseCompletionContext,
   completionPrefix,
 } from "@core/completion.ts";
+import {
+  CHANNEL_COMMAND_NAMES,
+  CHANNEL_ARG_COMMANDS,
+} from "@core/channel.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 import type { SessionManager } from "@core/session/index.ts";
 import type { Completion, EditorView } from "@utils/cli/renderer/index.ts";
@@ -134,6 +138,35 @@ export function registerFenceCompletion(
         .map((a) => ({ value: a }));
     },
     "ui-interactive-cli:fence",
+  );
+}
+
+/**
+ * Channel command-name completion (/sessions, /attach, /switch, /detach,
+ * /quit, /help). Channel handles these itself and they never reach the
+ * agent's command registry, so registerSlashCommandNameCompletion cannot
+ * offer them. Argument-taking commands complete with a trailing space so
+ * the cursor lands on the id.
+ */
+export function registerChannelCommandCompletion(
+  completionService: CoreContext["completion"],
+): void {
+  completionService.register(
+    (ctx: CompletionContext) => {
+      // Same span rule as command-name completion: only while typing the
+      // command word itself, before the first space.
+      const text = ctx.line.slice(0, ctx.cursorPos).trimStart();
+      return text.startsWith("/") && !text.slice(1).includes(" ");
+    },
+    (ctx: CompletionContext) => {
+      const prefix = ctx.line.slice(0, ctx.cursorPos).trimStart().toLowerCase();
+      return CHANNEL_COMMAND_NAMES.filter((name) =>
+        `/${name}`.startsWith(prefix),
+      ).map((name) => ({
+        value: CHANNEL_ARG_COMMANDS.includes(name) ? `/${name} ` : `/${name}`,
+      }));
+    },
+    "ui-interactive-cli:channel-commands",
   );
 }
 

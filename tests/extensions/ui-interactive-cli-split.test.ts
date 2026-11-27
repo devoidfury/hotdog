@@ -1218,9 +1218,14 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
     execute: [] as string[],
     interrupt: 0,
   };
-  // Session-event fan-out stub: stores handlers so tests can fire bus
-  // events (SESSION_STATE/QUEUE_UPDATE/...) at the status glue.
-  const sessionHandlers: Array<(ev: unknown) => void> = [];
+  // Session-event fan-out stub: handlers keyed by the session id they were
+  // subscribed to, so tests can fire bus events (SESSION_STATE/
+  // QUEUE_UPDATE/...) at the status glue AND prove WHERE the glue is
+  // subscribed (the chrome re-attaches on a session swap; see the swap test).
+  const handlersById = new Map<string, Array<(ev: unknown) => void>>();
+  // Mutable "current session": a swap test moves it, and every seam the
+  // session layer exposes reads it live (sessionId(), getSessionInfo()).
+  const current = { id: "test-session" };
   // The current agent's context: the status row's #N reads the visible index
   // off it, so wiring tests push plain entries and echo the events.
   const messages: Array<Record<string, unknown>> = [];
@@ -1230,20 +1235,24 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
     modelRegistry: {},
     getMessages: () => messages.map((m) => ({ ...m })),
   };
+  const running = { value: false };
   const sm = {
     getAgent: () => agent,
-    sessionId: () => "test-session",
+    sessionId: () => current.id,
+    isSessionRunning: () => running.value,
     getBus: () => ({ run: async () => {} }),
     getTaskManager: () => null,
     executeCommand: async (_id: string, cmdText: string) => {
       calls.execute.push(cmdText);
       return undefined;
     },
-    onSessionEvents: (_id: string, handler: (ev: unknown) => void) => {
-      sessionHandlers.push(handler);
+    onSessionEvents: (id: string, handler: (ev: unknown) => void) => {
+      const list = handlersById.get(id) ?? [];
+      list.push(handler);
+      handlersById.set(id, list);
       return () => {
-        const i = sessionHandlers.indexOf(handler);
-        if (i >= 0) sessionHandlers.splice(i, 1);
+        const i = list.indexOf(handler);
+        if (i >= 0) list.splice(i, 1);
       };
     },
     interrupt: () => {
@@ -1293,11 +1302,18 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
     clock.advance(20);
     clock.runImmediates();
   };
-  const emitEvent = (ev: unknown): void => {
-    for (const h of [...sessionHandlers]) h(ev);
+  const emitTo = (id: string, ev: unknown): void => {
+    for (const h of [...(handlersById.get(id) ?? [])]) h(ev);
     settle();
   };
-  return { term, clock, sig, bridge, keys, calls, done, screenRows, count, emitEvent, settle, messages, agent };
+  /** Fire at whichever session is current (what the real bus does). */
+  const emitEvent = (ev: unknown): void => emitTo(current.id, ev);
+  return {
+    term, clock, sig, bridge, keys, calls, done, screenRows, count, emitEvent, emitTo, settle,
+    messages, agent, current, running,
+    /** Where the session layer is subscribed: the chrome follows a swap. */
+    handlersFor: (id: string) => handlersById.get(id) ?? [],
+  };
 }
 
 /** Run fn with process.exit stubbed (same pattern as the legacy suite). */
@@ -3266,3 +3282,74 @@ describe("stream reset through the session event glue (mid-stream retry, H-3)", 
 function bridgeTranscript(rig: { bridge: OutputBridge }): string {
   return rig.bridge.transcriptLog.join("\n");
 }
+
+describe("session frame: the chrome follows a session swap", () => {
+  // /fork and a /sessions cold resume both move the manager's current session
+  // to a fresh id. The status row, the in-flight rows and the queue chip ride
+  // a PER-SESSION subscription, so the swap has to re-attach it: staying on
+  // the boot id strands the new session's events and leaves the abandoned
+  // session's cost/ctx painting under a session that never attested them.
+  function hookRecorder() {
+    const handlers = new Map<string, Array<(payload: unknown) => unknown>>();
+    return {
+      hooks: {
+        on: (name: string, fn: (payload: unknown) => unknown) => {
+          const list = handlers.get(name) ?? [];
+          list.push(fn);
+          handlers.set(name, list);
+        },
+        notifyHooks: () => {},
+      },
+      fire: (name: string) => {
+        for (const fn of handlers.get(name) ?? []) fn({});
+      },
+    };
+  }
+
+  const usageFrame = {
+    type: OUTPUT_EVENT.TOKEN_USAGE,
+    sessionPromptTokens: 2_000_000,
+    sessionCachedTokens: 0,
+    sessionCompletionTokens: 0,
+    sessionTotalTokens: 2_000_000,
+    turns: 1,
+    promptTokens: 45_000,
+    cachedTokens: 0,
+    completionTokens: 120,
+    totalTokens: 45_120,
+    contextWindow: 200_000,
+    durationMs: 4_200,
+  };
+
+  it("re-attaches to the swapped-in session and retires the abandoned one", async () => {
+    const rec = hookRecorder();
+    const rig = makeSessionRig({
+      hooks: rec.hooks,
+      resolvedExtra: { modelPricing: { "test-model": { input: 10, output: 20 } } },
+    });
+    await rig.done;
+    const status = () => rig.screenRows().filter((r) => r.includes("·"));
+
+    // The boot session attests a turn: working, the ctx pair, a priced cost.
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    rig.emitEvent(usageFrame);
+    expect(status()).toEqual(["working · 00:00 · 45k/200k · 4.2s · $20.00"]);
+
+    // The swap: the manager's current id moves, then SESSION_SWAP fires.
+    rig.current.id = "swapped-in";
+    rec.fire(HOOKS.SESSION_SWAP);
+    rig.settle();
+
+    // The abandoned session's attested numbers left the row with it: no cost,
+    // no ctx gauge, no settled clock -- nothing the new session claimed.
+    expect(status()).toEqual([]);
+
+    // The new session drives the row; the old id's events no longer do.
+    rig.emitTo("test-session", { type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    expect(status()).toEqual([]);
+    rig.emitTo("swapped-in", { type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    expect(status()).toEqual(["working · 00:00"]);
+    rig.emitTo("swapped-in", usageFrame);
+    expect(status()).toEqual(["working · 00:00 · 45k/200k · 4.2s · $20.00"]);
+  });
+});

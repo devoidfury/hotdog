@@ -69,6 +69,16 @@ export class EditorView {
    */
   pasteHandler: ((text: string) => void) | null = null;
 
+  /**
+   * Input overlay (the session browser mounts one): while set, EVERY key
+   * event -- text, paste, and keys alike -- routes to the overlay instead of
+   * the editor's key map, so the line editor's buffer, history, and popup
+   * are untouched (the half-typed draft survives byte-exact for when the
+   * overlay closes itself). The overlay never paints from here; the bridge
+   * composes its rows through setListPicker.
+   */
+  overlay: ((e: KeyEvent) => void) | null = null;
+
   constructor(opts: EditorViewOptions = {}) {
     this.editor = new LineEditor();
     this.popup = new Popup();
@@ -150,6 +160,10 @@ export class EditorView {
   // ── key handling ───────────────────────────────────────────────────────
 
   feedKey(e: KeyEvent): void {
+    if (this.overlay) {
+      this.overlay(e);
+      return;
+    }
     if (e.kind === "text") {
       if (e.text === "") return;
       this.editor.insert(e.text);

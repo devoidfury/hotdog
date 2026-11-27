@@ -530,6 +530,9 @@ export class OutputBridge {
    * is wired (every non-codemode session, and the whole legacy path).
    */
   #nestedRows: (() => string[] | null) | null = null;
+  /** The list-picker paint source (session browser): rows composed between
+   *  the status row and the editor block, the same seam the popup rides. */
+  #listPicker: ((width: number) => string[]) | null = null;
   /**
    * True once the live streaming attempt has put bytes on screen via a
    * streaming event (the event glue calls markAttemptOutput on every chunk /
@@ -886,9 +889,27 @@ export class OutputBridge {
     this.#repaint();
   }
 
+  /**
+   * The list picker (session browser) paint source: rows compose directly
+   * above the editor block, the same seam the completion popup rides (frame
+   * h grows; nothing commits). Null clears. Input routing is the VIEW's job
+   * (its `overlay` field grabs the keys); the bridge only paints what the
+   * picker renders and keeps the physical cursor on the editor block.
+   */
+  setListPicker(source: ((width: number) => string[]) | null): void {
+    this.#listPicker = source;
+    this.#repaint();
+  }
+
   /** The view's repaint seam: recompose only while a source is installed. */
   refreshNestedRows(): void {
     if (this.#nestedRows !== null) this.#repaint();
+  }
+
+  /** Repaint on demand (the list picker repaints on every consumed key; the
+   *  core scheduler coalesces a key burst into one paint). */
+  repaintFrame(): void {
+    this.#repaint();
   }
 
   /** Nested rows composed for the frame (null source / empty tree = none). */
@@ -1256,9 +1277,12 @@ export class OutputBridge {
     const inflight = this.#inflightRows(width);
     const nested = this.#nestedFrameRows(width);
     const popup = editor.popupRows(width);
+    // The picker rides the popup's seam: rows composed directly above the
+    // block, counted into the block's height budget (INV-2 sees the grow).
+    const list = this.#listPicker ? this.#listPicker(width) : [];
     const chrome =
-      stream.length + inflight.length + nested.length + popup.length + status.length +
-      (chip ? 1 : 0);
+      stream.length + inflight.length + nested.length + popup.length + list.length +
+      status.length + (chip ? 1 : 0);
     const block = editor.view(width, Math.max(1, this.opts.terminal.rows - chrome));
     const rows = [
       ...stream,
@@ -1266,13 +1290,14 @@ export class OutputBridge {
       ...nested,
       ...status,
       ...popup,
+      ...list,
       ...block.rows,
       ...(chip ? [chip] : []),
     ];
     this.#lastBlockRows = block.rows;
     this.#setFrame(rows, {
       row: stream.length + inflight.length + nested.length + status.length + popup.length +
-        block.cursorRow,
+        list.length + block.cursorRow,
       col: block.cursorCol,
     });
   }

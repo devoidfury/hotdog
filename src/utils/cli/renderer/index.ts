@@ -18,4 +18,13 @@ export { clusterWidth, clusterStarts, snapBackward, snapForward, segments } from
 export { LineEditor, type EditorBlockView, type EditorLayout } from "./line-editor.ts";
 export { History, HISTORY_MAX, HISTORY_LINE_MAX } from "./history.ts";
 export { Popup, POPUP_MAX_ROWS, type Completion, type PopupCloseReason } from "./popup.ts";
+export {
+  ListPicker,
+  LIST_PICKER_MAX_ROWS,
+  LIST_PICKER_DEBOUNCE_MS,
+  type PickerRow,
+  type ListPickerCopy,
+  type ListPickerEvents,
+  type ListPickerOptions,
+} from "./list-picker.ts";
 export { EditorView, sanitizePaste, type EditorEvent, type EditorViewOptions } from "./editor-view.ts";

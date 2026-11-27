@@ -144,6 +144,12 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
                    optionally send a prompt there
                      Fork auto-switches to the new session; the original stays
                      attached (interactive/switch-capable UIs)
+/sessions          Live sessions + stored logs: the split renderer opens the
+                   interactive session browser (see below); other paths print
+                   the plain live-session list
+/attach <id>       Attach a live session by id (it becomes current if none is)
+/switch <id>       Switch to an attached session
+/detach <id>       Detach from a session
 /loop <prompt>     Repeatedly run a prompt until cancelled
 /model <name>      Switch model
 /models            List available models
@@ -163,6 +169,56 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 /reasoning <level> Set reasoning effort (none/minimal/low/high/xhigh/max/unset)
 /fence on|off|status  Runtime exec-fence toggle for THIS session (worker plane)
 ```
+
+The session browser (`/sessions`)
+---------------------------------
+
+On the split renderer (the default on a TTY), `/sessions` opens an interactive
+browser over the live sessions and the stored session logs -- one list, newest
+activity first, pinned rows leading. Every column rides an attestation: the
+relative date (the webui idiom: `MM-DD HH:MM` in the current year, `YYYY-MM-DD
+HH:MM` otherwise), the model, the message count, and the title (renamed or
+derived) where the session index attests them; cost shows only when local
+model pricing attests a number. Rows you cannot see data for simply lack the
+column -- nothing is guessed. The `▶` glyph marks the current session, `●` the
+other live ones.
+
+Keys: type to filter; Up/Down move (walking off the bottom of the loaded page
+pulls older rows in, the same paged walk the webui sidebar uses); Enter opens
+the selected row; `p` pins or unpins it (shared with the webui sidebar; while
+a query is live, typing wins over the pin key and Alt+P pins); Esc closes and
+leaves any half-typed prompt line exactly as it was. The browser is modal: it
+takes every keystroke, so while it is up Ctrl-C closes it instead of
+interrupting the line, and Ctrl-D/Ctrl-L do nothing at all.
+
+Enter resumes through the same machinery the typed commands and a
+`--session-id` launch use: a live session attaches/switches; a cold log
+restores in-process with the index-attested model precedence, including the
+honest warning when the log attests no model. Enter on the current session is
+a refused no-op that says so, and a cold resume is refused (list still up)
+while THIS session has a turn in flight: the resume swaps the session, which
+would abandon that turn with nobody reading its output. Esc closes the browser
+so Ctrl-C can interrupt the turn, or wait for it to end. A frame's worth of
+rows is capped to a third of the terminal height, and live sessions always ride
+the loaded list -- a fresh session with no log yet is never paged away.
+
+Typing filters on two tiers: instantly over the loaded rows' displayed
+metadata (id, model, profile, title), and -- after a short debounce -- as a
+full-text search of the conversation corpus across every log, even ones far
+older than the loaded page. The corpus is user and assistant text only (tool
+output is excluded; the empty state says so), matches are exact substrings
+(`%` and `_` are literal), and search hits merge below a separator with a
+snippet and match count, deduped against the instant hits. Subagent logs stay
+hidden from the list per the usual doctrine; a search hit on one is labeled
+"subagent of <task>" where the lineage attests the task. More matches than the
+view ships are admitted honestly ("more matches; refine query"). The query is
+capped at 64 characters and the header shows its newest end.
+
+A browser that cannot load (an unreadable session index says so on the
+transcript) hands the command back, and `/sessions` prints the plain live
+session list instead.
+
+Rename and delete are not part of the picker; they stay in the webui.
 
 The visible-message index (the status row's `#N`)
 -------------------------------------------------

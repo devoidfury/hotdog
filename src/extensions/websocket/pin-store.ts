@@ -116,8 +116,22 @@ export function dropPinned(id: string): void {
 }
 
 /** @internal Forget the in-memory cache: the next read comes off disk again
- *  (restart simulation for tests). */
+ *  (restart simulation for tests). Same re-read `reloadPins()` exposes, plus
+ *  the path key so a store-home change is proven to take effect. */
 export function closePinStore(): void {
-  pins = null;
+  reloadPins();
   pinsFile = null;
+}
+
+/**
+ * Re-read pins from disk on the next access. ensureLoaded() caches for the
+ * whole store-home lifetime, so a long-lived process would otherwise never
+ * see a pin flipped by ANOTHER process sharing this sessions dir (the webui
+ * daemon). The interactive session browser calls this when it OPENS; it does
+ * NOT call it after its own flip, where the in-memory set is the store's
+ * documented authority (a failed write re-persists on the next success).
+ * The file stays the single source of truth either way.
+ */
+export function reloadPins(): void {
+  pins = null;
 }

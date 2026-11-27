@@ -162,8 +162,9 @@ export class Popup {
   }
 }
 
-/** Hard-cut a row to w cells using the width table (no wrap, no padding). */
-function cutToWidth(s: string, w: number): string {
+/** Hard-cut a row to w cells using the width table (no wrap, no padding).
+ *  Exported for the sibling list-picker (same row-cut rule). */
+export function cutToWidth(s: string, w: number): string {
   if (visibleWidth(s) <= w) return s;
   let out = "";
   let acc = 0;

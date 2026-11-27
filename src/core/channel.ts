@@ -14,6 +14,17 @@ const ChannelCommand = {
 export type ChannelCommandType =
   (typeof ChannelCommand)[keyof typeof ChannelCommand];
 
+/** Channel commands for completion providers: these never reach the agent's
+ * command registry, so registry-driven name completion cannot offer them. */
+export const CHANNEL_COMMAND_NAMES: readonly string[] = Object.values(ChannelCommand);
+
+/** The subset taking a session-id argument; completions add a trailing space. */
+export const CHANNEL_ARG_COMMANDS: readonly string[] = [
+  ChannelCommand.Attach,
+  ChannelCommand.Detach,
+  ChannelCommand.Switch,
+];
+
 // Minimal SessionManager surface, so Channel avoids a circular import.
 export interface ChannelSessionManager {
   /** `steering` routes a mid-run send to the agent's steer queue (drained
@@ -41,6 +52,14 @@ export abstract class Channel {
   public attachedSessions: Set<string>;
   public currentSessionId: string | null;
   public isClosed: boolean;
+  /**
+   * Session-browser seam for /sessions: when installed AND it answers true,
+   * handleSessions hands the command off to the interactive picker (the
+   * split-renderer CLI installs one). Default null: every other channel
+   * (legacy readline, WebSocketChannel, OneShotChannel, non-TTY) keeps
+   * printing the plain-text session list, byte-identical by construction.
+   */
+  public sessionBrowser: (() => Promise<boolean>) | null = null;
   #unsubscribers: Map<string, () => void>;
 
   constructor(options: { sessionManager: ChannelSessionManager }) {
@@ -134,21 +153,17 @@ export abstract class Channel {
   }
 
   isChannelCommand(cmdText: string): boolean {
-    const channelCmds = Object.values(ChannelCommand);
     // Argument-taking commands also match "<cmd> <arg>"; the names themselves
     // live only in ChannelCommand.
-    const argCmds: readonly string[] = [
-      ChannelCommand.Attach,
-      ChannelCommand.Detach,
-      ChannelCommand.Switch,
-    ];
     return (
-      channelCmds.includes(cmdText as ChannelCommandType) ||
-      argCmds.some((c) => cmdText.startsWith(`${c} `))
+      CHANNEL_COMMAND_NAMES.includes(cmdText) ||
+      CHANNEL_ARG_COMMANDS.some((c) => cmdText.startsWith(`${c} `))
     );
   }
 
-  protected async handleChannelCommand(cmdText: string): Promise<void> {
+  /** Public for UI layers that intercept channel commands before the agent
+   *  registry sees them (the interactive CLI's slash dispatch). */
+  public async handleChannelCommand(cmdText: string): Promise<void> {
     switch (true) {
       case cmdText === ChannelCommand.Sessions:
         await this.handleSessions();
@@ -176,6 +191,10 @@ export abstract class Channel {
   protected async handleHelp(): Promise<void> {}
 
   public async handleSessions(): Promise<void> {
+    // The interactive browser grabs the command where the split renderer
+    // mounts one; a false/no-browser answer falls through to this exact
+    // plain-text list (the byte-identical posture every other channel has).
+    if (this.sessionBrowser && await this.sessionBrowser()) return;
     const ids = this.sessionManager.sessionIds();
     const lines = ["Available sessions:"];
     for (const id of ids) {

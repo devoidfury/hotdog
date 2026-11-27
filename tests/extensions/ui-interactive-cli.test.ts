@@ -14,12 +14,14 @@ import {
   registerSlashCommandNameCompletion,
   registerCommandCompletions,
   registerShellCompletion,
+  registerChannelCommandCompletion,
   applyCommandReplacements,
   buildReadlineCompleter,
   buildOnQuitHandler,
   resumeUnansweredQuestions,
 } from "@extensions/ui-interactive-cli/index.ts";
 import { HOOKS } from "@core/hooks.ts";
+import { createCompletionService } from "@core/completion.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { runInteractiveSession } from "@extensions/ui-interactive-cli/index.ts";
 import { runWithSuppressedStdout } from "../test-helpers.ts";
@@ -254,6 +256,68 @@ describe("registerSlashCommandNameCompletion", () => {
       { value: "/tokens" },
     ]);
     expect(handler!({ line: "/zz", cursorPos: 3, agent })).toEqual([]);
+  });
+});
+
+// ── registerChannelCommandCompletion ───────────────────────────────────────
+
+describe("registerChannelCommandCompletion", () => {
+  function capture() {
+    const captured: {
+      name: string;
+      matcher: (ctx: { line: string; cursorPos: number }) => boolean;
+      handler: (ctx: { line: string; cursorPos: number }) => { value: string }[];
+    }[] = [];
+    const service = {
+      register: (m: unknown, h: unknown, name: string) => {
+        captured.push({ name, matcher: m as never, handler: h as never });
+      },
+    } as never;
+    registerChannelCommandCompletion(service);
+    return captured[0]!;
+  }
+
+  it("registers a provider for channel command names", () => {
+    expect(capture().name).toBe("ui-interactive-cli:channel-commands");
+  });
+
+  it("matches only the command word span, same rule as name completion", () => {
+    const p = capture();
+    expect(p.matcher({ line: "/se", cursorPos: 3 })).toBe(true);
+    expect(p.matcher({ line: "/", cursorPos: 1 })).toBe(true);
+    expect(p.matcher({ line: "/attach abc", cursorPos: 11 })).toBe(false);
+    expect(p.matcher({ line: "sessions", cursorPos: 8 })).toBe(false);
+  });
+
+  it("completes channel commands by prefix; arg-taking ones carry a trailing space", () => {
+    const h = capture().handler;
+    expect(h({ line: "/ses", cursorPos: 4 })).toEqual([{ value: "/sessions" }]);
+    expect(h({ line: "/attach", cursorPos: 7 })).toEqual([{ value: "/attach " }]);
+    expect(h({ line: "/s", cursorPos: 2 })).toEqual([
+      { value: "/sessions" },
+      { value: "/switch " },
+    ]);
+    expect(h({ line: "/zz", cursorPos: 3 })).toEqual([]);
+    expect(h({ line: "/", cursorPos: 1 }).map((o) => o.value)).toEqual([
+      "/quit",
+      "/help",
+      "/sessions",
+      "/attach ",
+      "/detach ",
+      "/switch ",
+    ]);
+  });
+
+  it("merges with agent-registry names without duplicates", async () => {
+    const service = createCompletionService();
+    registerSlashCommandNameCompletion(service);
+    registerChannelCommandCompletion(service);
+    const agent = { commandRegistry: { names: () => ["help", "model"] } } as never;
+    const options = await service.request(parseCompletionContext("/", 1, agent), 50);
+    const values = options.map((o) => o.value);
+    expect(values).toContain("/model");
+    expect(values).toContain("/sessions");
+    expect(values.filter((v) => v.trimEnd() === "/help").length).toBe(1);
   });
 });
 

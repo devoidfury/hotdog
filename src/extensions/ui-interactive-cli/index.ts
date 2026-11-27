@@ -19,7 +19,7 @@ import { restoreSessionIntoAgent, type PendingQuestion } from "@core/session/ses
 import { getSessionRow } from "@core/session/session-index.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError, formatError } from "@core/error.ts";
-import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import { latestVisibleIndex } from "@core/context/message-index.ts";
 import {
   computeTokenCost,
@@ -36,8 +36,9 @@ import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
 import { DictationInterceptor, DictationCore, type CaptureFactory } from "./dictation.ts";
 import { EditorPasteMarkers } from "./paste-markers.ts";
 import { mountSplitRenderer, type OutputBridge } from "./split-bridge.ts";
+import { createSessionBrowser, defaultSearch } from "./session-browser.ts";
 import { NestedRowsView, attachNestedRows, parentOf } from "./nested-rows.ts";
-import { StdinKeySource, type KeySource } from "@utils/cli/renderer/index.ts";
+import { StdinKeySource, SystemClock, LIST_PICKER_MAX_ROWS, type KeySource } from "@utils/cli/renderer/index.ts";
 import { resolveSttTarget } from "@core/config/stt.ts";
 import {
   parseCompletionContext,
@@ -45,6 +46,7 @@ import {
   registerCommandCompletions,
   registerShellCompletion,
   registerFenceCompletion,
+  registerChannelCommandCompletion,
   buildReadlineCompleter,
   buildEditorCompleter,
 } from "./completions.ts";
@@ -55,6 +57,7 @@ export {
   registerCommandCompletions,
   registerShellCompletion,
   registerFenceCompletion,
+  registerChannelCommandCompletion,
   buildReadlineCompleter,
 };
 
@@ -68,6 +71,14 @@ Commands:
   /rewind [N]   - Cut to visible message #N (keep #N; #N form accepted); bare /rewind cuts one back, exactly /rewind -1
   /rewind -N    - Cut N visible messages back (the status row's #N)
   /fork [-N | N] [prompt] - Branch a new session: N (or #N) after message #N, -N messages back, omitted = head; optionally send prompt there
+  /sessions     - Live sessions + stored logs. Split renderer: opens an interactive
+                  browser (type to filter the loaded rows and full-text search the
+                  conversation corpus; Up/Down move and page older rows, Enter opens
+                  the row - attach/switch a live session or resume a cold log -
+                  p pins a row, Esc closes). Other paths print the plain live-session list.
+  /attach <id>  - Attach a live session by id (it becomes current if none is)
+  /switch <id>  - Switch to an attached session
+  /detach <id>  - Detach from a session
   /loop <prompt> - Repeatedly run prompt until cancelled
   /model <name> - Switch model
   /models       - List available models
@@ -505,11 +516,16 @@ export function resetUiSlotsForTesting(): void {
 }
 
 /**
- * Unanswered questions reconstructed by a resume (buildInteractiveAgent),
- * consumed once by the session loop after its input interface exists.
- * Interactive hotdog is one session per process, so a module slot is enough.
+ * Unanswered questions reconstructed by a resume, keyed by the session that
+ * adopted the log. A single slot carried the launch path's "one session per
+ * process" doctrine, but a resume no longer has to be the boot one: the
+ * /sessions browser swaps one in at any time, while task and worker builds
+ * run through the same builder -- so each resume reads (and clears) its own
+ * entry, and a worker build can never clobber a resume that has not drained.
+ * Only non-empty entries are stored: a build that found nothing pending leaves
+ * no trace, so the map holds nothing but questions waiting for a prompt.
  */
-let resumePendingQuestions: PendingQuestion[] = [];
+const resumePendingQuestions = new Map<string, PendingQuestion[]>();
 
 /**
  * Build the shared shutdown handler. Idempotent, every exit path invokes it, and the notice must print exactly once.
@@ -546,12 +562,17 @@ export async function buildInteractiveAgent(
   const factory = createAgentFactory(core, { resolved, config, llmClient });
   const agent = await factory(agentConfig);
 
-  const explicitSessionId = cli.sessionId as string | undefined;
+  // The explicit id rides the BUILD config: identical to the boot `cli` bag
+  // on a launch (initialConfig IS cli), and lets an in-process cold resume
+  // (the /sessions browser) reuse THIS path through sessionManager.swap by
+  // building with { ...cli, sessionId } instead of forking a second resume.
+  const explicitSessionId = (agentConfig.sessionId as string | undefined) ??
+    (cli.sessionId as string | undefined);
   const { replayed, pendingQuestions, profile } = await restoreSessionIntoAgent(agent, explicitSessionId);
   if (replayed > 0) {
     uiOut(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
   }
-  resumePendingQuestions = pendingQuestions;
+  if (pendingQuestions.length > 0) resumePendingQuestions.set(agent.sessionId, pendingQuestions);
 
   // Restore the profile the session ended on so the resumed agent runs with
   // the same tools / model / body it had before the crash.
@@ -638,6 +659,27 @@ export async function resumeUnansweredQuestions(
     held.shift();
   }
   continueTurn();
+}
+
+/**
+ * Fire-and-forget re-presentation of the restored log's unanswered questions:
+ * the launch path and the in-session cold resume (/sessions browser) consume
+ * what buildInteractiveAgent left for THEIR OWN session id through this ONE
+ * drain, so a resumed session presents its questions identically no matter
+ * which door it came in through. True when questions were pending (the launch
+ * path skips its first-prompt reprint in that case).
+ */
+function drainPendingResumeQuestions(
+  agent: AgentLike | undefined,
+  continueTurn: () => void,
+  onError: (err: unknown) => void,
+): boolean {
+  if (!agent) return false;
+  const pending = resumePendingQuestions.get(agent.sessionId);
+  if (!pending || pending.length === 0) return false;
+  resumePendingQuestions.delete(agent.sessionId);
+  void resumeUnansweredQuestions(agent, pending, currentInput, continueTurn).catch(onError);
+  return true;
 }
 
 export async function runInteractiveSession(
@@ -741,6 +783,7 @@ export async function runInteractiveSession(
   // (e.g. /reasoning <levels>) would never be registered.
   registerSlashCommandNameCompletion(core.completion);
   registerFenceCompletion(core.completion);
+  registerChannelCommandCompletion(core.completion);
   core.hooks.on(
     HOOKS.COMMANDS_REGISTER,
     ({ registry }) => {
@@ -1093,10 +1136,128 @@ export async function runInteractiveSession(
     core.hooks.on(HOOKS.CONTEXT_REWOUND, ({ agent }: { agent?: unknown }) => {
       if (isCurrentAgent(agent)) refreshIndex();
     });
-    // Fork and /switch: the row numbers the session that is current now.
-    core.hooks.on(HOOKS.SESSION_SWAP, () => refreshIndex());
+    // ── The chrome subscription follows the CURRENT session ──────────────
+    // onSessionEvents keys handlers by session id, and both /fork and a
+    // /sessions cold resume move the current session to a fresh id. Staying
+    // subscribed to the boot id would strand the row twice over: the new
+    // session's working edge, in-flight calls and queue chip would never
+    // arrive, while the abandoned session's cost/ctx numbers kept painting
+    // under it -- an unattested claim, which is exactly what this row is
+    // built never to do. So: one named handler, re-attached on every swap.
+    let chromeSessionId = sessionManager.sessionId() ?? "";
+    let detachChrome: (() => void) | null = null;
+    const attachChrome = (sessionId: string): void => {
+      if (detachChrome) detachChrome();
+      chromeSessionId = sessionId;
+      // Neither of the previous session's attested numbers describes this
+      // one: cost goes dark until this session's own TOKEN_USAGE lands, and
+      // the pricing key follows the session's own model.
+      usage = null;
+      pricedModel = String(sessionManager.getAgent()?.model ?? resolved.model ?? "");
+      detachChrome = sessionManager.onSessionEvents(sessionId, (ev) => handleChromeEvent(ev));
+      // The abandoned session's turn is not this session's turn: settle the
+      // working/lane hints it may have left, drop its dead in-flight and
+      // nested rows (the same dead-stream rule the working:false edge
+      // applies), then take its numbers down with it -- a swapped-in row that
+      // still showed the old session's cost or ctx gauge would be the
+      // unattested claim this row forbids.
+      bridge.updateStatus({ working: false, laneWait: false });
+      bridge.clearInflightCalls();
+      bridge.endAttemptOutput();
+      nested?.clearAll();
+      bridge.updateStatus({
+        cost: sessionCost(),
+        ctxUsed: null,
+        ctxTotal: null,
+        callMs: null,
+        workedMs: null,
+        lastAtMs: null,
+      });
+    };
+    // Fork, /switch and the cold resume: the row tracks the session it moved to.
+    core.hooks.on(HOOKS.SESSION_SWAP, () => {
+      const swapped = sessionManager.sessionId();
+      if (swapped) attachChrome(swapped);
+      refreshIndex();
+    });
     refreshIndex();
-    sessionManager.onSessionEvents(sessionManager.sessionId()!, (ev) => {
+
+    // ── Session browser (/sessions) ──────────────────────────────────────
+    // The split renderer mounts the interactive picker; every other surface
+    // keeps Channel.handleSessions' plain-text list (the hook is installed
+    // ONLY on this branch). Cost attests only for the session this chrome
+    // subscription tracks (its own TOKEN_USAGE frames) and only while
+    // modelPricing is configured -- every other row omits the column.
+    const taskManager = sessionManager.getTaskManager();
+    channel.sessionBrowser = createSessionBrowser({
+      liveSessions: () =>
+        sessionManager.sessionIds().flatMap((id) => {
+          const info = sessionManager.getSessionInfo(id);
+          return info ? [{ id: info.id, model: info.model, profile: info.profile }] : [];
+        }),
+      currentId: () => channel.getCurrentSessionId(),
+      joinedWorkers: async () =>
+        taskManager ? await taskManager.joinedAgentSessionIds() : new Set<string>(),
+      taskDescriptions: async () => {
+        // The webui search-label grammar: sidecar lineage UNION this
+        // lifetime's task registry (records the boot snapshot cannot see).
+        const descs = new Map<string, string>();
+        if (taskManager) {
+          for (const rec of await taskManager.lineageTasks()) {
+            if (rec.agentSessionId !== null) descs.set(rec.agentSessionId, rec.description);
+          }
+          for (const info of taskManager.listTasks()) {
+            if (info.agentSessionId) descs.set(info.agentSessionId, info.description);
+          }
+        }
+        return descs;
+      },
+      costOf: (id) => (id === chromeSessionId ? sessionCost() : null),
+      search: defaultSearch,
+      currentRunning: () => {
+        const id = sessionManager.sessionId();
+        return id !== null && sessionManager.isSessionRunning(id);
+      },
+      resumeCold: async (id) => {
+        // The launch-resume path, reused: swap builds through
+        // buildInteractiveAgent, which restores the log into the adopted id
+        // and applies the index-attested model precedence with the honest
+        // no-attestation warning. Retarget the channel like the /fork flow
+        // does, then drain the restored log's pending questions through the
+        // same seam launch uses.
+        await sessionManager.swap({ ...cli, sessionId: id });
+        channel.attach(id);
+        channel.switchSession(id);
+        drainPendingResumeQuestions(
+          sessionManager.getAgent(),
+          () => {
+            sessionManager.getBus(id)?.enqueue("", { continuation: true });
+          },
+          (e: unknown) => sink.log(formatError(e)),
+        );
+      },
+      activator: {
+        isLive: (id) => sessionManager.getSessionInfo(id) !== null,
+        isAttached: (id) => channel.attachedSessions.has(id),
+        attach: async (id) => {
+          await channel.handleAttach(`attach ${id}`);
+        },
+        switchTo: async (id) => {
+          await channel.handleSwitch(`switch ${id}`);
+        },
+      },
+      clock: new SystemClock(),
+      now: () => Date.now(),
+      output: (text) => sink.log(text),
+      editor: () => bridge.editor,
+      paintRows: (source) => bridge.setListPicker(source),
+      repaint: () => bridge.repaintFrame(),
+      // The picker rows are frame chrome, so they ride the height budget: a
+      // short terminal gets a shorter list rather than a one-line editor.
+      maxRows: Math.max(3, Math.min(LIST_PICKER_MAX_ROWS, Math.floor(bridge.capture.rows / 3))),
+    });
+
+    const handleChromeEvent = (ev: OutputEvent): void => {
       switch (ev.type) {
         case OUTPUT_EVENT.SESSION_STATE:
           if (ev.key === "working") {
@@ -1239,7 +1400,8 @@ export async function runInteractiveSession(
           bridge.setQueueChip(ev.pending, ev.preview);
           return;
       }
-    });
+    };
+    attachChrome(chromeSessionId);
   } else {
     const legacyRl = rl as readline.Interface;
     legacyRl.on("line", lineHandler);
@@ -1251,18 +1413,14 @@ export async function runInteractiveSession(
 
   // Mid-question resume: re-present the restored log's unanswered questions
   // before the first prompt; the TURN_END hook re-prompts when done.
-  if (agent && resumePendingQuestions.length > 0) {
-    const pending = resumePendingQuestions;
-    resumePendingQuestions = [];
-    void resumeUnansweredQuestions(agent, pending, currentInput, () => {
-      // Through the bus like every other turn: lane bookkeeping applies and
-      // a mid-continuation prompt queues instead of racing.
-      sessionManager.getBus(agent.sessionId)?.enqueue("", { continuation: true });
-    }).catch((e: unknown) => {
-      sink.log(formatError(e));
-      rl?.prompt();
-    });
-  } else {
+  if (!drainPendingResumeQuestions(agent ?? undefined, () => {
+    // Through the bus like every other turn: lane bookkeeping applies and
+    // a mid-continuation prompt queues instead of racing.
+    sessionManager.getBus(agent!.sessionId)?.enqueue("", { continuation: true });
+  }, (e: unknown) => {
+    sink.log(formatError(e));
+    rl?.prompt();
+  })) {
     // First prompt on the legacy path; the editor path's mounted input is
     // already painting the prompt row inside the frame.
     rl?.prompt();
@@ -1320,6 +1478,27 @@ export function handleSlashCommand(
       if (ui.redraw) ui.redraw();
       else uiOut("/redraw needs the split renderer (uiInteractiveCli.renderer: \"split\").");
       ui.prompt();
+      return;
+
+    case Command.Sessions:
+    case Command.Attach:
+    case Command.Detach:
+    case Command.Switch:
+      // Live-session (channel) commands run through the SAME Channel
+      // handlers read-loop channels use: /sessions opens the interactive
+      // browser where the split renderer installed one (Channel.handleSessions
+      // consults the hook), else prints the plain-text list; attach/detach/
+      // switch run the typed-command paths verbatim. The handler is async
+      // (the browser reads the session index and the pin store before it
+      // paints), so the prompt redraws first and a failure lands on the
+      // transcript instead of an unhandled rejection.
+      channel.handleChannelCommand(cmdText).then(
+        () => ui.prompt(),
+        (err: unknown) => {
+          uiOut(`Command failed: ${formatError(err)}`);
+          ui.prompt();
+        },
+      );
       return;
 
     case Command.Fence: {
